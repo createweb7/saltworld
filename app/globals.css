@@ -2,77 +2,99 @@
 @tailwind components;
 @tailwind utilities;
 
+/*  ────────────────────────────────────────────────────────────────
+    SALT WORLD · Brand tokens v2.1
+    Derived from the official Salt World logo (teal #00A79A).
+    Aman / Scandinavian-Japanese minimal palette.
+    ────────────────────────────────────────────────────────────────
+    Primary        Halite       #00A79A   HSL(175 100% 33%)
+    Deep primary   Halite Deep  #0A5F58   HSL(173 81% 21%)
+    Mint surface   Halite Soft  #EAF2EF   HSL(160 24% 93%)
+    Warm canvas    Bone         #F5F1EA   HSL(38  33% 94%)
+    Deep ink       Basalt       #14201E   HSL(168 20% 10%)
+    Warm neutral   Sand         #ECE4D5   HSL(37  33% 88%)
+    Warm accent    Driftwood    #B8956A   HSL(31  34% 57%)
+    Muted text     Stone        #5A5449   HSL(40  11% 32%)
+    Border         Chalk        #E0D8C7   HSL(40  28% 83%)
+────────────────────────────────────────────────────────────────── */
+
 @layer base {
   :root {
-    /* --- Salt World v2.0 brand tokens (light) --- */
-    /* Bone (warm off-white) is our canvas. */
-    --background: 41 40% 95%;
-    --foreground: 165 20% 6%;
-    --card: 41 60% 98%;
-    --card-foreground: 165 20% 6%;
-    --popover: 41 60% 98%;
-    --popover-foreground: 165 20% 6%;
-    /* Basalt near-black for primary UI ink */
-    --primary: 165 20% 6%;
-    --primary-foreground: 41 40% 96%;
-    --secondary: 160 30% 94%;
-    --secondary-foreground: 165 20% 6%;
-    --muted: 160 30% 94%;
-    --muted-foreground: 165 8% 40%;
-    --accent: 25 71% 70%;
-    --accent-foreground: 165 20% 6%;
+    --background: 38 33% 94%;
+    --foreground: 168 20% 10%;
+    --card: 40 40% 97%;
+    --card-foreground: 168 20% 10%;
+    --popover: 40 40% 97%;
+    --popover-foreground: 168 20% 10%;
+    --primary: 168 20% 10%;
+    --primary-foreground: 38 33% 94%;
+    --secondary: 160 24% 93%;
+    --secondary-foreground: 168 20% 10%;
+    --muted: 160 24% 93%;
+    --muted-foreground: 40 11% 32%;
+    --accent: 31 34% 57%;
+    --accent-foreground: 168 20% 10%;
     --destructive: 8 55% 47%;
-    --destructive-foreground: 41 40% 96%;
-    --border: 41 18% 86%;
-    --input: 41 18% 86%;
-    --ring: 173 78% 26%;
+    --destructive-foreground: 38 33% 94%;
+    --border: 40 28% 83%;
+    --input: 40 28% 83%;
+    --ring: 175 100% 33%;
     --radius: 0.625rem;
-    /* Halite (from logo) — the brand color */
-    --brand: 173 78% 26%;
-    --brand-foreground: 41 40% 96%;
-    /* Aurora — warm apricot accent for CTAs */
-    --aurora: 25 71% 70%;
-    --aurora-foreground: 165 20% 6%;
-    /* Sand — warm neutral pairing */
-    --sand: 35 26% 80%;
-    /* Kelp — deeper teal for editorial contrast */
-    --kelp: 168 30% 22%;
+
+    /* Brand-specific extensions */
+    --brand: 175 100% 33%;                /* Halite \u2014 the logo teal */
+    --brand-foreground: 40 40% 97%;
+    --brand-deep: 173 81% 21%;            /* Halite Deep \u2014 hovers, deep surfaces */
+    --brand-soft: 160 24% 93%;            /* Halite Soft \u2014 tinted surfaces */
+    --aurora: 31 34% 57%;                 /* Driftwood \u2014 warm wood/sand accent */
+    --aurora-foreground: 168 20% 10%;
+    --sand: 37 33% 88%;                   /* Warm neutral \u2014 alternate section bg */
+    --kelp: 168 30% 22%;                  /* Deep editorial contrast */
   }
+
   .dark {
-    --background: 165 18% 5%;
-    --foreground: 41 35% 94%;
-    --card: 165 18% 8%;
-    --card-foreground: 41 35% 94%;
-    --popover: 165 18% 8%;
-    --popover-foreground: 41 35% 94%;
-    --primary: 41 35% 94%;
-    --primary-foreground: 165 20% 6%;
-    --secondary: 165 15% 13%;
-    --secondary-foreground: 41 35% 94%;
-    --muted: 165 15% 13%;
-    --muted-foreground: 41 10% 65%;
-    --accent: 25 60% 55%;
-    --accent-foreground: 165 20% 6%;
+    --background: 168 20% 6%;
+    --foreground: 38 30% 92%;
+    --card: 168 18% 9%;
+    --card-foreground: 38 30% 92%;
+    --popover: 168 18% 9%;
+    --popover-foreground: 38 30% 92%;
+    --primary: 38 30% 92%;
+    --primary-foreground: 168 20% 6%;
+    --secondary: 168 12% 14%;
+    --secondary-foreground: 38 30% 92%;
+    --muted: 168 12% 14%;
+    --muted-foreground: 38 12% 65%;
+    --accent: 31 30% 50%;
+    --accent-foreground: 38 30% 92%;
     --destructive: 8 55% 55%;
-    --destructive-foreground: 41 40% 96%;
-    --border: 165 15% 16%;
-    --input: 165 15% 16%;
-    --ring: 173 60% 45%;
-    --brand: 173 60% 45%;
-    --brand-foreground: 165 20% 6%;
-    --aurora: 25 60% 55%;
-    --sand: 35 15% 30%;
+    --destructive-foreground: 38 30% 92%;
+    --border: 168 12% 17%;
+    --input: 168 12% 17%;
+    --ring: 175 60% 50%;
+
+    --brand: 175 60% 50%;
+    --brand-foreground: 168 20% 6%;
+    --brand-deep: 173 60% 32%;
+    --brand-soft: 168 20% 12%;
+    --aurora: 31 30% 50%;
+    --aurora-foreground: 38 30% 92%;
+    --sand: 37 15% 22%;
     --kelp: 168 40% 60%;
   }
 }
 
 @layer base {
   * { @apply border-border; }
-  body { @apply bg-background text-foreground; font-feature-settings: 'ss01', 'cv11'; }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: 'ss01', 'cv11';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
   html { scroll-behavior: smooth; scroll-padding-top: 88px; }
   ::selection { background: hsl(var(--brand) / 0.22); }
 
-  /* Editorial serif is used sparingly via .font-serif or via layout font var */
   .font-serif { font-family: var(--font-serif), Georgia, 'Times New Roman', serif; font-optical-sizing: auto; }
 }
 
@@ -84,7 +106,7 @@
   .prose-doc ul { @apply list-disc pl-6 space-y-1.5 text-[15px] leading-7 text-muted-foreground mb-4; }
   .prose-doc ol { @apply list-decimal pl-6 space-y-1.5 text-[15px] leading-7 text-muted-foreground mb-4; }
   .prose-doc code:not(pre code) { @apply font-mono text-[13px] px-1.5 py-0.5 rounded-md bg-muted text-foreground border border-border; }
-  .prose-doc pre { @apply font-mono text-[12.5px] leading-6 bg-[hsl(165,25%,4%)] text-zinc-100 p-5 rounded-xl overflow-x-auto border border-border/60 my-5; }
+  .prose-doc pre { @apply font-mono text-[12.5px] leading-6 bg-[hsl(168,25%,4%)] text-zinc-100 p-5 rounded-xl overflow-x-auto border border-border/60 my-5; }
   .prose-doc table { @apply w-full text-sm my-6 border border-border rounded-lg overflow-hidden; }
   .prose-doc thead { @apply bg-muted/60; }
   .prose-doc th { @apply text-left font-semibold px-4 py-2.5 border-b border-border text-foreground; }
@@ -104,6 +126,9 @@
   .text-brand { color: hsl(var(--brand)); }
   .bg-brand { background-color: hsl(var(--brand)); }
   .border-brand { border-color: hsl(var(--brand)); }
+  .text-brand-deep { color: hsl(var(--brand-deep)); }
+  .bg-brand-deep { background-color: hsl(var(--brand-deep)); }
+  .bg-brand-soft { background-color: hsl(var(--brand-soft)); }
   .bg-aurora { background-color: hsl(var(--aurora)); }
   .text-aurora { color: hsl(var(--aurora)); }
   .bg-kelp { background-color: hsl(var(--kelp)); }
@@ -112,14 +137,18 @@
   .text-balance { text-wrap: balance; }
   .text-pretty { text-wrap: pretty; }
 
-  /* Editorial slow zoom for hero imagery. Respects prefers-reduced-motion. */
-  @keyframes ss-kenburns { 0% { transform: scale(1.02); } 100% { transform: scale(1.12); } }
-  .anim-kenburns { animation: ss-kenburns 22s ease-in-out infinite alternate; }
-  @media (prefers-reduced-motion: reduce) {
-    .anim-kenburns { animation: none; }
+  /* Subtle mesh gradient specific to Salt World brand \u2014 mint on bone */
+  .brand-mesh {
+    background:
+      radial-gradient(1200px 500px at 10% -10%, hsl(var(--brand) / 0.08), transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, hsl(var(--aurora) / 0.06), transparent 60%),
+      hsl(var(--background));
   }
 
-  /* Fade + rise on scroll-in — add class + set data-animate="in" via IO */
+  @keyframes ss-kenburns { 0% { transform: scale(1.02); } 100% { transform: scale(1.12); } }
+  .anim-kenburns { animation: ss-kenburns 22s ease-in-out infinite alternate; }
+  @media (prefers-reduced-motion: reduce) { .anim-kenburns { animation: none; } }
+
   .rise { opacity: 0; transform: translateY(14px); transition: opacity 620ms cubic-bezier(0.19,1,0.22,1), transform 620ms cubic-bezier(0.19,1,0.22,1); }
   .rise[data-animate="in"] { opacity: 1; transform: translateY(0); }
 }
