@@ -16,6 +16,36 @@ async function handle(req, method, segs) {
   const col = db.collection('pages');
   const bookings = db.collection('bookings');
 
+  // ------- Leads (Corporate / General) -------
+  if (segs[0] === 'leads') {
+    const leadsCol = db.collection('leads');
+    if (segs.length === 1 && method === 'POST') {
+      const body = await req.json().catch(() => ({}));
+      const now = new Date();
+      const doc = {
+        id: randomUUID(),
+        name:     body.name    || '',
+        email:    body.email   || '',
+        company:  body.company || '',
+        teamSize: body.teamSize|| '',
+        notes:    body.notes   || '',
+        source:   body.source  || 'unknown',
+        status:   'new',
+        createdAt: now.toISOString(),
+      };
+      if (!doc.email || !doc.name) {
+        return NextResponse.json({ error: 'name_email_required' }, { status: 400 });
+      }
+      await leadsCol.insertOne(doc);
+      const { _id, ...cleanDoc } = doc;
+      return NextResponse.json(cleanDoc);
+    }
+    if (segs.length === 1 && method === 'GET') {
+      const docs = await leadsCol.find({}).sort({ createdAt: -1 }).limit(200).toArray();
+      return NextResponse.json(docs.map(clean));
+    }
+  }
+
   // ------- Bookings -------
   if (segs[0] === 'bookings') {
     if (segs.length === 1 && method === 'POST') {

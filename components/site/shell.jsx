@@ -3,9 +3,87 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
-  Menu, X, Phone, MessageCircle, ArrowRight, MapPin, Instagram, Mail, Clock,
+  Menu, X, Phone, MessageCircle, ArrowRight, MapPin, Instagram, Mail, Clock, Sparkles,
 } from 'lucide-react';
 import { cn } from '@/components/ss/utils';
+
+/* ------------------------------------------------------------------ */
+/* Announcement Bar — dismissible, persists in localStorage           */
+/* ------------------------------------------------------------------ */
+
+export function AnnouncementBar({
+  text = 'First session complimentary this month for new members.',
+  ctaLabel = 'Book now',
+  ctaHref = '/book',
+  storageKey = 'sw-announce-2025-06',
+}) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.localStorage.getItem(storageKey) !== 'dismissed') setVisible(true);
+  }, [storageKey]);
+  const dismiss = () => {
+    setVisible(false);
+    try { window.localStorage.setItem(storageKey, 'dismissed'); } catch { /* noop */ }
+  };
+  if (!visible) return null;
+  return (
+    <div
+      className="no-print relative z-[55] w-full text-[12.5px]"
+      style={{ background: 'hsl(var(--foreground))', color: 'hsl(var(--background))' }}
+    >
+      <div className="max-w-[1240px] mx-auto px-5 md:px-8 h-10 flex items-center justify-center gap-3 relative">
+        <Sparkles className="h-3.5 w-3.5 shrink-0" style={{ color: 'hsl(var(--aurora))' }} />
+        <span className="truncate">{text}</span>
+        <Link
+          href={ctaHref}
+          className="font-semibold underline underline-offset-4 decoration-white/40 hover:decoration-white transition-colors"
+        >
+          {ctaLabel} <ArrowRight className="h-3 w-3 inline -mt-0.5" />
+        </Link>
+        <button
+          aria-label="Dismiss"
+          onClick={dismiss}
+          className="absolute right-3 md:right-6 h-6 w-6 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Sticky WhatsApp FAB — always visible, right-hand rail              */
+/* ------------------------------------------------------------------ */
+
+export function WhatsAppFab({ phone = '919916019755', message = 'Hi! I have a question about Salt World.' }) {
+  const href = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      aria-label="Chat with Salt World on WhatsApp"
+      className={cn(
+        'no-print fixed z-[55] right-4 md:right-6',
+        'bottom-24 md:bottom-6', // clear of mobile sticky book bar
+        'h-13 md:h-14 w-13 md:w-14 rounded-full',
+        'flex items-center justify-center',
+        'shadow-2xl ring-1 ring-black/5',
+        'transition-transform hover:scale-105 active:scale-95',
+      )}
+      style={{ background: '#25D366', color: '#ffffff', height: 52, width: 52 }}
+    >
+      {/* Soft ping */}
+      <span
+        className="absolute inset-0 rounded-full animate-ping"
+        style={{ background: '#25D366', opacity: 0.35 }}
+      />
+      <MessageCircle className="relative h-5 w-5" strokeWidth={2.4} />
+    </a>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /* Hooks                                                              */

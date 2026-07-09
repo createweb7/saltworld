@@ -210,6 +210,43 @@ backend:
         agent: "testing"
         comment: "✅ VERIFIED: GET /api/pages/by-slug/:slug returns 200 with full page data when page is published. After unpublishing the same page, the endpoint correctly returns 404 for the same slug."
 
+  - task: "Corporate leads capture (POST /api/leads)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          NEW ENDPOINT added as part of Homepage CRO pass. Corporate wellness band on
+          the homepage POSTs to /api/leads with { name, email, company, teamSize, notes, source }.
+          - POST /api/leads: validates that name & email are present (400 otherwise). Persists to
+            'leads' collection with id (uuid), status='new', createdAt (ISO). Returns clean doc
+            without Mongo _id.
+          - GET /api/leads: returns latest 200 leads sorted by createdAt desc (admin utility).
+          Please verify:
+            1) POST with valid payload {name, email, company, teamSize, notes, source} → 200 and
+               returns doc with id, status='new', createdAt as valid ISO string, no _id field.
+            2) POST missing email → 400 with error='name_email_required'.
+            3) POST missing name  → 400 with error='name_email_required'.
+            4) GET /api/leads returns an array containing the created lead(s).
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ VERIFIED ALL LEADS ENDPOINT TESTS (7/7 PASSED):
+          - POST /api/leads with valid body: Returns 200 with id (UUID), status='new', createdAt (valid ISO timestamp), all submitted fields echoed back (name, email, company, teamSize, notes, source), NO _id field present.
+          - POST /api/leads missing email: Returns 400 with error='name_email_required'.
+          - POST /api/leads missing name: Returns 400 with error='name_email_required'.
+          - POST /api/leads empty body: Returns 400 with error='name_email_required'.
+          - GET /api/leads: Returns 200 with array containing created lead, all fields correct, NO _id fields.
+          - Regression: GET /api/health returns {ok: true, service: 'salt-world-builder'}.
+          - Regression: GET /api/templates returns array with 6 templates.
+          
+          All validation, persistence, and response formatting working correctly. MongoDB integration functioning properly. Note: 1 lead created during testing (no DELETE endpoint available for cleanup).
+
 frontend:
   - task: "Marketing dashboard (page list + template picker)"
     implemented: true
@@ -250,21 +287,27 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 2
+  test_sequence: 3
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "Templates listing"
-    - "Page CRUD (list/create/get/patch/delete)"
-    - "Duplicate page"
-    - "Publish / Unpublish"
-    - "Public fetch by slug"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
 agent_communication:
+  - agent: "main"
+    message: |
+      Homepage CRO pass shipped. New backend endpoint /api/leads added to capture the
+      Corporate Wellness lead-form submissions. Please verify:
+        1) POST /api/leads with a full valid payload persists and returns the doc
+           without _id.
+        2) POST /api/leads with a missing 'email' or 'name' returns 400 with
+           error='name_email_required'.
+        3) GET /api/leads returns the freshly-inserted lead(s).
+      Base URL and Mongo config are unchanged from previous runs.
+
   - agent: "main"
     message: |
       Backend testing requested for the landing-page-builder API. All endpoints live
@@ -323,3 +366,24 @@ agent_communication:
       All created test pages cleaned up successfully.
       
       NO CRITICAL ISSUES FOUND. Backend API is production-ready for Phase-1 slice.
+
+  - agent: "testing"
+    message: |
+      ✅ LEADS ENDPOINT TESTING COMPLETE - ALL TESTS PASSED (7/7)
+      
+      Executed comprehensive testing of /api/leads endpoint using /app/test_leads.py against
+      https://saltwell-arch.preview.emergentagent.com/api
+      
+      Test Results Summary:
+      ✅ POST /api/leads with valid body: 200, returns id (UUID), status='new', createdAt (ISO), all fields echoed, no _id
+      ✅ POST /api/leads missing email: 400 with error='name_email_required'
+      ✅ POST /api/leads missing name: 400 with error='name_email_required'
+      ✅ POST /api/leads empty body: 400 with error='name_email_required'
+      ✅ GET /api/leads: 200, returns array with created lead, no _id fields
+      ✅ Regression: GET /api/health returns {ok: true}
+      ✅ Regression: GET /api/templates returns 6 templates
+      
+      All validation logic working correctly. MongoDB integration functioning properly.
+      Response formatting correct (no _id fields). Previously working endpoints still functional.
+      
+      NO CRITICAL ISSUES FOUND. Leads endpoint is production-ready for Homepage CRO pass.
