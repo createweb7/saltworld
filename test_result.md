@@ -291,7 +291,13 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "BOS Auth (login/logout/me/forgot/reset)"
+    - "BOS Middleware (protected /admin/* + /api/admin/*)"
+    - "BOS Dashboard KPIs"
+    - "BOS Customers CRUD + notes"
+    - "BOS Bookings list, detail, calendar & status transitions"
+    - "BOS Universal search + Activity log"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -299,14 +305,77 @@ test_plan:
 agent_communication:
   - agent: "main"
     message: |
-      Homepage CRO pass shipped. New backend endpoint /api/leads added to capture the
+      PHASE 3.1 FOUNDATION shipped — Salt World BOS admin portal.
+      New endpoints under /api/admin/*. All gated by JWT cookie middleware except
+      the public auth sub-routes (login, forgot, reset, logout).
+
+      Seeded super-admin credentials (see /app/memory/test_credentials.md):
+        email:    admin@saltworld.in
+        password: SaltWorld@2025
+
+      Please verify (Base URL = NEXT_PUBLIC_BASE_URL, all routes /api/*):
+
+      A) Auth flow
+        1) POST /api/admin/auth/login {email,password} for the seeded account →
+           200 with { user: { id, email, name, role, status } } (no _id, no
+           passwordHash) and Set-Cookie 'sw_admin'.
+        2) POST /api/admin/auth/login with wrong password → 401 { error:
+           'invalid_credentials' }.
+        3) GET /api/admin/auth/me without cookie → 401.
+        4) GET /api/admin/auth/me with the login cookie → 200 with { user }.
+        5) POST /api/admin/auth/logout with cookie → 200, next /me → 401.
+        6) POST /api/admin/auth/forgot { email: seeded } → 200 with { ok:true,
+           devLink }. POST /api/admin/auth/reset { token from devLink,
+           password: 'Reset@123' } → 200. Login with new password works. Then
+           reset back to the original 'SaltWorld@2025' at the end.
+
+      B) Middleware
+        7) GET /api/admin/customers without cookie → 401 { error:
+           'unauthenticated' }.
+
+      C) Dashboard
+        8) GET /api/admin/dashboard (authenticated) → 200 with { kpis: {
+           todayRevenue, bookingsToday, walkIns, pendingPayments, giftcardsToday,
+           membersActive, leadsToday, customersTotal }, trend7d: [7 objects],
+           upcoming: [] }.
+
+      D) Customers
+        9) POST /api/admin/customers { name, email, phone, tags:[] } → 200, doc
+           with uuid id, status='active', createdAt ISO, no _id.
+       10) POST without name → 400 { error: 'name_required' }.
+       11) GET /api/admin/customers → array (includes the created).
+       12) GET /api/admin/customers?q=<partial-name> → filtered.
+       13) GET /api/admin/customers/:id → { customer, visits, invoices,
+           giftcards, subscriptions, communications, notes }.
+       14) PATCH /api/admin/customers/:id { name:'New Name' } → 200 updated.
+       15) POST /api/admin/customers/:id/notes { body:'Hello' } → 200 note.
+       16) DELETE /api/admin/customers/:id → 200 { ok:true }; GET after → 404.
+
+      E) Bookings
+       17) GET /api/admin/bookings → array (may be empty; not an error).
+       18) GET /api/admin/bookings?status=confirmed → filtered array.
+       19) GET /api/admin/bookings/calendar?from=<todayISO>&to=<tomISO> → array.
+       20) If any booking exists (create one via the public POST /api/bookings
+           if needed), POST /api/admin/bookings/:id/check-in → status
+           'checked_in'; then /start → 'in_session'; /complete → 'completed'.
+
+      F) Search & activity
+       21) GET /api/admin/search?q=any → { customers, bookings, pages }.
+       22) GET /api/admin/activity → array; recent activity from the writes
+           above should appear.
+
+      NOTE: All admin write endpoints emit an activityLog row synchronously.
+      Test creds are auto-seeded on the first authenticated route hit.
+
+  - agent: "main"
+    message: |
+      Homepage CRO pass shipped. Backend endpoint /api/leads added to capture the
       Corporate Wellness lead-form submissions. Please verify:
         1) POST /api/leads with a full valid payload persists and returns the doc
            without _id.
-        2) POST /api/leads with a missing 'email' or 'name' returns 400 with
+        2) POST /api/leads missing 'email' or 'name' → 400 with
            error='name_email_required'.
-        3) GET /api/leads returns the freshly-inserted lead(s).
-      Base URL and Mongo config are unchanged from previous runs.
+        3) GET /api/leads returns freshly-inserted lead(s).
 
   - agent: "main"
     message: |

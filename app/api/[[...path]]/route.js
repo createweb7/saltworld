@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getDb, clean } from '@/lib/mongo';
 import { TEMPLATES, getTemplate, emptyPage } from '@/lib/templates';
 import { randomUUID } from 'crypto';
+import { adminHandle } from '@/lib/api/admin';
 
 const slugify = (s) => (s || 'page').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'page';
 
@@ -12,6 +13,11 @@ async function uniqueSlug(db, base) {
 }
 
 async function handle(req, method, segs) {
+  // Delegate admin sub-router
+  if (segs[0] === 'admin') {
+    return adminHandle(req, method, segs.slice(1));
+  }
+
   const db = await getDb();
   const col = db.collection('pages');
   const bookings = db.collection('bookings');
