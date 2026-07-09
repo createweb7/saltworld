@@ -14,6 +14,43 @@ async function uniqueSlug(db, base) {
 async function handle(req, method, segs) {
   const db = await getDb();
   const col = db.collection('pages');
+  const bookings = db.collection('bookings');
+
+  // ------- Bookings -------
+  if (segs[0] === 'bookings') {
+    if (segs.length === 1 && method === 'POST') {
+      const body = await req.json();
+      const now = new Date();
+      const yy = String(now.getFullYear()).slice(2);
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+      const ref = `SW-${yy}${mm}-${rand}`;
+      const doc = {
+        id: randomUUID(),
+        ref,
+        outcome:   body.outcome   || null,
+        therapy:   body.therapy   || null,
+        slotDate:  body.slotDate  || null,
+        slotTime:  body.slotTime  || null,
+        guests:    body.guests    || 1,
+        contact:   body.contact   || {},
+        payment:   body.payment   || 'at-visit',
+        priceLine: body.priceLine || null,
+        total:     body.total     || 0,
+        status:    'confirmed',
+        createdAt: now.toISOString(),
+      };
+      await bookings.insertOne(doc);
+      const { _id, ...clean } = doc;
+      return NextResponse.json(clean);
+    }
+    if (segs[1] && method === 'GET') {
+      const doc = await bookings.findOne({ id: segs[1] });
+      if (!doc) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      const { _id, ...cleanDoc } = doc;
+      return NextResponse.json(cleanDoc);
+    }
+  }
 
   // /api/templates
   if (segs[0] === 'templates') {
