@@ -1,11 +1,11 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
-import ComingSoon from '@/components/admin/coming-soon';
+import PaymentsClient from './PaymentsClient';
 
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {
   const user = await getCurrentUser();
   if (!user) redirect('/admin/login');
-  return <ComingSoon user={user} title="Payments" eyebrow="Finance" description="Cash / card / UPI / Razorpay + split payments, refunds, invoices with 18% GST." when="Phase 3.2" />;
+  return <PaymentsClient user={user} />;
 }

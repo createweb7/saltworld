@@ -292,15 +292,92 @@ metadata:
 
 test_plan:
   current_focus:
-    - "BOS Auth (login/logout/me/forgot/reset)"
-    - "BOS Middleware (protected /admin/* + /api/admin/*)"
-    - "BOS Dashboard KPIs"
-    - "BOS Customers CRUD + notes"
-    - "BOS Bookings list, detail, calendar & status transitions"
-    - "BOS Universal search + Activity log"
+    - "BOS Services (therapies/journeys/packages) CRUD"
+    - "BOS Memberships (plans + subscriptions + freeze/renew)"
+    - "BOS Gift cards (issue + redeem + by-code)"
+    - "BOS Products & categories + stock adjust"
+    - "BOS Payments + Invoices (INV-NNNNNN + 18% GST) + Refunds"
+    - "BOS Reports (revenue/bookings/occupancy)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: |
+      PHASE 3.2 SHIPPED (Money & operations). New /api/admin/* endpoints.
+      Credentials: /app/memory/test_credentials.md.
+
+      Please verify (all authenticated, base URL from NEXT_PUBLIC_BASE_URL):
+
+      SERVICES (CRUD × 3 kinds)
+        1) POST /api/admin/services/therapies {name:'Float Therapy',
+           durationMin:60, defaultPrice:1999} → 200 doc with id (uuid), slug,
+           active=true, no _id.
+        2) POST without name → 400 { error:'name_required' }.
+        3) GET /api/admin/services/therapies → array (contains created).
+        4) PATCH /api/admin/services/therapies/:id {defaultPrice:2199} → 200
+           updated.
+        5) DELETE /api/admin/services/therapies/:id → 200 {ok:true}; GET → 404.
+        6) Repeat 1,3,5 for /journeys and /packages (packages should accept
+           validityDays).
+
+      MEMBERSHIPS
+        7) POST /api/admin/memberships {name:'Wellness',price:3499,
+           sessionsIncluded:8, validityDays:30} → 200 doc.
+        8) GET /api/admin/memberships → array.
+        9) PATCH /api/admin/memberships/:id {price:3999} → 200.
+       10) POST /api/admin/memberships/subs {customerId,membershipId} where
+           customerId is a created customer and membershipId the plan above →
+           200 sub doc with status='active', sessionsRemaining=8.
+       11) POST /api/admin/memberships/subs/:id/freeze → status='frozen'.
+       12) POST /api/admin/memberships/subs/:id/unfreeze → status='active'.
+       13) POST /api/admin/memberships/subs/:id/renew → sessionsRemaining += 8.
+
+      GIFT CARDS
+       14) POST /api/admin/giftcards {amount:5000, designId:'halite',
+           from:{name,email}, to:{name,email,phone}, message} → 200 doc with
+           code matching /^SW-[A-Z0-9]{4}-[A-Z0-9]{4}$/, balance=amount,
+           status='active'.
+       15) POST with amount<100 → 400 { error:'amount_required' }.
+       16) GET /api/admin/giftcards?status=active → array.
+       17) GET /api/admin/giftcards/by-code/:CODE → 200 doc.
+       18) POST /api/admin/giftcards/:id/redeem {amount:1000} → balance
+           decreases by 1000, status stays 'active'. Redeem remaining balance →
+           status='redeemed'.
+
+      PRODUCTS & CATEGORIES
+       19) POST /api/admin/product-categories {name:'Salt lamps'} → 200 doc.
+       20) POST /api/admin/products {name:'Himalayan lamp', price:1499,
+           categoryId, stock:5} → 200 doc with SKU, tax=18 default.
+       21) GET /api/admin/products → array.
+       22) POST /api/admin/products/:id/stock {delta:-2} → 200 doc with
+           stock=3.
+       23) DELETE product & category → 200 each.
+
+      PAYMENTS + INVOICES (critical: verify INV-NNNNNN + GST math)
+       24) POST /api/admin/payments {total:1180, method:'cash',
+           customerName:'Rohan'} → 200 with { payment, invoice }.
+           * Verify invoice.number matches /^INV-\d{6}$/.
+           * Verify subtotal = 1000, cgst = 90, sgst = 90, total = 1180 (18% GST
+             inclusive math).
+       25) GET /api/admin/payments → array (contains it).
+       26) GET /api/admin/invoices → array; GET /api/admin/invoices/:id → doc.
+       27) POST /api/admin/payments/:id/refund {amount:1180, reason:'test'} →
+           200 refund doc; original payment.status='refunded'.
+       28) Do steps 24 twice more — invoice numbers must be sequential
+           (e.g. INV-000002, INV-000003 — actual seq depends on prior test
+           runs).
+
+      REPORTS
+       29) GET /api/admin/reports/revenue?days=30 → { total, count, daily:[30
+           objects], byMethod }.
+       30) GET /api/admin/reports/bookings?days=30 → { total, daily:[30],
+           byStatus }.
+       31) GET /api/admin/reports/occupancy?days=30 → { byResource, total }.
+
+      Every write endpoint above must emit an activityLog row (verifiable via
+      GET /api/admin/activity).
 
 agent_communication:
   - agent: "main"

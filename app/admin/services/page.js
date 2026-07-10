@@ -1,11 +1,11 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
-import ComingSoon from '@/components/admin/coming-soon';
+import ServicesClient from './ServicesClient';
 
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {
   const user = await getCurrentUser();
   if (!user) redirect('/admin/login');
-  return <ComingSoon user={user} title="Services" eyebrow="Catalog" description="Manage therapies, wellness journeys and packages — pricing, images, availability." when="Phase 3.2" />;
+  return <ServicesClient user={user} />;
 }
