@@ -9,7 +9,9 @@ import { Loader2, ArrowRight } from 'lucide-react';
 export default function LoginPage() {
   const router = useRouter();
   const params = useSearchParams();
-  const nextHref = params.get('next') || '/admin/dashboard';
+  const rawNext = params.get('next') || '/admin/dashboard';
+  // Normalise root '/admin' (which requires an extra hop through the redirector)
+  const nextHref = rawNext === '/admin' ? '/admin/dashboard' : rawNext;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
