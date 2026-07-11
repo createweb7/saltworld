@@ -1,11 +1,11 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
-import ComingSoon from '@/components/admin/coming-soon';
+import NotificationsClient from './NotificationsClient';
 
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {
   const user = await getCurrentUser();
   if (!user) redirect('/admin/login');
-  return <ComingSoon user={user} title="Notifications" eyebrow="Comms" description="Email + WhatsApp templates and delivery logs for confirmations, reminders, reviews." when="Phase 3.3" />;
+  return <NotificationsClient user={user} />;
 }

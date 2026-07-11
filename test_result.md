@@ -367,6 +367,132 @@ backend:
           - Occupancy report with days=30 returns correct structure with byResource and total
           All report endpoints working correctly with proper data aggregation.
 
+  - task: "BOS Marketing CRUD (Phase 3.3)"
+    implemented: true
+    working: true
+    file: "lib/api/admin.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Four sub-kinds under /api/admin/marketing/{announcements,campaigns,reviews,testimonials}.
+          Each supports GET (list), POST (create - requires marketing:edit),
+          PATCH /:id, DELETE /:id. Activity log entries emitted on every write.
+          Requires cookie auth (super_admin has all permissions).
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ VERIFIED ALL MARKETING TESTS (18/18 PASSED):
+          - Announcements: GET list, POST create with UUID id and active=true, PATCH update active=false, DELETE removes item
+          - Campaigns: GET list, POST create with UUID id and active=true, PATCH update active=false, DELETE removes item
+          - Reviews: GET list, POST create with UUID id and active=true, PATCH update active=false, DELETE removes item
+          - Testimonials: GET list, POST create with UUID id and active=true, PATCH update active=false, DELETE removes item
+          - Unknown marketing kind returns 404 with error='unknown_marketing_kind'
+          - Activity log contains all marketing write operations (verified 20+ entries)
+          All CRUD operations working correctly for all 4 marketing kinds. Activity logging functional.
+
+  - task: "BOS CMS Media + Blog (Phase 3.3)"
+    implemented: true
+    working: true
+    file: "lib/api/admin.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          /api/admin/cms/media: GET list, POST (multipart file upload OR {url,alt} JSON body). DELETE /:id.
+          Falls back to local disk under /app/public/uploads when S3 keys not set (added `@aws-sdk/client-s3` package).
+          /api/admin/cms/blog: full CRUD with title/slug/body/status.
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ VERIFIED ALL CMS TESTS (10/10 PASSED):
+          Media:
+          - POST with URL registers external media with storage='external'
+          - POST without URL returns 400 with error='url_required'
+          - GET /media returns array with created media
+          - DELETE /media/:id removes media
+          Blog:
+          - POST creates blog with auto-generated slug and status='draft'
+          - POST without title returns 400 with error='title_required'
+          - GET /blog returns array with created blog
+          - GET /blog/:id returns blog document
+          - PATCH /blog/:id updates status to 'published' and bumps updatedAt
+          - DELETE /blog/:id removes blog
+          All CMS media and blog CRUD operations working correctly.
+
+  - task: "BOS Notifications templates + logs (Phase 3.3)"
+    implemented: true
+    working: true
+    file: "lib/api/admin.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          /api/admin/notifications/templates: GET/POST/PATCH/:id/DELETE/:id. Requires key + channel.
+          /api/admin/notifications/logs: GET returns communications collection.
+          /api/admin/notifications/send: POST queues a comms record; provider dispatch is stubbed (WhatsApp/Email keys not yet configured).
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ VERIFIED ALL NOTIFICATIONS TESTS (7/7 PASSED):
+          Templates:
+          - POST creates template with key, channel, and active=true
+          - POST without key or channel returns 400 with error='key_channel_required'
+          - GET /templates returns array with created template
+          - PATCH /templates/:id updates active=false
+          - DELETE /templates/:id removes template
+          Send & Logs:
+          - POST /send queues message with status='queued' (provider not configured)
+          - GET /logs returns array with queued communications
+          All notification template CRUD and queuing operations working correctly.
+
+  - task: "BOS Settings + Integrations (Phase 3.3)"
+    implemented: true
+    working: true
+    file: "lib/api/admin.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          /api/admin/settings: GET returns all singletons. GET /:key, PUT /:key upserts value (business, taxes, brand).
+          /api/admin/resources: CRUD for rooms/equipment.
+          /api/admin/integrations: GET returns list with masked secrets and configured flag. PUT /:key upserts (super_admin only).
+          /api/admin/users: super_admin only. GET list, POST creates staff account with hashed password.
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ VERIFIED ALL SETTINGS + INTEGRATIONS + RESOURCES + USERS TESTS (13/13 PASSED):
+          Settings:
+          - PUT /settings/business upserts value with hours object
+          - GET /settings/business returns value with hours
+          - PUT /settings/taxes upserts value with GST rates
+          - GET /settings returns object with all keys (business, taxes)
+          Resources:
+          - POST /resources creates with name and type
+          - POST without name returns 400 with error='name_type_required'
+          - GET /resources returns array with created resource
+          - DELETE /resources/:id removes resource
+          Integrations:
+          - PUT /integrations/:key stores config (super_admin only)
+          - GET /integrations returns list with masked secrets (bullet characters) and configured flag
+          Users:
+          - GET /users returns array without passwordHash or _id
+          - POST /users creates staff without passwordHash or _id in response
+          All settings, resources, integrations, and user management operations working correctly.
+          CRITICAL FIX: Added PUT method export to /app/app/api/[[...path]]/route.js to support PUT endpoints.
+
   - task: "Templates listing"
     implemented: true
     working: true
@@ -746,15 +872,93 @@ metadata:
 
 test_plan:
   current_focus:
-    - "BOS Admin UI - Customers"
-    - "BOS Admin UI - Products"
-    - "BOS Admin UI - Payments"
-    - "BOS Admin UI - Reports"
+    - "BOS Marketing CRUD (Phase 3.3)"
+    - "BOS CMS Media + Blog (Phase 3.3)"
+    - "BOS Notifications templates + logs (Phase 3.3)"
+    - "BOS Settings + Integrations (Phase 3.3)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
 agent_communication:
+  - agent: "main"
+    message: |
+      PHASE 3.3 (Growth) endpoints shipped and ready for backend verification.
+      Installed `@aws-sdk/client-s3` so the /cms/media route now compiles.
+      All routes are authenticated via `sw_admin` cookie (login endpoint
+      unchanged: POST /api/admin/auth/login, seeded creds in
+      /app/memory/test_credentials.md).
+
+      Please verify (base URL from NEXT_PUBLIC_BASE_URL, all under /api):
+
+      MARKETING  (kinds: announcements | campaigns | reviews | testimonials)
+        M1) GET  /admin/marketing/announcements → 200 array (may be empty).
+        M2) POST /admin/marketing/announcements {body:'Free session this month',
+            kind:'bar', ctaLabel:'Book', ctaHref:'/book'} → 200 doc with uuid
+            id, active=true (default), createdAt ISO, no _id.
+        M3) PATCH /admin/marketing/announcements/:id {active:false} → 200
+            doc with active=false and updatedAt bumped.
+        M4) DELETE /admin/marketing/announcements/:id → 200 {ok:true}; a
+            subsequent PATCH on the same id → 404 not_found.
+        M5) Repeat POST+DELETE for reviews (POST with
+            {rating:5, body:'Best float ever', author:'Ravi'}) and
+            testimonials (POST with {body:'Life-changing', author:'Anita'})
+            and campaigns (POST with {name:'July flash', status:'draft'}).
+        M6) GET /admin/marketing/nonsense → 404 unknown_marketing_kind.
+        M7) Every write MUST show up in GET /admin/activity.
+
+      CMS
+        C1) POST /admin/cms/media with JSON body {url:'https://picsum.photos/300',
+            alt:'demo', mime:'image/jpeg'} → 200 doc with uuid id, storage:'external'.
+        C2) POST /admin/cms/media with NO url → 400 url_required.
+        C3) GET /admin/cms/media → array (contains created).
+        C4) DELETE /admin/cms/media/:id → 200 {ok:true}.
+        C5) POST /admin/cms/blog {title:'Salt therapy 101', body:'…',
+            category:'Wellness', tags:['salt','wellness']} → 200 doc, slug
+            auto-generated from title, status='draft' default.
+        C6) POST /admin/cms/blog {} → 400 title_required.
+        C7) GET /admin/cms/blog → array; GET /admin/cms/blog/:id → doc; PATCH
+            /admin/cms/blog/:id {status:'published'} → 200 with updatedAt
+            bumped; DELETE → 200.
+
+      NOTIFICATIONS
+        N1) POST /admin/notifications/templates {key:'booking_confirmation',
+            channel:'email', subject:'Your booking is confirmed',
+            body:'Hi {{name}}', variables:['name']} → 200 doc with active=true.
+        N2) POST /admin/notifications/templates {} (missing key or channel) →
+            400 key_channel_required.
+        N3) GET /admin/notifications/templates → array.
+        N4) PATCH /admin/notifications/templates/:id {active:false} → 200.
+        N5) DELETE /admin/notifications/templates/:id → 200.
+        N6) POST /admin/notifications/send {channel:'whatsapp',
+            templateId:'booking_confirmation', payload:{name:'Ravi'}} → 200
+            doc with status='queued' (provider not configured).
+        N7) GET /admin/notifications/logs → array (contains the queued send).
+
+      SETTINGS
+        S1) PUT /admin/settings/business { hours:{monday:{open:true,
+            from:'06:00', to:'21:00'}} } → 200 {ok:true, key:'business'}.
+        S2) GET /admin/settings/business → value with hours object.
+        S3) PUT /admin/settings/taxes {gstRate:18,cgstRate:9,sgstRate:9,
+            gstin:'29ABC…', hsnServices:'999722'} → 200.
+        S4) GET /admin/settings → 200 object with keys business & taxes.
+        S5) POST /admin/resources {name:'Float Tank 3', type:'float_tank',
+            capacity:1} → 200 doc; POST without name → 400 name_type_required.
+        S6) DELETE /admin/resources/:id → 200.
+        S7) PUT /admin/integrations/razorpay {keyId:'rzp_test_xxx',
+            keySecret:'shhh', webhookSecret:'w'} → 200 (super_admin).
+        S8) GET /admin/integrations → array; each item should have `config`
+            with secrets masked (contain • characters), and `configured` flag.
+        S9) GET /admin/users → 200 array (super_admin only); POST
+            /admin/users {name:'Test Reception', email:'test.rec@saltworld.in',
+            role:'reception', password:'ReceptionPass1'} → 200 doc without
+            passwordHash.
+
+      NOTE: Please clean up the resources/users/templates/blog posts you
+      create (DELETE where possible) so the seed data stays tidy. The
+      previous 79/79 endpoints have NOT changed — no regression run needed
+      unless a Phase 3.3 test fails in a way that suggests Phase 3.2 breakage.
+
   - agent: "main"
     message: |
       FRONTEND TEST FEEDBACK ADDRESSED.
@@ -1189,3 +1393,66 @@ agent_communication:
       **OVERALL ASSESSMENT:**
       Core UI components (Dashboard, Shell, Services, Memberships, Gift cards) are functional and well-designed.
       Auth flow works correctly. Customer CRUD needs investigation. Testing incomplete due to memory constraint.
+
+
+  - agent: "testing"
+    message: |
+      ✅ PHASE 3.3 (GROWTH) BACKEND TESTING COMPLETE - ALL TESTS PASSED (48/48)
+      
+      Executed comprehensive backend API testing for Salt World BOS Phase 3.3 (Growth) endpoints using /app/backend_test_phase_3_3.py
+      against https://saltwell-arch.preview.emergentagent.com/api
+      
+      Test Results Summary by Module:
+      
+      **MARKETING CRUD (18/18 tests passed)**
+      ✅ Announcements: GET list, POST create, PATCH update, DELETE
+      ✅ Campaigns: GET list, POST create, PATCH update, DELETE
+      ✅ Reviews: GET list, POST create, PATCH update, DELETE
+      ✅ Testimonials: GET list, POST create, PATCH update, DELETE
+      ✅ Unknown kind returns 404 with error='unknown_marketing_kind'
+      ✅ Activity log contains all marketing write operations
+      
+      **CMS MEDIA + BLOG (10/10 tests passed)**
+      ✅ Media: POST with URL (external storage), POST without URL (400), GET list, DELETE
+      ✅ Blog: POST create (auto-slug, status=draft), POST without title (400), GET list, GET by ID, PATCH update, DELETE
+      
+      **NOTIFICATIONS (7/7 tests passed)**
+      ✅ Templates: POST create (key+channel required), POST without key/channel (400), GET list, PATCH update, DELETE
+      ✅ Send: POST queues message with status='queued' (provider not configured)
+      ✅ Logs: GET returns array with queued communications
+      
+      **SETTINGS (4/4 tests passed)**
+      ✅ PUT /settings/business upserts value with hours object
+      ✅ GET /settings/business returns value
+      ✅ PUT /settings/taxes upserts GST rates
+      ✅ GET /settings returns all keys (business, taxes)
+      
+      **RESOURCES (4/4 tests passed)**
+      ✅ POST creates resource with name and type
+      ✅ POST without name returns 400 with error='name_type_required'
+      ✅ GET list, DELETE resource
+      
+      **INTEGRATIONS (2/2 tests passed)**
+      ✅ PUT /integrations/:key stores config (super_admin only)
+      ✅ GET /integrations returns masked secrets (bullet chars) and configured flag
+      
+      **USERS (2/2 tests passed)**
+      ✅ GET /users returns array without passwordHash or _id
+      ✅ POST /users creates staff without sensitive fields in response
+      
+      **REGRESSION (1/1 test passed)**
+      ✅ GET /health returns {ok: true}
+      
+      **CRITICAL FIX APPLIED:**
+      - Added PUT method export to /app/app/api/[[...path]]/route.js (was missing, causing 405 errors for Settings and Integrations endpoints)
+      
+      **ACTIVITY LOG VERIFICATION:**
+      - Verified 84 total activity log entries
+      - Confirmed 20+ Phase 3.3 write operations logged (marketing, cms, notifications, settings, integrations)
+      
+      **SUCCESS RATE: 100% (48/48 tests passed)**
+      
+      NO CRITICAL ISSUES FOUND. All Phase 3.3 (Growth) backend APIs are production-ready.
+      All authentication, CRUD operations, validation, activity logging, and data integrity checks functioning correctly.
+      
+      NOTE: Did NOT retest the 79 Phase 3.1/3.2 endpoints as instructed - they were already verified as passing.

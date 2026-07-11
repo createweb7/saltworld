@@ -1,11 +1,11 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
-import ComingSoon from '@/components/admin/coming-soon';
+import CmsClient from './CmsClient';
 
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {
   const user = await getCurrentUser();
   if (!user) redirect('/admin/login');
-  return <ComingSoon user={user} title="CMS" eyebrow="Content" description="Page builder, blog, media library and SEO — merges with the existing visual builder." when="Phase 3.3" />;
+  return <CmsClient user={user} />;
 }
