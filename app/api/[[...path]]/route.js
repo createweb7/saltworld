@@ -3,6 +3,14 @@ import { getDb, clean } from '@/lib/mongo';
 import { TEMPLATES, getTemplate, emptyPage } from '@/lib/templates';
 import { randomUUID } from 'crypto';
 import { adminHandle } from '@/lib/api/admin';
+import {
+  createOrder as rpCreateOrder,
+  verifySignature as rpVerifySignature,
+  verifyWebhookSignature as rpVerifyWebhook,
+  razorpayIsConfigured,
+  getPublicKeyId,
+} from '@/lib/razorpay';
+import { sendWhatsappTemplate, whatsappIsConfigured } from '@/lib/whatsapp';
 
 const slugify = (s) => (s || 'page').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'page';
 
@@ -77,14 +85,170 @@ async function handle(req, method, segs) {
         createdAt: now.toISOString(),
       };
       await bookings.insertOne(doc);
-      const { _id, ...clean } = doc;
-      return NextResponse.json(clean);
+
+      // Fire-and-forget WhatsApp confirmation (does nothing if not configured or phone missing).
+      const phone = doc.contact?.phone;
+      if (phone) {
+        sendWhatsappTemplate({
+          to: phone,
+          templateKey: 'booking_confirmation',
+          templateName: 'booking_confirmation',
+          languageCode: 'en',
+          variables: {
+            name:     doc.contact?.name || 'there',
+            ref:      doc.ref,
+            outcome:  body.outcomeLabel || doc.outcome || '',
+            therapy:  body.therapyLabel || doc.therapy || '',
+            date:     doc.slotDate || '',
+            time:     doc.slotTime || '',
+          },
+          orderedVariables: ['name', 'ref', 'outcome', 'therapy', 'date', 'time'],
+        })
+          .then((r) => {
+            if (r?.messageId) {
+              db.collection('communications').insertOne({
+                id: randomUUID(),
+                bookingId: doc.id,
+                customerPhone: phone,
+                channel: 'whatsapp',
+                templateId: 'booking_confirmation',
+                status: r.queued ? 'sent' : 'failed',
+                providerRef: r.messageId || null,
+                sentAt: new Date().toISOString(),
+                error: r.error || null,
+              }).catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
+
+      const { _id, ...cleanDoc } = doc;
+      return NextResponse.json(cleanDoc);
     }
     if (segs[1] && method === 'GET') {
       const doc = await bookings.findOne({ id: segs[1] });
       if (!doc) return NextResponse.json({ error: 'not_found' }, { status: 404 });
       const { _id, ...cleanDoc } = doc;
       return NextResponse.json(cleanDoc);
+    }
+  }
+
+  // ------- Payments (Razorpay) -------
+  if (segs[0] === 'payments') {
+    // Public status check for the checkout button.
+    if (segs[1] === 'status' && method === 'GET') {
+      const configured = await razorpayIsConfigured();
+      const keyId = configured ? await getPublicKeyId() : null;
+      return NextResponse.json({ configured, keyId });
+    }
+
+    // Create Razorpay order. Body: { bookingId, amountPaise, notes? }
+    if (segs[1] === 'create-order' && method === 'POST') {
+      const body = await req.json().catch(() => ({}));
+      const { bookingId, amountPaise, notes } = body;
+      if (!bookingId) return NextResponse.json({ error: 'bookingId_required' }, { status: 400 });
+      const amt = Number(amountPaise);
+      if (!Number.isFinite(amt) || amt <= 0) {
+        return NextResponse.json({ error: 'invalid_amount' }, { status: 400 });
+      }
+      const booking = await bookings.findOne({ id: bookingId });
+      if (!booking) return NextResponse.json({ error: 'booking_not_found' }, { status: 404 });
+
+      if (!(await razorpayIsConfigured())) {
+        return NextResponse.json({ error: 'razorpay_not_configured' }, { status: 503 });
+      }
+
+      let order;
+      try {
+        order = await rpCreateOrder({
+          amountPaise: Math.round(amt),
+          currency: 'INR',
+          receipt: booking.ref || bookingId.slice(0, 24),
+          notes: { bookingId, ref: booking.ref, ...(notes || {}) },
+        });
+      } catch (e) {
+        console.error('razorpay order create failed', e);
+        return NextResponse.json({ error: 'razorpay_error', details: String(e?.message || e) }, { status: 502 });
+      }
+
+      await db.collection('bookingPayments').insertOne({
+        id: randomUUID(),
+        bookingId,
+        razorpayOrderId: order.id,
+        amount: order.amount,
+        currency: order.currency,
+        status: 'created',
+        createdAt: new Date().toISOString(),
+      });
+
+      const keyId = await getPublicKeyId();
+      return NextResponse.json({ order: { id: order.id, amount: order.amount, currency: order.currency }, keyId });
+    }
+
+    // Verify signature after Checkout success
+    if (segs[1] === 'verify-signature' && method === 'POST') {
+      const body = await req.json().catch(() => ({}));
+      const { bookingId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = body;
+      if (!bookingId || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+        return NextResponse.json({ success: false, error: 'missing_fields' }, { status: 400 });
+      }
+      const paymentRecord = await db.collection('bookingPayments').findOne({
+        bookingId, razorpayOrderId: razorpay_order_id,
+      });
+      if (!paymentRecord) {
+        return NextResponse.json({ success: false, error: 'payment_record_not_found' }, { status: 404 });
+      }
+      const valid = await rpVerifySignature({
+        orderId: paymentRecord.razorpayOrderId,
+        paymentId: razorpay_payment_id,
+        signature: razorpay_signature,
+      });
+      const nowIso = new Date().toISOString();
+      if (!valid) {
+        await db.collection('bookingPayments').updateOne(
+          { id: paymentRecord.id },
+          { $set: { status: 'signature_failed', razorpayPaymentId: razorpay_payment_id, verifiedAt: nowIso } },
+        );
+        return NextResponse.json({ success: false, error: 'signature_mismatch' }, { status: 400 });
+      }
+      await db.collection('bookingPayments').updateOne(
+        { id: paymentRecord.id },
+        { $set: { status: 'verified', razorpayPaymentId: razorpay_payment_id, verifiedAt: nowIso } },
+      );
+      await bookings.updateOne(
+        { id: bookingId },
+        { $set: { payment: 'online', paymentStatus: 'paid', paymentProvider: 'razorpay', paymentId: razorpay_payment_id, paymentVerifiedAt: nowIso } },
+      );
+      return NextResponse.json({ success: true });
+    }
+
+    // Webhook — signature verified against raw body.
+    if (segs[1] === 'webhook' && method === 'POST') {
+      const raw = await req.text();
+      const sig = req.headers.get('x-razorpay-signature') || req.headers.get('X-Razorpay-Signature');
+      if (!sig) return NextResponse.json({ ok: false, error: 'missing_signature' }, { status: 400 });
+      const ok = await rpVerifyWebhook(raw, sig);
+      if (!ok) return NextResponse.json({ ok: false, error: 'invalid_signature' }, { status: 400 });
+      let payload = {};
+      try { payload = JSON.parse(raw); } catch { /* noop */ }
+      const event = payload?.event;
+      const entity = payload?.payload?.payment?.entity;
+      if (event === 'payment.captured' && entity) {
+        await db.collection('bookingPayments').updateOne(
+          { razorpayOrderId: entity.order_id },
+          { $set: { status: 'captured', razorpayPaymentId: entity.id, capturedAt: new Date().toISOString() } },
+        );
+        const rec = await db.collection('bookingPayments').findOne({ razorpayOrderId: entity.order_id });
+        if (rec?.bookingId) {
+          await bookings.updateOne({ id: rec.bookingId }, { $set: { paymentStatus: 'captured' } });
+        }
+      } else if (event === 'payment.failed' && entity) {
+        await db.collection('bookingPayments').updateOne(
+          { razorpayOrderId: entity.order_id },
+          { $set: { status: 'failed', razorpayPaymentId: entity.id, failureReason: entity.error_reason || entity.error_description, updatedAt: new Date().toISOString() } },
+        );
+      }
+      return NextResponse.json({ ok: true });
     }
   }
 

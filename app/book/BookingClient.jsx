@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import Script from 'next/script';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft, ArrowRight, Check, Loader2, Clock, Calendar as Cal,
@@ -273,7 +274,7 @@ function StepSlot({ value, onChange }) {
 /* Step 4 — Contact & confirm                                         */
 /* ------------------------------------------------------------------ */
 
-function StepContact({ outcome, therapy, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error }) {
+function StepContact({ outcome, therapy, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline }) {
   const o = getOutcome(outcome);
   const th = o?.protocol?.therapies?.find((x) => x.slug === therapy);
   const priceLine = o?.pricing?.single?.price + ' ' + (o?.pricing?.single?.period || '');
@@ -328,12 +329,21 @@ function StepContact({ outcome, therapy, slot, contact, setContact, payment, set
                   <div className="text-[12px] text-muted-foreground">Card / UPI at reception. Nothing charged now.</div>
                 </div>
               </label>
-              <label className="flex items-center gap-3 rounded-xl border border-border p-3.5 opacity-60 cursor-not-allowed">
-                <input type="radio" disabled className="sr-only" />
-                <span className="h-4 w-4 rounded-full border-2 border-border" />
+              <label className={cn('flex items-center gap-3 rounded-xl border p-3.5',
+                canPayOnline ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed',
+                payment === 'online' ? 'border-brand bg-brand-soft' : 'border-border')}>
+                <input type="radio" name="pay" disabled={!canPayOnline} checked={payment === 'online'} onChange={() => setPayment('online')} className="sr-only" />
+                <span className={cn('h-4 w-4 rounded-full border-2 flex items-center justify-center', payment === 'online' ? 'border-brand' : 'border-border')}>
+                  {payment === 'online' && <span className="h-2 w-2 rounded-full bg-brand" />}
+                </span>
                 <div className="flex-1">
-                  <div className="text-[14px] font-medium flex items-center gap-2">Pay online <span className="text-[10px] uppercase tracking-widest bg-muted px-1.5 py-0.5 rounded">Soon</span></div>
-                  <div className="text-[12px] text-muted-foreground">Razorpay integration — arriving next release.</div>
+                  <div className="text-[14px] font-medium flex items-center gap-2">
+                    Pay online
+                    {!canPayOnline && <span className="text-[10px] uppercase tracking-widest bg-muted px-1.5 py-0.5 rounded">Soon</span>}
+                  </div>
+                  <div className="text-[12px] text-muted-foreground">
+                    {canPayOnline ? 'Cards, UPI, netbanking via Razorpay. Secure by default.' : 'Available once payments are enabled.'}
+                  </div>
                 </div>
               </label>
             </div>
@@ -343,7 +353,7 @@ function StepContact({ outcome, therapy, slot, contact, setContact, payment, set
 
           <button type="submit" disabled={submitting}
             className="w-full inline-flex items-center justify-center gap-2 h-12 rounded-full bg-foreground text-background text-[14.5px] font-semibold hover:bg-foreground/90 disabled:opacity-60 transition-colors">
-            {submitting ? <><Loader2 className="h-4 w-4 animate-spin" /> Confirming…</> : <>Confirm booking <ArrowRight className="h-4 w-4" /></>}
+            {submitting ? <><Loader2 className="h-4 w-4 animate-spin" /> {payment === 'online' ? 'Opening secure checkout…' : 'Confirming…'}</> : <>{payment === 'online' ? 'Pay & confirm booking' : 'Confirm booking'} <ArrowRight className="h-4 w-4" /></>}
           </button>
           <div className="text-[11.5px] text-muted-foreground text-center">
             By confirming, you agree to our <Link href="/legal/terms" className="underline underline-offset-2">terms</Link> &amp; <Link href="/legal/refunds" className="underline underline-offset-2">refund policy</Link>.
@@ -397,6 +407,7 @@ export default function BookingClient({ initialOutcome }) {
   const [payment, setPayment] = useState('at-visit');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [payCfg, setPayCfg] = useState({ configured: false, keyId: null });
 
   // Auto-select first therapy when outcome changes.
   useEffect(() => {
@@ -408,6 +419,15 @@ export default function BookingClient({ initialOutcome }) {
 
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'smooth' }); }, [stepIdx]);
 
+  // Fetch payment configuration once — we only surface "Pay online" if Razorpay is truly configured.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/payments/status').then((r) => r.json()).then((d) => {
+      if (!cancelled && d?.configured) setPayCfg({ configured: true, keyId: d.keyId });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   const canNext =
     (stepIdx === 0 && !!outcome) ||
     (stepIdx === 1 && !!therapy) ||
@@ -417,6 +437,47 @@ export default function BookingClient({ initialOutcome }) {
   const next = () => setStepIdx((i) => Math.min(i + 1, STEPS.length - 1));
   const back = () => setStepIdx((i) => Math.max(i - 1, 0));
 
+  const openRazorpay = ({ order, keyId, bookingId, bookingRef, name, contact }) => new Promise((resolve, reject) => {
+    if (typeof window === 'undefined' || typeof window.Razorpay === 'undefined') {
+      reject(new Error('Payment gateway not ready. Please refresh and try again.'));
+      return;
+    }
+    const rzp = new window.Razorpay({
+      key: keyId,
+      amount: order.amount,
+      currency: order.currency || 'INR',
+      name: 'Salt World',
+      description: `Booking ${bookingRef}`,
+      order_id: order.id,
+      prefill: {
+        name: contact?.name || '',
+        email: contact?.email || '',
+        contact: contact?.phone || '',
+      },
+      theme: { color: '#0a3838' },
+      handler: async (response) => {
+        try {
+          const v = await fetch('/api/payments/verify-signature', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              bookingId,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            }),
+          });
+          const j = await v.json();
+          if (!v.ok || !j?.success) return reject(new Error('Signature verification failed.'));
+          resolve({ ok: true });
+        } catch (e) { reject(e); }
+      },
+      modal: {
+        ondismiss: () => reject(new Error('Payment cancelled.')),
+      },
+    });
+    rzp.open();
+  });
+
   const submit = async () => {
     setError(null);
     if (!contact.name || !contact.phone) { setError('Name and phone are required.'); return; }
@@ -424,6 +485,8 @@ export default function BookingClient({ initialOutcome }) {
     try {
       const o = getOutcome(outcome);
       const th = o?.protocol?.therapies?.find((x) => x.slug === therapy);
+      const totalRupees = Number(String(o?.pricing?.single?.price || '0').replace(/[^\d]/g, ''));
+
       const r = await fetch('/api/bookings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -432,11 +495,29 @@ export default function BookingClient({ initialOutcome }) {
           duration: o?.protocol?.duration,
           contact, payment,
           priceLine: o?.pricing?.single?.price + ' ' + (o?.pricing?.single?.period || ''),
-          total: Number(String(o?.pricing?.single?.price || '0').replace(/[^\d]/g, '')),
+          total: totalRupees,
         }),
       });
       if (!r.ok) throw new Error('Failed to create booking');
       const doc = await r.json();
+
+      // If online payment requested and Razorpay is configured, open Checkout.
+      if (payment === 'online' && payCfg.configured && totalRupees > 0) {
+        const co = await fetch('/api/payments/create-order', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bookingId: doc.id, amountPaise: Math.round(totalRupees * 100), notes: { ref: doc.ref } }),
+        });
+        const coJson = await co.json();
+        if (!co.ok) throw new Error(coJson?.error || 'Could not initialise payment.');
+        await openRazorpay({
+          order: coJson.order,
+          keyId: coJson.keyId || payCfg.keyId,
+          bookingId: doc.id,
+          bookingRef: doc.ref,
+          contact,
+        });
+      }
+
       router.push(`/book/confirm/${doc.id}`);
     } catch (e) {
       setError(e.message || 'Something went wrong.');
@@ -446,6 +527,9 @@ export default function BookingClient({ initialOutcome }) {
 
   return (
     <div className="min-h-screen bg-background">
+      {payCfg.configured && (
+        <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="lazyOnload" />
+      )}
       <BookingHeader stepIdx={stepIdx} onBack={back} />
 
       <main className="max-w-[1200px] mx-auto px-4 md:px-8 pt-10 md:pt-14 pb-28 md:pb-16">
@@ -457,6 +541,7 @@ export default function BookingClient({ initialOutcome }) {
             outcome={outcome} therapy={therapy} slot={slot}
             contact={contact} setContact={setContact}
             payment={payment} setPayment={setPayment}
+            canPayOnline={payCfg.configured}
             submitting={submitting} error={error} onSubmit={submit}
           />
         )}
