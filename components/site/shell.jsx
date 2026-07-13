@@ -155,10 +155,10 @@ export function Wordmark({ inverted }) {
 }
 
 const NAV_LINKS = [
-  { href: '/outcomes/stress-relief', label: 'Outcomes' },
-  { href: '/therapies',              label: 'Therapies' },
-  { href: '/memberships',            label: 'Memberships' },
-  { href: '/journal',                label: 'Journal' },
+  { href: '/outcomes',    label: 'Outcomes' },
+  { href: '/therapies',   label: 'Therapies' },
+  { href: '/memberships', label: 'Memberships' },
+  { href: '/journal',     label: 'Journal' },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -268,8 +268,8 @@ export function SiteFooter() {
         </div>
         {[
           { h: 'Outcomes', l: [['Stress Relief','/outcomes/stress-relief'],['Better Sleep','/outcomes/better-sleep'],['Muscle Recovery','/outcomes/muscle-recovery'],['Couple Activities','/outcomes/couple-activities'],['Skin Rejuvenation','/outcomes/skin-rejuvenation']] },
-          { h: 'Therapies', l: [['Float Therapy','/therapies/float-therapy'],['Salt Therapy','/therapies/salt-therapy'],['Infrared Sauna','/therapies/infrared-sauna'],['Cold Plunge','/therapies/cold-plunge'],['Red-light','/therapies/red-light-therapy']] },
-          { h: 'Company', l: [['About','/about'],['Journal','/journal'],['Gifts','/gifts'],['For teams','/for-teams'],['Contact','/contact']] },
+          { h: 'Therapies', l: [['All therapies','/therapies'],['Memberships','/memberships'],['Gift cards','/gifts'],['Book a session','/book']] },
+          { h: 'Company', l: [['Journal','/journal'],['Gifts','/gifts'],['For teams','/for-teams'],['Contact','/contact']] },
         ].map((col) => (
           <div key={col.h} className="md:col-span-2">
             <div className="text-[11px] uppercase tracking-[0.18em] text-foreground font-semibold">{col.h}</div>
