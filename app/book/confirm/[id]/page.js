@@ -67,11 +67,11 @@ export default async function ConfirmPage({ params }) {
         </div>
 
         <div className="mt-12 flex flex-wrap items-center gap-3">
-          <a href="https://wa.me/919916019755" target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 h-11 px-5 rounded-full bg-foreground text-background font-semibold text-[14px] hover:bg-foreground/90 transition-colors">
+          <a href="https://wa.me/917687878793" target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 h-11 px-5 rounded-full bg-foreground text-background font-semibold text-[14px] hover:bg-foreground/90 transition-colors">
             <MessageCircle className="h-4 w-4" /> WhatsApp us
           </a>
-          <a href="tel:+919916019755" className="inline-flex items-center gap-2 h-11 px-5 rounded-full border border-border text-[14px] font-medium hover:bg-muted transition-colors">
-            <Phone className="h-4 w-4" /> +91 99160 19755
+          <a href="tel:+917687878793" className="inline-flex items-center gap-2 h-11 px-5 rounded-full border border-border text-[14px] font-medium hover:bg-muted transition-colors">
+            <Phone className="h-4 w-4" /> +91 76878 78793
           </a>
           <a href="https://maps.google.com/?q=Salt+World+HSR+Layout+Bengaluru" target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 h-11 px-5 rounded-full border border-border text-[14px] font-medium hover:bg-muted transition-colors">
             <MapPin className="h-4 w-4" /> Directions

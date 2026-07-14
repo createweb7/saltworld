@@ -149,7 +149,7 @@ export default function MembershipsPage() {
           </p>
           <div className="mt-8 flex justify-center gap-3 flex-wrap">
             <Link href="/book" className="h-11 px-5 rounded-full bg-foreground text-background inline-flex items-center gap-1.5 text-[14px] font-semibold">Book a first visit <ArrowRight className="h-4 w-4" /></Link>
-            <a href="https://wa.me/919916019755" className="h-11 px-5 rounded-full border border-border inline-flex items-center gap-1.5 text-[14px] font-medium hover:bg-background transition-colors">WhatsApp us</a>
+            <a href="https://wa.me/917687878793" className="h-11 px-5 rounded-full border border-border inline-flex items-center gap-1.5 text-[14px] font-medium hover:bg-background transition-colors">WhatsApp us</a>
           </div>
         </div>
       </section>

@@ -131,7 +131,7 @@ function Brand() {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['settings', 'brand'], queryFn: async () => (await fetch('/api/admin/settings/brand')).json() });
   const [form, setForm] = useState(null);
-  useEffect(() => { if (!form) setForm(data || { name: 'Salt World', legalName: 'SSALT WELLNESS SPACES PRIVATE LIMITED', tagline: 'A wellness sanctuary in Bengaluru', phone: '+919916019755', email: 'hello@saltworld.in', address: 'Site 1, 2nd floor, 18th Main, HSR Layout, Sector 3, Bengaluru 560102', whatsapp: '919916019755' }); }, [data]);
+  useEffect(() => { if (!form) setForm(data || { name: 'Salt World', legalName: 'SSALT WELLNESS SPACES PRIVATE LIMITED', tagline: 'A wellness sanctuary in Bengaluru', phone: '+917687878793', email: 'info@saltworld.in', address: 'Site 1, 2nd floor, 18th Main, HSR Layout, Sector 3, Bengaluru 560102', whatsapp: '917687878793' }); }, [data]);
   const [saving, setSaving] = useState(false);
   if (!form) return <div className="text-[12.5px] text-muted-foreground">Loading…</div>;
   const save = async () => {

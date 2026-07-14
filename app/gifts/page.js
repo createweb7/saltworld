@@ -7,7 +7,7 @@ import { TopNav, SiteFooter, WhatsAppFab } from '@/components/site/shell';
 import GiftCardPreview from '@/components/site/gift-card-preview';
 import { GIFT_DESIGNS, DENOMINATIONS, formatINR } from '@/lib/gift-designs';
 
-const WHATSAPP = 'https://wa.me/919916019755';
+const WHATSAPP = 'https://wa.me/917687878793';
 
 const OCCASION = [
   { id: 'birthday',     label: 'Birthday' },

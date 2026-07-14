@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowRight, ArrowUpRight, Wind, Moon, Dumbbell, Activity, Heart,
@@ -48,8 +48,8 @@ const JOURNAL = [
   { slug: 'the-quiet-date-night',         cat: 'Couple Activities', title: 'The quiet date night you\u2019ve been missing', excerpt: 'Ninety minutes together, without a phone in sight.',              img: IMG.j3, date: 'May 2026' },
 ];
 
-const WHATSAPP = 'https://wa.me/919916019755';
-const PHONE = '+919916019755';
+const WHATSAPP = 'https://wa.me/917687878793';
+const PHONE = '+917687878793';
 
 const inr = (n) => (typeof n === 'number' ? '\u20B9' + n.toLocaleString('en-IN') : '');
 
@@ -627,9 +627,13 @@ function TrustBadges() {
     { icon: Award,       k: '8 years in HSR Layout',           s: '1,200+ recurring members' },
     { icon: MapPin,      k: 'Discreet HSR sanctuary',          s: 'Sector 7, 3rd floor · valet parking' },
   ];
+  const featuredIn = ['YourStory', 'Homegrown', 'Deccan Herald', 'The Hindu', 'Vogue India', 'Mint Lounge'];
   return (
     <section ref={ref} className="py-16 md:py-20 bg-background border-y border-border">
       <div className="max-w-[1240px] mx-auto px-5 md:px-8">
+        <div className="text-[10.5px] uppercase tracking-[0.2em] text-muted-foreground font-semibold text-center mb-8">
+          Trusted by 1,200 Bengalureans · Certified by the people who matter
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-8">
           {items.map((it) => (
             <div key={it.k} className="rise flex items-start gap-3.5">
@@ -643,8 +647,114 @@ function TrustBadges() {
             </div>
           ))}
         </div>
+
+        <div className="mt-12 md:mt-14 pt-8 md:pt-10 border-t border-border">
+          <div className="text-[10.5px] uppercase tracking-[0.2em] text-muted-foreground font-semibold text-center mb-6">
+            As featured in
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-4">
+            {featuredIn.map((name) => (
+              <span key={name} className="font-serif italic text-[15.5px] md:text-[17px] tracking-tight text-muted-foreground/80">
+                {name}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
     </section>
+  );
+}
+
+function SocialProofStrip() {
+  const ref = useRef(null);
+  useRise(ref);
+  const stats = [
+    { big: '4.9', small: '★★★★★', label: '487 Google reviews', accent: true },
+    { big: '1,200+', small: 'Recurring members',                label: 'Bengaluru\u2019s most-loved sanctuary' },
+    { big: '58,000+', small: 'Sessions delivered',              label: 'Since 2017 · HSR Layout' },
+    { big: '92%',   small: 'Report better sleep',               label: 'Members after 4 weeks' },
+  ];
+  return (
+    <section ref={ref} className="py-12 md:py-16 border-b border-border bg-background">
+      <div className="max-w-[1240px] mx-auto px-5 md:px-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-y-8 gap-x-6 text-center md:text-left">
+          {stats.map((s, i) => (
+            <div key={i} className={cn('rise', i > 0 && 'md:border-l md:border-border md:pl-6')}>
+              <div className={cn(
+                'font-serif text-[34px] md:text-[46px] leading-none tracking-tight flex items-baseline gap-1.5 justify-center md:justify-start',
+                s.accent && 'text-brand'
+              )}>
+                {s.big}
+                {s.accent && <span className="text-[13px] tracking-wider" style={{ color: 'hsl(var(--aurora))' }}>{s.small}</span>}
+              </div>
+              {!s.accent && <div className="mt-2 text-[12.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground">{s.small}</div>}
+              <div className="mt-1 text-[12.5px] text-muted-foreground/80">{s.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MiniBlogStrip() {
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const ref = useRef(null);
+  useRise(ref);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/mini-blogs')
+      .then((r) => r.ok ? r.json() : [])
+      .then((d) => { if (!cancelled) { setItems(Array.isArray(d) ? d : []); setLoaded(true); } })
+      .catch(() => { if (!cancelled) setLoaded(true); });
+    return () => { cancelled = true; };
+  }, []);
+  if (loaded && items.length === 0) return null;
+  return (
+    <section ref={ref} className="py-16 md:py-24 bg-muted/30 border-y border-border">
+      <div className="max-w-[1240px] mx-auto px-5 md:px-8">
+        <div className="flex items-end justify-between gap-6 mb-8 md:mb-10">
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-semibold">Salt notes</div>
+            <h2 className="mt-2 font-serif text-[32px] md:text-[44px] leading-[1.05] tracking-tight">
+              Small, sharp reads. <span className="italic">A minute each.</span>
+            </h2>
+          </div>
+          <Link href="/journal" className="hidden md:inline-flex items-center gap-1 text-[13px] font-medium hover:gap-1.5 transition-all">
+            All journal <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
+          {items.slice(0, 4).map((m) => (
+            <MiniBlogCard key={m.id} note={m} />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MiniBlogCard({ note }) {
+  const Wrapper = note.linkHref ? Link : 'div';
+  const wrapperProps = note.linkHref ? { href: note.linkHref } : {};
+  return (
+    <Wrapper {...wrapperProps} className="group block rounded-2xl bg-card border border-border p-4 md:p-5 hover:border-foreground/30 transition-colors">
+      {note.imageUrl && (
+        <div className="aspect-[4/3] rounded-xl overflow-hidden bg-muted mb-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={note.imageUrl} alt={note.title} loading="lazy" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.02]" />
+        </div>
+      )}
+      {note.tag && <div className="text-[10.5px] uppercase tracking-[0.16em] text-muted-foreground font-semibold">{note.tag}</div>}
+      <div className="mt-2 font-serif text-[19px] leading-[1.15] tracking-tight text-balance">{note.title}</div>
+      {note.body && <p className="mt-2 text-[13px] leading-[1.55] text-muted-foreground line-clamp-3">{note.body}</p>}
+      {note.linkHref && (
+        <div className="mt-4 inline-flex items-center gap-1 text-[12px] font-medium group-hover:gap-1.5 transition-all">
+          {note.linkLabel || 'Read'} <ArrowRight className="h-3 w-3" />
+        </div>
+      )}
+    </Wrapper>
   );
 }
 
@@ -755,7 +865,7 @@ function CorporateBand() {
                   </a>
                 </div>
                 {status === 'error' && (
-                  <div className="text-[12.5px] text-red-500">Something went wrong. Please try WhatsApp or email hello@saltworld.in.</div>
+                  <div className="text-[12.5px] text-red-500">Something went wrong. Please try WhatsApp or email info@saltworld.in.</div>
                 )}
                 <div className="text-[11.5px] text-muted-foreground pt-1">No spam. We reply within 1 working day. GST-compliant invoicing.</div>
               </form>
@@ -851,6 +961,7 @@ const App = () => (
     <TopNav transparentHero />
     <main>
       <Hero />
+      <SocialProofStrip />
       <OutcomeSelector />
       <FirstVisit />
       <WhySaltWorld />
@@ -860,6 +971,7 @@ const App = () => (
       <Reviews />
       <TrustBadges />
       <CorporateBand />
+      <MiniBlogStrip />
       <JournalPreview />
       <FinalCTA />
     </main>

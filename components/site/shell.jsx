@@ -57,7 +57,7 @@ export function AnnouncementBar({
 /* Sticky WhatsApp FAB — always visible, right-hand rail              */
 /* ------------------------------------------------------------------ */
 
-export function WhatsAppFab({ phone = '919916019755', message = 'Hi! I have a question about Salt World.' }) {
+export function WhatsAppFab({ phone = '917687878793', message = 'Hi! I have a question about Salt World.' }) {
   const href = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
   return (
     <a
@@ -235,8 +235,8 @@ export function TopNav({ transparentHero = true }) {
             <Link href="/book" onClick={() => setOpen(false)} className="flex items-center justify-center gap-1.5 h-11 rounded-full bg-foreground text-background font-semibold">
               Book a session <ArrowRight className="h-4 w-4" />
             </Link>
-            <a href="tel:+919916019755" className="flex items-center justify-center gap-1.5 h-11 rounded-full border border-border text-foreground text-[14px] font-medium">
-              <Phone className="h-3.5 w-3.5" /> +91 99160 19755
+            <a href="tel:+917687878793" className="flex items-center justify-center gap-1.5 h-11 rounded-full border border-border text-foreground text-[14px] font-medium">
+              <Phone className="h-3.5 w-3.5" /> +91 76878 78793
             </a>
           </div>
         </div>
@@ -261,8 +261,8 @@ export function SiteFooter() {
           </p>
           <address className="not-italic mt-6 text-[13px] text-muted-foreground space-y-2">
             <div className="flex items-start gap-2"><MapPin className="h-3.5 w-3.5 mt-0.5" /><span>3rd Floor, 6th Cross, Sector 7,<br />HSR Layout, Bengaluru 560102</span></div>
-            <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5" /><a href="tel:+919916019755" className="hover:text-foreground">+91 99160 19755</a></div>
-            <div className="flex items-center gap-2"><Mail className="h-3.5 w-3.5" /><a href="mailto:hello@saltworld.in" className="hover:text-foreground">hello@saltworld.in</a></div>
+            <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5" /><a href="tel:+917687878793" className="hover:text-foreground">+91 76878 78793</a></div>
+            <div className="flex items-center gap-2"><Mail className="h-3.5 w-3.5" /><a href="mailto:info@saltworld.in" className="hover:text-foreground">info@saltworld.in</a></div>
             <div className="flex items-center gap-2"><Clock className="h-3.5 w-3.5" /><span>Mon &ndash; Sun · 6:00 AM &ndash; 9:00 PM</span></div>
           </address>
         </div>
@@ -287,7 +287,7 @@ export function SiteFooter() {
           </form>
           <div className="mt-6 flex items-center gap-2">
             <a href="#" aria-label="Instagram" className="h-9 w-9 rounded-full border border-border flex items-center justify-center hover:bg-muted transition-colors"><Instagram className="h-3.5 w-3.5" /></a>
-            <a href="https://wa.me/919916019755" aria-label="WhatsApp" className="h-9 w-9 rounded-full border border-border flex items-center justify-center hover:bg-muted transition-colors"><MessageCircle className="h-3.5 w-3.5" /></a>
+            <a href="https://wa.me/917687878793" aria-label="WhatsApp" className="h-9 w-9 rounded-full border border-border flex items-center justify-center hover:bg-muted transition-colors"><MessageCircle className="h-3.5 w-3.5" /></a>
           </div>
         </div>
       </div>
@@ -317,7 +317,7 @@ export function StickyBookingBar({ threshold = 600 }) {
       scrolled ? 'translate-y-0' : 'translate-y-full'
     )}>
       <div className="rounded-full shadow-xl flex items-center gap-1 p-1" style={{ background: 'hsl(var(--foreground))' }}>
-        <a href="tel:+919916019755" aria-label="Call Salt World"
+        <a href="tel:+917687878793" aria-label="Call Salt World"
           className="h-11 w-11 rounded-full flex items-center justify-center shrink-0" style={{ color: 'hsl(var(--background))' }}>
           <Phone className="h-4 w-4" />
         </a>

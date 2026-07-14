@@ -288,7 +288,7 @@ function FinalCTA({ outcome }) {
           <Link href={`/book?outcome=${outcome.slug}`} className="inline-flex items-center gap-2 h-12 px-6 rounded-full font-semibold text-[15px] transition-all hover:brightness-110" style={{ background: 'hsl(var(--aurora))', color: 'hsl(var(--aurora-foreground))' }}>
             Book a session <ArrowRight className="h-4 w-4" />
           </Link>
-          <a href="https://wa.me/919916019755" target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 h-12 px-6 rounded-full border font-medium text-[14.5px] transition-colors" style={{ borderColor: 'hsl(var(--background) / 0.2)', color: 'hsl(var(--background))' }}>
+          <a href="https://wa.me/917687878793" target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 h-12 px-6 rounded-full border font-medium text-[14.5px] transition-colors" style={{ borderColor: 'hsl(var(--background) / 0.2)', color: 'hsl(var(--background))' }}>
             <MessageCircle className="h-4 w-4" /> WhatsApp us
           </a>
         </div>

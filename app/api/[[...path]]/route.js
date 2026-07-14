@@ -60,6 +60,16 @@ async function handle(req, method, segs) {
     }
   }
 
+  // ------- Public mini-blogs (homepage strip) -------
+  if (segs[0] === 'mini-blogs' && segs.length === 1 && method === 'GET') {
+    const docs = await db.collection('mini_blog')
+      .find({ status: 'published' })
+      .sort({ order: 1, createdAt: -1 })
+      .limit(24)
+      .toArray();
+    return NextResponse.json(docs.map(({ _id, ...rest }) => rest));
+  }
+
   // ------- Bookings -------
   if (segs[0] === 'bookings') {
     if (segs.length === 1 && method === 'POST') {
