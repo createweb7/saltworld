@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import Script from 'next/script';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, ArrowRight, Check, Loader2, Clock, Calendar as Cal,
   MapPin, Phone, MessageCircle, Sparkles,
@@ -399,15 +399,35 @@ function Row({ label, value }) {
 
 export default function BookingClient({ initialOutcome }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [stepIdx, setStepIdx] = useState(initialOutcome ? 1 : 0);
   const [outcome, setOutcome] = useState(initialOutcome);
   const [therapy, setTherapy] = useState(null);
   const [slot, setSlot] = useState(null);
   const [contact, setContact] = useState({});
+  const [customerId, setCustomerId] = useState(null);
   const [payment, setPayment] = useState('at-visit');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [payCfg, setPayCfg] = useState({ configured: false, keyId: null });
+
+  // Pre-fill contact from query params (used when staff launches "New booking" from
+  // /admin/customers/:id — we hand off to the same flow with contact already known).
+  useEffect(() => {
+    const name  = searchParams.get('name');
+    const phone = searchParams.get('phone');
+    const email = searchParams.get('email');
+    const cid   = searchParams.get('customerId');
+    if (name || phone || email) {
+      setContact((prev) => ({
+        ...prev,
+        name:  prev.name  || name  || '',
+        phone: prev.phone || phone || '',
+        email: prev.email || email || '',
+      }));
+    }
+    if (cid) setCustomerId(cid);
+  }, [searchParams]);
 
   // Auto-select first therapy when outcome changes.
   useEffect(() => {
@@ -494,6 +514,7 @@ export default function BookingClient({ initialOutcome }) {
           slotDate: slot.date, slotTime: slot.time,
           duration: o?.protocol?.duration,
           contact, payment,
+          customerId,
           priceLine: o?.pricing?.single?.price + ' ' + (o?.pricing?.single?.period || ''),
           total: totalRupees,
         }),

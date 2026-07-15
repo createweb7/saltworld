@@ -10,7 +10,7 @@ import {
   Waves, Sparkles, Gift, Package, IndianRupee, BarChart3, Megaphone,
   FileText, BellDot, Bot, Settings, Search, Sun, Moon, LogOut,
   ChevronsLeft, ChevronsRight, Command, ChevronDown, User as UserIcon,
-  CircleUser,
+  CircleUser, Building2, MapPin, Check,
 } from 'lucide-react';
 import { cn } from '@/components/ss/utils';
 import CommandPalette from './command-palette';
@@ -48,6 +48,12 @@ const NAV_GROUPS = [
       { href: '/admin/cms',           label: 'CMS',           icon: FileText },
       { href: '/admin/notifications', label: 'Notifications', icon: BellDot },
       { href: '/admin/ai',            label: 'AI Assistant',  icon: Bot },
+    ],
+  },
+  {
+    label: 'Company',
+    items: [
+      { href: '/admin/branches',      label: 'Branches',      icon: Building2 },
     ],
   },
 ];
@@ -214,6 +220,7 @@ export default function AdminShell({ user, children, title, actions, tabs, right
             </div>
 
             <div className="flex items-center gap-1">
+              <BranchSwitcher />
               {actions}
               <button
                 onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
@@ -307,4 +314,86 @@ export function PageHeader({ eyebrow, title, subtitle, actions }) {
 
 export function AdminSection({ children, className }) {
   return <div className={cn('px-5 md:px-8 py-6', className)}>{children}</div>;
+}
+
+function BranchSwitcher() {
+  const [branches, setBranches] = useState([]);
+  const [currentId, setCurrentId] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [switching, setSwitching] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/admin/branches')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        if (cancelled) return;
+        setBranches(Array.isArray(data) ? data : []);
+        // Cookie value comes as document.cookie 'sw_branch=…'
+        const match = typeof document !== 'undefined' ? document.cookie.match(/(?:^|; )sw_branch=([^;]+)/) : null;
+        if (match) setCurrentId(decodeURIComponent(match[1]));
+        else if (data?.[0]?.id) setCurrentId(data[0].id);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const onDoc = (e) => { if (!e.target.closest?.('[data-branch-switcher]')) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+
+  const current = branches.find((b) => b.id === currentId) || branches[0] || null;
+
+  const switchTo = async (id) => {
+    if (id === currentId) { setOpen(false); return; }
+    setSwitching(true);
+    try {
+      // 12-hour cookie so it survives a working shift.
+      document.cookie = `sw_branch=${encodeURIComponent(id)}; path=/; max-age=${60 * 60 * 12}; samesite=lax`;
+      setCurrentId(id);
+      toast.success('Branch switched');
+      // Force a full re-render so branch-scoped fetches refresh
+      if (typeof window !== 'undefined') window.location.reload();
+    } finally { setSwitching(false); setOpen(false); }
+  };
+
+  if (branches.length <= 1) return null;
+
+  return (
+    <div className="relative" data-branch-switcher>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="h-8 px-2.5 rounded-md border border-border text-[12.5px] hover:bg-muted flex items-center gap-1.5 max-w-[220px]"
+        title="Switch branch"
+        disabled={switching}
+      >
+        <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="truncate font-medium">{current?.name || 'Branches'}</span>
+        <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 min-w-[240px] rounded-lg border border-border bg-card shadow-lg z-40 p-1">
+          {branches.map((b) => (
+            <button
+              key={b.id}
+              onClick={() => switchTo(b.id)}
+              className={cn(
+                'w-full flex items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[12.5px] hover:bg-muted transition-colors',
+                b.id === currentId && 'bg-muted'
+              )}
+            >
+              <div className="h-6 w-6 rounded bg-brand/10 text-brand inline-flex items-center justify-center shrink-0"><MapPin className="h-3 w-3" /></div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold truncate">{b.name}</div>
+                <div className="text-[10.5px] text-muted-foreground font-mono">{b.code}</div>
+              </div>
+              {b.id === currentId && <Check className="h-3.5 w-3.5 text-emerald-600" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }

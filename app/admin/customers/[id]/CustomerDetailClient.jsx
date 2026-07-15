@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -30,12 +31,25 @@ async function fetchCustomer(id) {
 
 export default function CustomerDetailClient({ user, id }) {
   const qc = useQueryClient();
+  const router = useRouter();
   const [tab, setTab] = useState('overview');
   const { data, isLoading } = useQuery({ queryKey: ['customer', id], queryFn: () => fetchCustomer(id) });
 
   const c = data?.customer;
 
   const initials = (c?.name || 'U').split(' ').map((s) => s[0]).join('').slice(0, 2).toUpperCase();
+
+  const startNewBooking = () => {
+    if (!c) return;
+    const params = new URLSearchParams();
+    if (c.name)  params.set('name',  c.name);
+    if (c.phone) params.set('phone', c.phone);
+    if (c.email) params.set('email', c.email);
+    params.set('customerId', c.id);
+    // Send staff to the public booking flow with contact pre-filled. Same flow handles
+    // walk-ins, existing customers, membership redemption, and gift-card usage.
+    router.push(`/book?${params.toString()}`);
+  };
 
   return (
     <AdminShell
@@ -72,7 +86,7 @@ export default function CustomerDetailClient({ user, id }) {
                     <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
                   </a>
                 )}
-                <button className="h-9 px-3 rounded-md bg-foreground text-background text-[12.5px] font-semibold hover:bg-foreground/90 inline-flex items-center gap-1.5">
+                <button type="button" onClick={startNewBooking} className="h-9 px-3 rounded-md bg-foreground text-background text-[12.5px] font-semibold hover:bg-foreground/90 inline-flex items-center gap-1.5">
                   <Plus className="h-3.5 w-3.5" /> New booking
                 </button>
               </div>
