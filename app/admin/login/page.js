@@ -28,11 +28,14 @@ export default function LoginPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'login_failed');
       toast.success(`Welcome, ${data.user.name}`);
-      router.push(nextHref);
-      router.refresh();
-    } catch (e) {
-      toast.error(e.message === 'invalid_credentials' ? 'Wrong email or password.' : 'Login failed. Please try again.');
-    } finally {
+      // Full-page navigation — client-side router.push races the Set-Cookie header
+      // in the fetch response (the HttpOnly cookie is set by the browser AFTER we
+      // read the response body, and the middleware protecting /admin/dashboard needs
+      // it on the very next request). window.location guarantees the fresh request
+      // is sent with the cookie in place.
+      window.location.assign(nextHref);
+    } catch (err) {
+      toast.error(err.message === 'invalid_credentials' ? 'Wrong email or password.' : 'Login failed. Please try again.');
       setLoading(false);
     }
   };
