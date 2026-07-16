@@ -147,29 +147,63 @@ function StepOutcome({ value, onChange }) {
 /* Step 2 — Therapy                                                   */
 /* ------------------------------------------------------------------ */
 
-function StepTherapy({ outcome, value, onChange }) {
+const PRICE_MULTIPLIER = { primary: 1.0, adjunct: 0.5, track: 0.65 };
+
+function parsePrice(str) {
+  return Number(String(str || '0').replace(/[^\d]/g, '')) || 0;
+}
+
+function StepTherapy({ outcome, values, onChange, mappingOverride }) {
   const o = getOutcome(outcome);
-  const therapies = o?.protocol?.therapies || [];
-  const priceLine = o?.pricing?.single?.price + ' ' + (o?.pricing?.single?.period || '');
+  // Prefer DB override (admin-configurable), fall back to static outcome data.
+  const therapies = mappingOverride?.length ? mappingOverride : (o?.protocol?.therapies || []);
+  const basePrice = parsePrice(o?.pricing?.single?.price);
+  const baseDuration = parseInt(String(o?.protocol?.duration || '45'), 10) || 45;
+
+  const toggle = (slug) => {
+    const set = new Set(values);
+    if (set.has(slug)) {
+      // Never allow zero-selection — keep at least one therapy.
+      if (set.size > 1) set.delete(slug);
+    } else {
+      set.add(slug);
+    }
+    onChange(Array.from(set));
+  };
+
+  // Live journey recalc
+  const selected = therapies.filter((t) => values.includes(t.slug));
+  const combinedDuration = selected.reduce((sum, t) => sum + (t.durationMin || baseDuration), 0) || baseDuration;
+  const combinedPrice    = selected.reduce((sum, t) => {
+    const role = String(t.role || '').toLowerCase();
+    const mult = PRICE_MULTIPLIER[role] ?? 0.5;
+    return sum + Math.round(basePrice * mult);
+  }, 0) || basePrice;
+  const journeyLabel = selected.length === 1
+    ? selected[0].label
+    : `${selected.length}-therapy ${o?.title?.toLowerCase() || 'wellness'} journey`;
+
   return (
     <div>
       <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-semibold">Step 2 of 4</div>
       <h1 className="mt-2 font-serif text-[36px] md:text-[52px] leading-[1.02] tracking-tight text-balance">
         For {o?.title?.toLowerCase()}, <br className="hidden md:block" /><span className="italic">we recommend.</span>
       </h1>
-      <p className="mt-3 text-[15px] leading-7 text-muted-foreground max-w-[560px]">
-        Your therapist will confirm the exact protocol at check-in. Pick your primary session below.
+      <p className="mt-3 text-[15px] leading-7 text-muted-foreground max-w-[600px]">
+        Pick one therapy, or combine several — we&rsquo;ll sequence them into a single session. Your therapist will confirm the exact protocol at check-in.
       </p>
+
       <div className="mt-10 space-y-3">
         {therapies.map((t) => {
-          const isSel = value === t.slug;
+          const isSel = values.includes(t.slug);
           return (
-            <button key={t.slug} onClick={() => onChange(t.slug)}
+            <button key={t.slug} onClick={() => toggle(t.slug)}
+              type="button"
               className={cn(
                 'w-full text-left rounded-2xl border p-5 md:p-6 flex items-center gap-4 transition-all',
                 isSel ? 'border-brand bg-brand-soft' : 'border-border bg-card hover:border-foreground/40'
               )}>
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <div className="flex items-baseline gap-2 flex-wrap">
                   <div className="font-serif text-[22px] md:text-[26px] leading-tight text-foreground">{t.label}</div>
                   <span className={cn(
@@ -177,17 +211,32 @@ function StepTherapy({ outcome, value, onChange }) {
                     isSel ? 'text-brand' : 'text-muted-foreground'
                   )}>{t.role}</span>
                 </div>
-                <div className="mt-1 text-[13px] text-muted-foreground">{o?.protocol?.duration} · {priceLine}</div>
+                {t.description && (
+                  <div className="mt-1 text-[12.5px] text-muted-foreground line-clamp-1">{t.description}</div>
+                )}
+                <div className="mt-1 text-[13px] text-muted-foreground">{t.durationMin ? `${t.durationMin} min` : (o?.protocol?.duration || '45 min')}</div>
               </div>
+              {/* Checkbox instead of radio — enables multi-select */}
               <div className={cn(
-                'h-5 w-5 rounded-full border-2 flex items-center justify-center shrink-0',
+                'h-5 w-5 rounded-[6px] border-2 flex items-center justify-center shrink-0',
                 isSel ? 'border-brand bg-brand' : 'border-border'
               )}>
-                {isSel && <Check className="h-3 w-3 text-white" />}
+                {isSel && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
               </div>
             </button>
           );
         })}
+      </div>
+
+      {/* Combined journey summary — updates as therapies are toggled */}
+      <div className="mt-6 rounded-2xl border border-border bg-card p-5">
+        <div className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground mb-2">Your journey</div>
+        <div className="font-serif text-[19px] leading-tight tracking-tight text-balance">{journeyLabel}</div>
+        <div className="mt-3 flex items-center gap-x-6 gap-y-1.5 flex-wrap text-[13px]">
+          <div className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-muted-foreground" /><span><span className="font-semibold">{combinedDuration}</span> min total</span></div>
+          <div className="inline-flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-muted-foreground" /><span><span className="font-semibold">{selected.length}</span> therapy{selected.length === 1 ? '' : ' combo'}</span></div>
+          <div className="ml-auto font-mono text-[15px] font-semibold">₹{combinedPrice.toLocaleString('en-IN')}</div>
+        </div>
       </div>
     </div>
   );
@@ -402,7 +451,9 @@ export default function BookingClient({ initialOutcome }) {
   const searchParams = useSearchParams();
   const [stepIdx, setStepIdx] = useState(initialOutcome ? 1 : 0);
   const [outcome, setOutcome] = useState(initialOutcome);
-  const [therapy, setTherapy] = useState(null);
+  // therapies is now an ARRAY of slugs (multi-select). Legacy single-value `therapy`
+  // is derived as therapies[0] for compatibility with backend + confirmation flow.
+  const [therapies, setTherapies] = useState([]);
   const [slot, setSlot] = useState(null);
   const [contact, setContact] = useState({});
   const [customerId, setCustomerId] = useState(null);
@@ -410,6 +461,8 @@ export default function BookingClient({ initialOutcome }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [payCfg, setPayCfg] = useState({ configured: false, keyId: null });
+  const [outcomeMap, setOutcomeMap] = useState(null); // admin-configured overrides
+  const therapy = therapies[0] || null; // convenience alias
 
   // Pre-fill contact from query params (used when staff launches "New booking" from
   // /admin/customers/:id — we hand off to the same flow with contact already known).
@@ -429,13 +482,33 @@ export default function BookingClient({ initialOutcome }) {
     if (cid) setCustomerId(cid);
   }, [searchParams]);
 
-  // Auto-select first therapy when outcome changes.
+  // Auto-select the primary therapy when outcome changes.
   useEffect(() => {
-    if (outcome && !therapy) {
+    if (outcome && therapies.length === 0) {
       const o = getOutcome(outcome);
-      setTherapy(o?.protocol?.therapies?.[0]?.slug || null);
+      const primary = o?.protocol?.therapies?.find((x) => String(x.role || '').toLowerCase() === 'primary')
+                    || o?.protocol?.therapies?.[0];
+      if (primary?.slug) setTherapies([primary.slug]);
     }
-  }, [outcome, therapy]);
+  }, [outcome, therapies.length]);
+
+  // Fetch admin-configured outcome→therapy mapping if any (falls back silently).
+  useEffect(() => {
+    if (!outcome) return;
+    let cancelled = false;
+    fetch(`/api/outcome-mapping/${outcome}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d) return;
+        setOutcomeMap(d);
+        if (Array.isArray(d.defaultSelected) && d.defaultSelected.length > 0 && therapies.length <= 1) {
+          setTherapies(d.defaultSelected);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outcome]);
 
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'smooth' }); }, [stepIdx]);
 
@@ -450,7 +523,7 @@ export default function BookingClient({ initialOutcome }) {
 
   const canNext =
     (stepIdx === 0 && !!outcome) ||
-    (stepIdx === 1 && !!therapy) ||
+    (stepIdx === 1 && therapies.length > 0) ||
     (stepIdx === 2 && !!slot?.date && !!slot?.time) ||
     stepIdx === 3;
 
@@ -501,16 +574,28 @@ export default function BookingClient({ initialOutcome }) {
   const submit = async () => {
     setError(null);
     if (!contact.name || !contact.phone) { setError('Name and phone are required.'); return; }
+    if (therapies.length === 0) { setError('Please pick at least one therapy.'); return; }
     setSubmitting(true);
     try {
       const o = getOutcome(outcome);
-      const th = o?.protocol?.therapies?.find((x) => x.slug === therapy);
-      const totalRupees = Number(String(o?.pricing?.single?.price || '0').replace(/[^\d]/g, ''));
+      const staticTherapies = o?.protocol?.therapies || [];
+      const merged = (outcomeMap?.therapies?.length ? outcomeMap.therapies : staticTherapies);
+      const selected = merged.filter((t) => therapies.includes(t.slug));
+      const basePrice = parsePrice(o?.pricing?.single?.price);
+      const totalRupees = selected.reduce((sum, t) => {
+        const role = String(t.role || '').toLowerCase();
+        const mult = PRICE_MULTIPLIER[role] ?? 0.5;
+        return sum + Math.round(basePrice * mult);
+      }, 0) || basePrice;
+      const primary = selected.find((t) => String(t.role || '').toLowerCase() === 'primary') || selected[0];
 
       const r = await fetch('/api/bookings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          outcome, outcomeLabel: o?.title, therapy, therapyLabel: th?.label,
+          outcome, outcomeLabel: o?.title,
+          therapy: primary?.slug || null,
+          therapyLabel: primary?.label || null,
+          therapies: selected.map((t) => ({ slug: t.slug, label: t.label, role: t.role })),
           slotDate: slot.date, slotTime: slot.time,
           duration: o?.protocol?.duration,
           contact, payment,
@@ -554,8 +639,8 @@ export default function BookingClient({ initialOutcome }) {
       <BookingHeader stepIdx={stepIdx} onBack={back} />
 
       <main className="max-w-[1200px] mx-auto px-4 md:px-8 pt-10 md:pt-14 pb-28 md:pb-16">
-        {stepIdx === 0 && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapy(null); }} />}
-        {stepIdx === 1 && <StepTherapy outcome={outcome} value={therapy} onChange={setTherapy} />}
+        {stepIdx === 0 && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); }} />}
+        {stepIdx === 1 && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} />}
         {stepIdx === 2 && <StepSlot value={slot} onChange={setSlot} />}
         {stepIdx === 3 && (
           <StepContact
@@ -574,7 +659,9 @@ export default function BookingClient({ initialOutcome }) {
           <div className="max-w-[1200px] mx-auto px-4 md:px-8 h-16 flex items-center justify-between gap-3">
             <div className="hidden md:block text-[12.5px] text-muted-foreground">
               {stepIdx === 0 && (outcome ? `→ ${getOutcome(outcome)?.title}` : 'Choose the outcome you want')}
-              {stepIdx === 1 && (therapy ? `→ ${getOutcome(outcome)?.protocol?.therapies?.find((x) => x.slug === therapy)?.label}` : 'Choose your primary therapy')}
+              {stepIdx === 1 && (therapies.length > 0
+                ? `→ ${therapies.length} ${therapies.length === 1 ? 'therapy' : 'therapies'} selected`
+                : 'Choose one or more therapies')}
               {stepIdx === 2 && (slot ? `→ ${new Date(slot.date + 'T00:00').toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })} at ${slot.time}` : 'Pick a date and time')}
             </div>
             <button onClick={next} disabled={!canNext}

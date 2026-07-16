@@ -70,6 +70,68 @@ async function handle(req, method, segs) {
     return NextResponse.json(docs.map(({ _id, ...rest }) => rest));
   }
 
+  // ------- Public outcome→therapy mapping (used by /book step 2) -------
+  if (segs[0] === 'outcome-mapping' && segs.length === 2 && method === 'GET') {
+    const doc = await db.collection('outcome_therapy_map').findOne({ outcomeSlug: segs[1], active: { $ne: false } });
+    if (!doc) return NextResponse.json({ error: 'not_configured' }, { status: 404 });
+    const { _id, ...rest } = doc;
+    return NextResponse.json(rest);
+  }
+
+  // ------- Customer auth (public phone + OTP) -------
+  if (segs[0] === 'customer' && segs[1] === 'auth') {
+    const { issueOtp, verifyOtp, upsertCustomerByPhone, signCustomerToken, setCustomerCookie, clearCustomerCookie, getCurrentCustomer } = await import('@/lib/customer-auth');
+
+    if (segs[2] === 'request-otp' && method === 'POST') {
+      const body = await req.json().catch(() => ({}));
+      try {
+        const { phone, otp } = await issueOtp(body.phone);
+        // Try to send via WhatsApp; fall back to returning otp in dev when not configured.
+        const waConfigured = await whatsappIsConfigured();
+        if (waConfigured) {
+          await sendWhatsappTemplate({
+            to: phone,
+            templateKey: 'otp_login',
+            templateName: 'otp_login',
+            languageCode: 'en',
+            variables: { code: otp, minutes: '5' },
+            orderedVariables: ['code', 'minutes'],
+          }).catch(() => {});
+          return NextResponse.json({ ok: true, sent: true });
+        }
+        // Dev fallback so testing works without provider keys.
+        return NextResponse.json({ ok: true, sent: false, devOtp: otp });
+      } catch (e) {
+        return NextResponse.json({ error: String(e?.message || e) }, { status: 400 });
+      }
+    }
+
+    if (segs[2] === 'verify-otp' && method === 'POST') {
+      const body = await req.json().catch(() => ({}));
+      const result = await verifyOtp(body.phone, body.otp);
+      if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
+      const customer = await upsertCustomerByPhone(result.phone);
+      const token = await signCustomerToken({ sub: customer.id, phone: customer.phone });
+      await setCustomerCookie(token);
+      return NextResponse.json({ ok: true, customer: { id: customer.id, name: customer.name, phone: customer.phone } });
+    }
+
+    if (segs[2] === 'me' && method === 'GET') {
+      const customer = await getCurrentCustomer();
+      if (!customer) return NextResponse.json({ error: 'not_signed_in' }, { status: 401 });
+      return NextResponse.json({ customer });
+    }
+
+    if (segs[2] === 'logout' && (method === 'POST' || method === 'GET')) {
+      await clearCustomerCookie();
+      // Support both fetch() calls (JSON) and native <form action> submissions (redirect).
+      if (method === 'GET' || req.headers.get('accept')?.includes('text/html')) {
+        return NextResponse.redirect(new URL('/', req.url));
+      }
+      return NextResponse.json({ ok: true });
+    }
+  }
+
   // ------- Public analytics config (only public IDs, no secrets) -------
   if (segs[0] === 'analytics-config' && segs.length === 1 && method === 'GET') {
     const doc = await db.collection('settings').findOne({ key: 'analytics' });
@@ -92,17 +154,32 @@ async function handle(req, method, segs) {
       const mm = String(now.getMonth() + 1).padStart(2, '0');
       const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
       const ref = `SW-${yy}${mm}-${rand}`;
+
+      // Attach a branchId. Prefer explicit body.branchId (staff picking a specific
+      // branch), else fall back to the current branch cookie / default branch so
+      // every booking is always scoped to somewhere.
+      let branchId = body.branchId || null;
+      if (!branchId) {
+        try {
+          const { getCurrentBranchFromCookies } = await import('@/lib/branches');
+          const b = await getCurrentBranchFromCookies();
+          branchId = b?.id || null;
+        } catch { /* fall through */ }
+      }
       const doc = {
         id: randomUUID(),
         ref,
-        outcome:    body.outcome    || null,
-        therapy:    body.therapy    || null,
+        outcome:      body.outcome      || null,
+        outcomeLabel: body.outcomeLabel || null,
+        therapy:      body.therapy      || null,
+        therapyLabel: body.therapyLabel || null,
+        therapies:    Array.isArray(body.therapies) ? body.therapies : (body.therapy ? [{ slug: body.therapy, label: body.therapyLabel, role: 'Primary' }] : []),
         slotDate:   body.slotDate   || null,
         slotTime:   body.slotTime   || null,
         guests:     body.guests     || 1,
         contact:    body.contact    || {},
         customerId: body.customerId || null,
-        branchId:   body.branchId   || null,
+        branchId,
         payment:    body.payment    || 'at-visit',
         priceLine:  body.priceLine  || null,
         total:      body.total      || 0,
@@ -111,41 +188,24 @@ async function handle(req, method, segs) {
       };
       await bookings.insertOne(doc);
 
-      // Fire-and-forget WhatsApp confirmation (does nothing if not configured or phone missing).
-      const phone = doc.contact?.phone;
-      if (phone) {
-        sendWhatsappTemplate({
-          to: phone,
-          templateKey: 'booking_confirmation',
-          templateName: 'booking_confirmation',
-          languageCode: 'en',
-          variables: {
-            name:     doc.contact?.name || 'there',
-            ref:      doc.ref,
-            outcome:  body.outcomeLabel || doc.outcome || '',
-            therapy:  body.therapyLabel || doc.therapy || '',
-            date:     doc.slotDate || '',
-            time:     doc.slotTime || '',
-          },
-          orderedVariables: ['name', 'ref', 'outcome', 'therapy', 'date', 'time'],
-        })
-          .then((r) => {
-            if (r?.messageId) {
-              db.collection('communications').insertOne({
-                id: randomUUID(),
-                bookingId: doc.id,
-                customerPhone: phone,
-                channel: 'whatsapp',
-                templateId: 'booking_confirmation',
-                status: r.queued ? 'sent' : 'failed',
-                providerRef: r.messageId || null,
-                sentAt: new Date().toISOString(),
-                error: r.error || null,
-              }).catch(() => {});
-            }
-          })
-          .catch(() => {});
-      }
+      // Fire the central notification engine (fire-and-forget — never blocks the response).
+      import('@/lib/notifications')
+        .then(({ emit, NOTIFY_EVENTS }) =>
+          emit(NOTIFY_EVENTS.BOOKING_CONFIRMATION, {
+            to: { phone: doc.contact?.phone, email: doc.contact?.email },
+            customerId: doc.customerId,
+            bookingId: doc.id,
+            branchId: doc.branchId,
+            context: {
+              name:     doc.contact?.name || 'there',
+              ref:      doc.ref,
+              outcome:  doc.outcomeLabel || doc.outcome || '',
+              therapy:  doc.therapyLabel || doc.therapy || '',
+              date:     doc.slotDate || '',
+              time:     doc.slotTime || '',
+            },
+          }))
+        .catch(() => {});
 
       const { _id, ...cleanDoc } = doc;
       return NextResponse.json(cleanDoc);
