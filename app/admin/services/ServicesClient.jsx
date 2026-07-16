@@ -84,8 +84,13 @@ function ServiceEditor({ kind, initial, onClose, onSaved }) {
   const [form, setForm] = useState({
     name: initial?.name || '',
     slug: initial?.slug || '',
-    durationMin: initial?.durationMin || 60,
-    cleaningBufferMin: initial?.cleaningBufferMin || 15,
+    durationMin:          initial?.durationMin       || 60,
+    preBufferMin:         initial?.preBufferMin      || 0,
+    postBufferMin:        initial?.postBufferMin     || 0,
+    cleaningBufferMin:    initial?.cleaningBufferMin || 15,
+    maxCapacity:          initial?.maxCapacity       || 1,
+    onlineBookingEnabled: initial?.onlineBookingEnabled !== false,
+    branchIds:            initial?.branchIds || [],
     defaultPrice: initial?.defaultPrice || 0,
     taxHsn: initial?.taxHsn || '999722',
     description: initial?.description || '',
@@ -93,21 +98,31 @@ function ServiceEditor({ kind, initial, onClose, onSaved }) {
     active: initial?.active !== false,
   });
   const [saving, setSaving] = useState(false);
+  const { data: branches = [] } = useQuery({ queryKey: ['branches-lookup'], queryFn: async () => (await fetch('/api/admin/branches')).json() });
 
   const save = async () => {
     setSaving(true);
     try {
       const url = isEdit ? `/api/admin/services/${kind}/${initial.id}` : `/api/admin/services/${kind}`;
+      const numericFields = ['defaultPrice', 'durationMin', 'validityDays', 'cleaningBufferMin', 'preBufferMin', 'postBufferMin', 'maxCapacity'];
+      const payload = { ...form };
+      numericFields.forEach((k) => { payload[k] = Number(payload[k]); });
       const res = await fetch(url, {
         method: isEdit ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, defaultPrice: Number(form.defaultPrice), durationMin: Number(form.durationMin), validityDays: Number(form.validityDays), cleaningBufferMin: Number(form.cleaningBufferMin) }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error('failed');
       toast.success(isEdit ? 'Updated' : 'Created');
       onSaved();
     } catch { toast.error('Could not save'); }
     finally { setSaving(false); }
+  };
+
+  const toggleBranch = (id) => {
+    const set = new Set(form.branchIds);
+    set.has(id) ? set.delete(id) : set.add(id);
+    setForm({ ...form, branchIds: Array.from(set) });
   };
 
   return (
@@ -117,10 +132,41 @@ function ServiceEditor({ kind, initial, onClose, onSaved }) {
       <div className="space-y-3">
         <Field label="Name" required><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
         <Field label="Slug" hint="Auto-generated from name if left blank"><Input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} placeholder="e.g. float-therapy" /></Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Duration (min)"><Input type="number" value={form.durationMin} onChange={(e) => setForm({ ...form, durationMin: e.target.value })} /></Field>
-          <Field label="Buffer (min)"><Input type="number" value={form.cleaningBufferMin} onChange={(e) => setForm({ ...form, cleaningBufferMin: e.target.value })} /></Field>
-        </div>
+        {kind === 'therapies' && (
+          <>
+            <div className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground pt-2">Scheduling</div>
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Duration (min)" required><Input type="number" min={5} value={form.durationMin} onChange={(e) => setForm({ ...form, durationMin: e.target.value })} /></Field>
+              <Field label="Pre-buffer" hint="Setup min"><Input type="number" min={0} value={form.preBufferMin} onChange={(e) => setForm({ ...form, preBufferMin: e.target.value })} /></Field>
+              <Field label="Post-buffer" hint="Reset min"><Input type="number" min={0} value={form.postBufferMin} onChange={(e) => setForm({ ...form, postBufferMin: e.target.value })} /></Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Cleaning (min)"><Input type="number" min={0} value={form.cleaningBufferMin} onChange={(e) => setForm({ ...form, cleaningBufferMin: e.target.value })} /></Field>
+              <Field label="Max capacity" hint="Simultaneous guests"><Input type="number" min={1} value={form.maxCapacity} onChange={(e) => setForm({ ...form, maxCapacity: e.target.value })} /></Field>
+            </div>
+            <label className="flex items-start gap-2 text-[13px]">
+              <input type="checkbox" checked={form.onlineBookingEnabled} onChange={(e) => setForm({ ...form, onlineBookingEnabled: e.target.checked })} className="mt-0.5 h-4 w-4" />
+              <span><span className="font-medium">Online booking enabled</span><span className="block text-[11.5px] text-muted-foreground">Uncheck to hide from the public booking flow (still available to admin)</span></span>
+            </label>
+            {branches.length > 1 && (
+              <div>
+                <div className="text-[11.5px] font-medium mb-1.5">Branch availability</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {branches.map((b) => {
+                    const checked = form.branchIds.length === 0 || form.branchIds.includes(b.id);
+                    return (
+                      <button key={b.id} type="button" onClick={() => toggleBranch(b.id)}
+                        className={`h-7 px-2.5 rounded-full border text-[11.5px] font-medium ${checked ? 'bg-foreground text-background border-foreground' : 'bg-transparent text-muted-foreground border-border hover:text-foreground'}`}>
+                        {b.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-1.5">Leave all unselected to make available at every branch.</div>
+              </div>
+            )}
+          </>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Price (₹)" required><Input type="number" value={form.defaultPrice} onChange={(e) => setForm({ ...form, defaultPrice: e.target.value })} /></Field>
           <Field label="HSN" hint="999722 for wellness services"><Input value={form.taxHsn} onChange={(e) => setForm({ ...form, taxHsn: e.target.value })} /></Field>

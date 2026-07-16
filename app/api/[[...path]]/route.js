@@ -70,6 +70,19 @@ async function handle(req, method, segs) {
     return NextResponse.json(docs.map(({ _id, ...rest }) => rest));
   }
 
+  // ------- Public analytics config (only public IDs, no secrets) -------
+  if (segs[0] === 'analytics-config' && segs.length === 1 && method === 'GET') {
+    const doc = await db.collection('settings').findOne({ key: 'analytics' });
+    const v = doc?.value || {};
+    return NextResponse.json({
+      gtmId:        v.gtmId        || null,
+      ga4Id:        v.ga4Id        || null,
+      metaPixelId:  v.metaPixelId  || null,
+      googleAdsId:  v.googleAdsId  || null,
+      clarityId:    v.clarityId    || null,
+    });
+  }
+
   // ------- Bookings -------
   if (segs[0] === 'bookings') {
     if (segs.length === 1 && method === 'POST') {

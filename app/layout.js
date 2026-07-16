@@ -2,6 +2,7 @@ import './globals.css';
 import { Inter, JetBrains_Mono, Fraunces } from 'next/font/google';
 import { Providers } from './providers';
 import { Toaster } from 'sonner';
+import Analytics from '@/components/site/analytics';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
 const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono', display: 'swap' });
@@ -35,6 +36,7 @@ export default function RootLayout({ children }) {
       <body className="font-sans antialiased bg-background text-foreground">
         <Providers>
           {children}
+          <Analytics />
           <Toaster position="bottom-right" theme="system" richColors closeButton />
         </Providers>
       </body>

@@ -18,6 +18,7 @@ const TABS = [
   { key: 'resources',    label: 'Resources'      },
   { key: 'staff',        label: 'Staff & roles'  },
   { key: 'integrations', label: 'Integrations'   },
+  { key: 'analytics',    label: 'Analytics'      },
 ];
 
 export default function SettingsClient({ user }) {
@@ -33,6 +34,7 @@ export default function SettingsClient({ user }) {
         {tab === 'resources'    && <Resources />}
         {tab === 'staff'        && <StaffRoles user={user} />}
         {tab === 'integrations' && <Integrations user={user} />}
+        {tab === 'analytics'    && <AnalyticsTab />}
       </AdminSection>
     </AdminShell>
   );
@@ -156,6 +158,46 @@ function Brand() {
       <Field label="Email"><Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
       <Field label="Address"><Textarea rows={2} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
       <PrimaryBtn onClick={save} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save brand</PrimaryBtn>
+    </div>
+  );
+}
+
+/* ---------- Analytics ---------- */
+function AnalyticsTab() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ['settings', 'analytics'], queryFn: async () => (await fetch('/api/admin/settings/analytics')).json() });
+  const [form, setForm] = useState({});
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (data) setForm(data || {}); }, [data]);
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch('/api/admin/settings/analytics', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+      if (!res.ok) throw new Error();
+      toast.success('Analytics tags saved. Live in ~10 seconds.');
+      qc.invalidateQueries({ queryKey: ['settings', 'analytics'] });
+    } catch { toast.error('Could not save'); }
+    finally { setSaving(false); }
+  };
+  const items = [
+    { key: 'gtmId',        label: 'Google Tag Manager container ID', hint: 'e.g. GTM-XXXXXXX', placeholder: 'GTM-XXXXXXX' },
+    { key: 'ga4Id',        label: 'Google Analytics 4 measurement ID', hint: 'e.g. G-XXXXXXXXXX', placeholder: 'G-XXXXXXXXXX' },
+    { key: 'metaPixelId',  label: 'Meta Pixel ID', hint: 'Facebook / Instagram tracking', placeholder: '000000000000000' },
+    { key: 'googleAdsId',  label: 'Google Ads conversion ID', hint: 'e.g. AW-XXXXXXXXXX', placeholder: 'AW-XXXXXXXXXX' },
+    { key: 'clarityId',    label: 'Microsoft Clarity project ID', hint: 'From clarity.microsoft.com', placeholder: 'xxxxxxxxxx' },
+  ];
+  return (
+    <div className="max-w-[720px] space-y-4">
+      <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-3.5 text-[12.5px] leading-[1.5]">
+        <div className="font-semibold text-[13px] mb-0.5">Marketing tracking</div>
+        Add any of the IDs below. Leave blank to disable. Changes go live within ~10 seconds — no re-deploy required.
+      </div>
+      {items.map((it) => (
+        <Field key={it.key} label={it.label} hint={it.hint}>
+          <Input value={form[it.key] || ''} onChange={(e) => setForm({ ...form, [it.key]: e.target.value.trim() })} placeholder={it.placeholder} />
+        </Field>
+      ))}
+      <PrimaryBtn onClick={save} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save analytics</PrimaryBtn>
     </div>
   );
 }
