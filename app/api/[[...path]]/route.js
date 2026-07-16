@@ -78,6 +78,23 @@ async function handle(req, method, segs) {
     return NextResponse.json(rest);
   }
 
+  // ------- Customer wallet + referrals (session-cookie protected) -------
+  if (segs[0] === 'customer' && (segs[1] === 'wallet' || segs[1] === 'referrals')) {
+    const { getCurrentCustomer } = await import('@/lib/customer-auth');
+    const c = await getCurrentCustomer();
+    if (!c) return NextResponse.json({ error: 'not_signed_in' }, { status: 401 });
+    const { customerBalance, customerHistory, referralStats, issueReferralCode } = await import('@/lib/loyalty');
+    if (segs[1] === 'wallet' && method === 'GET') {
+      const [balance, history] = await Promise.all([customerBalance(c.id), customerHistory(c.id, 30)]);
+      return NextResponse.json({ balance, history });
+    }
+    if (segs[1] === 'referrals' && method === 'GET') {
+      // Ensure customer has a code — issue one lazily on first fetch.
+      await issueReferralCode(c.id).catch(() => {});
+      return NextResponse.json(await referralStats(c.id));
+    }
+  }
+
   // ------- Customer auth (public phone + OTP) -------
   if (segs[0] === 'customer' && segs[1] === 'auth') {
     const { issueOtp, verifyOtp, upsertCustomerByPhone, signCustomerToken, setCustomerCookie, clearCustomerCookie, getCurrentCustomer } = await import('@/lib/customer-auth');
@@ -187,6 +204,18 @@ async function handle(req, method, segs) {
         createdAt:  now.toISOString(),
       };
       await bookings.insertOne(doc);
+
+      // Loyalty: award earn points for signed-in customers.
+      if (doc.customerId && Number(doc.total) > 0) {
+        import('@/lib/loyalty').then(({ awardBookingEarn }) => awardBookingEarn({ customerId: doc.customerId, totalInr: doc.total, bookingRef: doc.ref })).catch(() => {});
+      }
+
+      // Referral code applied at booking?
+      if (body.referralCode && doc.customerId) {
+        import('@/lib/loyalty').then(({ applyReferralOnBooking }) =>
+          applyReferralOnBooking({ code: body.referralCode, bookingRef: doc.ref, bookingCustomerId: doc.customerId, totalInr: doc.total })
+        ).catch(() => {});
+      }
 
       // Fire the central notification engine (fire-and-forget — never blocks the response).
       import('@/lib/notifications')

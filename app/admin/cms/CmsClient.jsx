@@ -112,6 +112,9 @@ function BlogTab({ data, loading }) {
   );
 }
 
+import dynamic from 'next/dynamic';
+const RichTextEditor = dynamic(() => import('@/components/admin/rich-text-editor'), { ssr: false });
+
 function BlogEditor({ initial, onClose, onSaved }) {
   const isEdit = Boolean(initial);
   const [form, setForm] = useState({
@@ -123,12 +126,24 @@ function BlogEditor({ initial, onClose, onSaved }) {
     category: initial?.category || 'Wellness',
     tags: (initial?.tags || []).join(', '),
     status: initial?.status || 'draft',
+    // SEO metadata
+    seoTitle:       initial?.seo?.title       || '',
+    seoDescription: initial?.seo?.description || '',
+    ogImage:        initial?.seo?.ogImage     || '',
+    canonicalUrl:   initial?.seo?.canonicalUrl|| '',
   });
+  const [showSeo, setShowSeo] = useState(false);
   const [saving, setSaving] = useState(false);
   const save = async () => {
     setSaving(true);
     try {
-      const body = { ...form, tags: form.tags.split(',').map((s) => s.trim()).filter(Boolean) };
+      const body = {
+        ...form,
+        tags: form.tags.split(',').map((s) => s.trim()).filter(Boolean),
+        seo: { title: form.seoTitle, description: form.seoDescription, ogImage: form.ogImage, canonicalUrl: form.canonicalUrl },
+      };
+      // Trim redundant top-level fields
+      delete body.seoTitle; delete body.seoDescription; delete body.ogImage; delete body.canonicalUrl;
       const url = isEdit ? `/api/admin/cms/blog/${initial.id}` : '/api/admin/cms/blog';
       const res = await fetch(url, { method: isEdit ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!res.ok) throw new Error('failed');
@@ -138,20 +153,36 @@ function BlogEditor({ initial, onClose, onSaved }) {
     finally { setSaving(false); }
   };
   return (
-    <Drawer open onClose={onClose} eyebrow="Journal" title={isEdit ? `Edit “${initial.title}”` : 'New journal post'}
+    <Drawer open onClose={onClose} eyebrow="Journal" title={isEdit ? `Edit “${initial.title}”` : 'New journal post'} wide
       footer={<div className="flex justify-end gap-2"><GhostBtn onClick={onClose}>Cancel</GhostBtn><PrimaryBtn onClick={save} disabled={saving || !form.title}>{saving ? 'Saving…' : 'Save'}</PrimaryBtn></div>}
     >
       <div className="space-y-3">
         <Field label="Title" required><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
-        <Field label="Slug" hint="Auto-generated if blank"><Input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} /></Field>
-        <Field label="Cover image URL"><Input value={form.coverUrl} onChange={(e) => setForm({ ...form, coverUrl: e.target.value })} placeholder="https://…" /></Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Category"><Input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></Field>
+          <Field label="Slug" hint="Auto-generated if blank"><Input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} /></Field>
           <Field label="Status"><Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}><option value="draft">Draft</option><option value="published">Published</option></Select></Field>
         </div>
-        <Field label="Tags (comma separated)"><Input value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} /></Field>
-        <Field label="Excerpt"><Textarea rows={2} value={form.excerpt} onChange={(e) => setForm({ ...form, excerpt: e.target.value })} /></Field>
-        <Field label="Body (markdown)"><Textarea rows={10} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} className="font-mono text-[12.5px]" /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Category"><Input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></Field>
+          <Field label="Tags (comma separated)"><Input value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} /></Field>
+        </div>
+        <Field label="Cover image URL"><Input value={form.coverUrl} onChange={(e) => setForm({ ...form, coverUrl: e.target.value })} placeholder="https://…" /></Field>
+        <Field label="Excerpt"><Textarea rows={2} value={form.excerpt} onChange={(e) => setForm({ ...form, excerpt: e.target.value })} placeholder="One or two sentences shown in listing cards + search snippets." /></Field>
+        <Field label="Body" hint="Notion-style editor — internal links (/journal/…), external links, images, videos, tables, quotes, headings, lists.">
+          <RichTextEditor value={form.body} onChange={(html) => setForm({ ...form, body: html })} minHeight={360} placeholder="Start writing your essay…" />
+        </Field>
+
+        <button type="button" onClick={() => setShowSeo(!showSeo)} className="w-full text-left text-[11.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground py-2 hover:text-foreground">
+          {showSeo ? '−' : '+'} SEO &amp; social preview
+        </button>
+        {showSeo && (
+          <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
+            <Field label="SEO title" hint="Overrides the page <title>. Leave blank to use Title."><Input value={form.seoTitle} onChange={(e) => setForm({ ...form, seoTitle: e.target.value })} /></Field>
+            <Field label="SEO description" hint="Search-result snippet, 150–160 chars."><Textarea rows={2} value={form.seoDescription} onChange={(e) => setForm({ ...form, seoDescription: e.target.value })} /></Field>
+            <Field label="Open Graph image URL" hint="Shown when the article is shared on WhatsApp/social."><Input value={form.ogImage} onChange={(e) => setForm({ ...form, ogImage: e.target.value })} /></Field>
+            <Field label="Canonical URL" hint="Set only if this content lives on another URL."><Input value={form.canonicalUrl} onChange={(e) => setForm({ ...form, canonicalUrl: e.target.value })} /></Field>
+          </div>
+        )}
       </div>
     </Drawer>
   );
@@ -250,7 +281,7 @@ function MiniBlogEditor({ initial, onClose, onSaved }) {
     >
       <div className="space-y-3">
         <Field label="Title" required><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="One sharp headline" /></Field>
-        <Field label="Body (≤200 words)" hint="Short-form insight, quote, or tip."><Textarea rows={5} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} /></Field>
+        <Field label="Body (≤200 words)" hint="Short-form insight, quote, or tip."><RichTextEditor value={form.body} onChange={(html) => setForm({ ...form, body: html })} minHeight={160} placeholder="A quick insight, tip or quote…" /></Field>
         <Field label="Image URL" hint="Displayed as the mini-blog card cover"><Input value={form.imageUrl} onChange={(e) => setForm({ ...form, imageUrl: e.target.value })} placeholder="https://…" /></Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="CTA label" hint="Optional"><Input value={form.linkLabel} onChange={(e) => setForm({ ...form, linkLabel: e.target.value })} placeholder="Read the guide" /></Field>

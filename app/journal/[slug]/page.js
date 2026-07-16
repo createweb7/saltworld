@@ -76,9 +76,8 @@ export default async function JournalPost({ params }) {
               <img src={post.coverUrl} alt={post.title} className="h-full w-full object-cover" />
             </div>
           )}
-          <div className="prose-body mt-8 md:mt-10 text-[16.5px] md:text-[17px] leading-[1.75] whitespace-pre-wrap text-foreground/90">
-            {post.body}
-          </div>
+          <div className="prose prose-lg max-w-none mt-8 md:mt-10 [&_h2]:font-serif [&_h2]:mt-8 [&_h3]:font-serif [&_h3]:mt-6 [&_a]:text-brand [&_a]:underline [&_a]:underline-offset-2 [&_img]:rounded-xl [&_blockquote]:border-l-2 [&_blockquote]:border-brand [&_blockquote]:pl-4 [&_blockquote]:italic [&_table]:w-full [&_table]:border-collapse [&_th]:text-left [&_th]:border [&_th]:border-border [&_th]:p-2 [&_th]:bg-muted/40 [&_td]:border [&_td]:border-border [&_td]:p-2 text-[16.5px] md:text-[17.5px] leading-[1.75] text-foreground/90"
+               dangerouslySetInnerHTML={{ __html: post.body || '' }} />
           {post.author && (
             <div className="mt-10 pt-8 border-t border-border text-[13px] text-muted-foreground">
               Written by <span className="text-foreground font-medium">{post.author}</span>

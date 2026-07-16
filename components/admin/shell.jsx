@@ -45,6 +45,7 @@ const NAV_GROUPS = [
     items: [
       { href: '/admin/reports',       label: 'Reports',       icon: BarChart3 },
       { href: '/admin/marketing',     label: 'Marketing',     icon: Megaphone },
+      { href: '/admin/referrals',     label: 'Referrals',     icon: Sparkles },
       { href: '/admin/cms',           label: 'CMS',           icon: FileText },
       { href: '/admin/notifications', label: 'Notifications', icon: BellDot },
       { href: '/admin/ai',            label: 'AI Assistant',  icon: Bot },

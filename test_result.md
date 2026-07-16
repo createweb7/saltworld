@@ -1067,10 +1067,180 @@ frontend:
         agent: "main"
         comment: "RSC route with generateMetadata(). Not asked to test frontend yet."
 
+  - task: "M3 Referral System — customer + admin endpoints"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js, lib/api/admin.js, lib/loyalty.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          NEW: Referral system fully wired.
+          PUBLIC (customer session):
+            - GET /api/customer/referrals → { code, referrals[], totalEarned, revenue }.
+              Auto-issues a unique referral code (SW + 6 chars) on first call for the current
+              signed-in customer. Requires sw_customer cookie (from OTP login). Returns 401 if
+              not signed in.
+          BOOKING SIDE EFFECT:
+            - POST /api/bookings with body.referralCode + a resolved customerId now calls
+              applyReferralOnBooking() fire-and-forget. Awards both parties on the referee's
+              first qualifying booking (default 500 pts each, min purchase ₹999).
+          ADMIN (sw_admin cookie):
+            - GET /api/admin/referrals/stats → { totalReferrals, totalRevenue, totalRewards,
+              conversionRate, topReferrers[] }.
+            - GET /api/admin/referrals/customer/:customerId → per-customer referralStats().
+
+          Please verify:
+            R1) With a signed-in customer, GET /api/customer/referrals returns a code matching
+                /^SW[A-Z0-9]{6}$/ on first call and the SAME code on second call (idempotent).
+            R2) Without a session, GET /api/customer/referrals returns 401 {error:'not_signed_in'}.
+            R3) GET /api/admin/referrals/stats returns 200 with numeric totals and array
+                topReferrers (may be empty on a fresh DB).
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ VERIFIED ALL M3 REFERRAL TESTS (R1-R4 PASSED):
+          R1) Customer referrals endpoint with session:
+              - Code format valid: ^SW[A-Z0-9]{6}$ (e.g., SWZWQS9A)
+              - Returns referrals array (empty for new customer)
+              - Returns totalEarned: 0, revenue: 0
+              - IDEMPOTENT: Second call returns same code (SWZWQS9A)
+          R2) Without session cookie:
+              - Returns 401 with error='not_signed_in' ✅
+          R3) Admin referrals stats:
+              - Returns 200 with all required numeric fields: totalReferrals, totalRevenue, totalRewards, conversionRate
+              - Returns topReferrers array (empty on fresh DB)
+          R4) Admin get customer referrals:
+              - Returns 200 with code and referrals array
+              - Code matches customer's referral code
+          
+          All referral endpoints working correctly. Code generation, idempotency, auth protection, and admin stats all functional.
+
+  - task: "M4 Loyalty Wallet — earn on booking, admin adjust"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js, lib/api/admin.js, lib/loyalty.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          NEW: Loyalty wallet tracked on customers.walletBalance with an append-only
+          wallet_transactions audit collection.
+          PUBLIC:
+            - GET /api/customer/wallet → { balance, history:[last 30 tx] } for the signed-in
+              customer. 401 if not signed in.
+          BOOKING SIDE EFFECT:
+            - POST /api/bookings (with a resolved customerId) fires awardBookingEarn() —
+              points = floor(total × earnRate) where earnRate defaults to 1 pt / ₹1.
+              The transaction is recorded as BOOKING_EARN with the bookingRef.
+          ADMIN:
+            - GET  /api/admin/wallet/:customerId/balance → { balance }.
+            - GET  /api/admin/wallet/:customerId/history → array of tx (last 100).
+            - POST /api/admin/wallet/:customerId/adjust {points, note} → manual
+              adjustment. Requires customers:edit permission. Non-zero numeric points
+              only; negative points go through the same insufficient_balance guard.
+
+          Please verify:
+            W1) POST /api/admin/wallet/:customerId/adjust {points:250, note:'test'} on an
+                existing customer → 200 tx doc with type='manual_adjustment', balanceAfter
+                = previous + 250, customer.walletBalance bumped.
+            W2) Same endpoint with points=0 → 400 {error:'invalid_points'}.
+            W3) With points=-999999 on a low-balance customer → 500 or 400 with
+                insufficient_balance error surfaced (either is acceptable so long as the
+                balance isn't corrupted).
+            W4) GET /api/admin/wallet/:customerId/history returns the new tx in the array.
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ VERIFIED ALL M4 LOYALTY WALLET TESTS (W1-W7 PASSED):
+          W1) Customer wallet endpoint:
+              - Returns 200 with balance and history array ✅
+              - History is properly formatted array
+          W2) Admin adjust wallet (+250 points):
+              - Returns 200 with tx doc
+              - Type: 'manual_adjustment' ✅
+              - balanceAfter correctly incremented ✅
+              - Has UUID id (36 chars) ✅
+              - Has createdAt ISO string ✅
+              - NO _id field (cleaned) ✅ [FIXED: Added clean() to remove MongoDB _id]
+          W3) Customer wallet after adjustment:
+              - Balance correctly updated ✅
+              - History contains new transaction ✅
+              - Transaction type and points correct ✅
+          W4) Adjust with 0 points:
+              - Returns 400 with error='invalid_points' ✅
+          W5) Over-debit attempt (-999999):
+              - Returns 500 with error='insufficient_balance' ✅
+              - Balance unchanged (protected) ✅
+          W6) Admin get wallet history:
+              - Returns array of transactions ✅
+              - Contains all adjustments ✅
+          W7) Admin get wallet balance:
+              - Returns 200 with {balance} ✅
+          
+          BONUS: Booking earn integration verified:
+          - POST /api/bookings automatically awards points (1 pt per ₹1)
+          - Transaction recorded as BOOKING_EARN with bookingRef
+          - Points persist across sessions
+          
+          All wallet endpoints working correctly. Manual adjustments, validation, insufficient balance protection, history tracking, and automatic booking earn all functional.
+          
+          MINOR FIX APPLIED: Added clean() to wallet adjust response to remove MongoDB _id field.
+
+  - task: "M2 Premium Therapy Landing Pages (frontend only, no backend impact)"
+    implemented: true
+    working: "NA"
+    file: "app/therapies/[slug]/page.js, lib/therapies.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Static pages under /therapies/[slug] for salt-therapy, float-therapy, infrared-sauna,
+          cold-plunge, red-light-therapy. Emits JSON-LD MedicalTherapy schema + FAQPage for SEO.
+          No backend impact; no backend testing required.
+
+frontend:
+  - task: "M1 Tiptap Rich Text Editor in Admin CMS"
+    implemented: true
+    working: "NA"
+    file: "components/admin/rich-text-editor.jsx, app/admin/cms/CmsClient.jsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Tiptap RichTextEditor wired into CMS Blog editor (main body) and Mini-Blog editor
+          (short body). Dynamic-imported to avoid SSR issues.
+
+  - task: "M3 Customer Referrals Page"
+    implemented: true
+    working: "NA"
+    file: "app/account/referrals/page.js, app/account/referrals/ShareButtons.jsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          /account/referrals page shows the customer's unique code, share buttons
+          (WhatsApp/SMS/Email/Copy/Native share), stat cards, and referral history.
+
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 6
+  test_sequence: 8
   run_ui: true
 
 test_plan:
@@ -1770,3 +1940,74 @@ agent_communication:
       
       NO CRITICAL ISSUES FOUND. Both Razorpay and WhatsApp integrations are production-ready with proper placeholder key detection.
       All endpoints return correct status codes and error messages. Ready for real API keys to be configured by user.
+
+
+  - agent: "testing"
+    message: |
+      ✅ M3 (REFERRAL SYSTEM) + M4 (LOYALTY WALLET) VERIFICATION COMPLETE - ALL TESTS PASSED
+      
+      Executed comprehensive backend API testing for M3 (Referral System) and M4 (Loyalty Wallet) endpoints
+      using /app/backend_test.py against https://saltwell-arch.preview.emergentagent.com/api
+      
+      **TEST RESULTS SUMMARY:**
+      
+      **M3 REFERRAL SYSTEM (R1-R4: 14/14 tests passed)**
+      ✅ R1: GET /api/customer/referrals (with session)
+          - Code format valid: ^SW[A-Z0-9]{6}$ (e.g., SWZWQS9A)
+          - Returns referrals array (empty for new customer)
+          - Returns totalEarned: 0, revenue: 0
+          - IDEMPOTENT: Second call returns same code
+      ✅ R2: GET /api/customer/referrals (without session)
+          - Returns 401 with error='not_signed_in'
+      ✅ R3: GET /api/admin/referrals/stats
+          - Returns 200 with all required numeric fields: totalReferrals, totalRevenue, totalRewards, conversionRate
+          - Returns topReferrers array
+      ✅ R4: GET /api/admin/referrals/customer/:customerId
+          - Returns 200 with code and referrals array
+      
+      **M4 LOYALTY WALLET (W1-W7: 20/20 tests passed)**
+      ✅ W1: GET /api/customer/wallet
+          - Returns 200 with balance and history array
+      ✅ W2: POST /api/admin/wallet/:customerId/adjust (+250 points)
+          - Returns 200 with tx doc
+          - Type: 'manual_adjustment'
+          - balanceAfter correctly incremented
+          - Has UUID id (36 chars)
+          - Has createdAt ISO string
+          - NO _id field (cleaned) ✅ [FIXED: Added clean() to remove MongoDB _id]
+      ✅ W3: GET /api/customer/wallet (after adjustment)
+          - Balance correctly updated
+          - History contains new transaction
+      ✅ W4: POST /api/admin/wallet/:customerId/adjust (0 points)
+          - Returns 400 with error='invalid_points'
+      ✅ W5: POST /api/admin/wallet/:customerId/adjust (over-debit)
+          - Returns 500 with error='insufficient_balance'
+          - Balance unchanged (protected)
+      ✅ W6: GET /api/admin/wallet/:customerId/history
+          - Returns array of transactions
+      ✅ W7: GET /api/admin/wallet/:customerId/balance
+          - Returns 200 with {balance}
+      
+      **REGRESSION SANITY (2/2 tests passed)**
+      ✅ POST /api/bookings
+          - Returns 200 with id and ref (SW-YYMM-XXXX format)
+          - Automatically awards loyalty points (1 pt per ₹1)
+          - Transaction recorded as BOOKING_EARN with bookingRef
+      
+      **BONUS VERIFICATION:**
+      ✅ Customer OTP login flow working correctly
+          - POST /api/customer/auth/request-otp returns OTP in dev mode
+          - POST /api/customer/auth/verify-otp sets sw_customer cookie
+      ✅ Booking earn integration verified
+          - POST /api/bookings automatically awards points to customer
+          - Points persist across sessions
+      
+      **CRITICAL FIX APPLIED:**
+      - Fixed wallet adjust endpoint to remove MongoDB _id field from response (lib/api/admin.js line 500)
+      
+      **SUCCESS RATE: 100% (36/36 tests passed)**
+      
+      NO CRITICAL ISSUES FOUND. All M3 (Referral System) and M4 (Loyalty Wallet) endpoints are production-ready.
+      All authentication, validation, insufficient balance protection, history tracking, and automatic booking earn working correctly.
+      
+      NOTE: Did NOT retest Phase 3.1/3.2/3.3 endpoints (79+) as instructed - they were already verified as passing.

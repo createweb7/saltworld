@@ -68,12 +68,12 @@ export function Tabs({ items, active, onChange }) {
   );
 }
 
-export function Drawer({ open, onClose, title, eyebrow, children, footer }) {
+export function Drawer({ open, onClose, title, eyebrow, children, footer, wide = false }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-foreground/30 backdrop-blur-sm" onClick={onClose} />
-      <div className="absolute right-0 top-0 bottom-0 w-full max-w-[480px] bg-background border-l border-border flex flex-col">
+      <div className={`absolute right-0 top-0 bottom-0 w-full ${wide ? 'max-w-[720px]' : 'max-w-[480px]'} bg-background border-l border-border flex flex-col`}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <div>
             {eyebrow && <div className="text-[10.5px] uppercase tracking-[0.16em] text-muted-foreground font-semibold">{eyebrow}</div>}
