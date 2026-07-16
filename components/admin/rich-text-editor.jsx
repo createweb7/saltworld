@@ -3,16 +3,11 @@
 import { useEffect } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import Link from '@tiptap/extension-link';
-import Image from '@tiptap/extension-image';
-import Underline from '@tiptap/extension-underline';
-import Placeholder from '@tiptap/extension-placeholder';
-import TextAlign from '@tiptap/extension-text-align';
-import Table from '@tiptap/extension-table';
-import TableRow from '@tiptap/extension-table-row';
-import TableCell from '@tiptap/extension-table-cell';
-import TableHeader from '@tiptap/extension-table-header';
-import Youtube from '@tiptap/extension-youtube';
+import { Image } from '@tiptap/extension-image';
+import { Placeholder } from '@tiptap/extension-placeholder';
+import { TextAlign } from '@tiptap/extension-text-align';
+import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table';
+import { Youtube } from '@tiptap/extension-youtube';
 import {
   Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code,
   Heading1, Heading2, Heading3, List, ListOrdered, Quote, Undo, Redo,
@@ -27,9 +22,7 @@ import {
 export default function RichTextEditor({ value, onChange, placeholder = 'Start writing…', minHeight = 320 }) {
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3] }, codeBlock: {} }),
-      Underline,
-      Link.configure({ openOnClick: false, HTMLAttributes: { class: 'text-brand underline underline-offset-2' } }),
+      StarterKit.configure({ heading: { levels: [1, 2, 3] }, codeBlock: {}, link: { openOnClick: false, HTMLAttributes: { class: 'text-brand underline underline-offset-2' } } }),
       Image.configure({ HTMLAttributes: { class: 'rounded-lg my-4 max-w-full h-auto' } }),
       Placeholder.configure({ placeholder }),
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
