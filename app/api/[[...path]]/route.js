@@ -168,7 +168,7 @@ async function handle(req, method, segs) {
 
   // ------- Customer auth (public phone + OTP) -------
   if (segs[0] === 'customer' && segs[1] === 'auth') {
-    const { issueOtp, verifyOtp, upsertCustomerByPhone, signCustomerToken, setCustomerCookie, clearCustomerCookie, getCurrentCustomer } = await import('@/lib/customer-auth');
+    const { issueOtp, verifyOtp, upsertCustomerByPhone, upsertCustomerByEmail, signCustomerToken, setCustomerCookie, clearCustomerCookie, getCurrentCustomer } = await import('@/lib/customer-auth');
 
     if (segs[2] === 'request-otp' && method === 'POST') {
       const body = await req.json().catch(() => ({}));
@@ -220,6 +220,42 @@ async function handle(req, method, segs) {
         return NextResponse.redirect(new URL('/', req.url));
       }
       return NextResponse.json({ ok: true });
+    }
+
+    // ---- Emergent Auth (Google) callback finaliser ----
+    // Client posts { session_id } extracted from the URL fragment. We call
+    // Emergent's session-data endpoint, upsert the customer by verified email,
+    // and set the same sw_customer cookie the OTP flow issues.
+    if (segs[2] === 'google-complete' && method === 'POST') {
+      const body = await req.json().catch(() => ({}));
+      const sid = body.session_id || body.sessionId;
+      if (!sid) return NextResponse.json({ ok: false, error: 'missing_session_id' }, { status: 400 });
+      try {
+        const resp = await fetch('https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data', {
+          method: 'GET',
+          headers: { 'X-Session-ID': sid },
+        });
+        if (!resp.ok) {
+          return NextResponse.json({ ok: false, error: 'emergent_session_invalid' }, { status: 401 });
+        }
+        const profile = await resp.json();
+        const email = profile.email;
+        if (!email) return NextResponse.json({ ok: false, error: 'email_required' }, { status: 400 });
+        const customer = await upsertCustomerByEmail(email, {
+          name: profile.name,
+          picture: profile.picture,
+          source: 'google_signin',
+        });
+        if (customer.disabled) {
+          return NextResponse.json({ ok: false, error: 'account_disabled' }, { status: 403 });
+        }
+        const token = await signCustomerToken({ sub: customer.id, email: customer.email, phone: customer.phone });
+        await setCustomerCookie(token);
+        return NextResponse.json({ ok: true, customer: { id: customer.id, name: customer.name, email: customer.email, phone: customer.phone, picture: customer.picture } });
+      } catch (e) {
+        console.error('google-complete failed', e);
+        return NextResponse.json({ ok: false, error: 'emergent_upstream_error' }, { status: 502 });
+      }
     }
   }
 
