@@ -78,6 +78,19 @@ async function handle(req, method, segs) {
     return NextResponse.json(rest);
   }
 
+  // ------- Public scheduling engine (single source of truth) -------
+  if (segs[0] === 'scheduling' && segs[1] === 'slots' && method === 'GET') {
+    const u = new URL(req.url);
+    const therapies = (u.searchParams.get('therapies') || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const branchId = u.searchParams.get('branchId') || null;
+    const date = u.searchParams.get('date');
+    if (therapies.length === 0) return NextResponse.json({ error: 'therapies_required' }, { status: 400 });
+    if (!date) return NextResponse.json({ error: 'date_required' }, { status: 400 });
+    const { availableJourneySlots } = await import('@/lib/scheduling');
+    const r = await availableJourneySlots({ therapySlugs: therapies, branchId, dateIso: date });
+    return NextResponse.json(r || { groups: { morning: [], afternoon: [], evening: [] }, totalDurationMin: 0, totalVisitMin: 0 });
+  }
+
   // ------- Public therapies (used by /therapies pages + booking flow) -------
   if (segs[0] === 'therapies') {
     const therapiesCol = db.collection('therapies');
@@ -217,31 +230,35 @@ async function handle(req, method, segs) {
           branchId = b?.id || null;
         } catch { /* fall through */ }
       }
-      // Resource allocation — pick a free resource for the primary therapy
-      // at the requested slot. Skips when startAt/date+time can't be resolved.
+      // Resource allocation — build a journey plan and pick free resources
+      // for EACH therapy in the sequence. Skips silently when startAt can't
+      // be resolved (e.g., admin creating an unscheduled placeholder).
       let resourceId = null;
       let resourceName = null;
       let blockedFrom = null;
       let blockedTo = null;
-      const primaryTherapySlug = Array.isArray(body.therapies) && body.therapies.length > 0
-        ? body.therapies[0].slug : body.therapy;
+      let schedule = null;
+      const bodyTherapies = Array.isArray(body.therapies) ? body.therapies : [];
+      const therapySlugs = bodyTherapies.length > 0
+        ? bodyTherapies.map((t) => t.slug).filter(Boolean)
+        : (body.therapy ? [body.therapy] : []);
       // Derive an ISO startAt: prefer explicit body.startAt, else compose from slotDate+slotTime.
       let startIso = body.startAt || null;
       if (!startIso && body.slotDate && body.slotTime) {
-        // slotDate: YYYY-MM-DD, slotTime: HH:mm — assume IST (+05:30).
         startIso = `${body.slotDate}T${body.slotTime}:00+05:30`;
       }
-      if (primaryTherapySlug && startIso) {
+      if (therapySlugs.length > 0 && startIso) {
         try {
-          const { allocateResource } = await import('@/lib/scheduling');
-          const alloc = await allocateResource({ therapySlug: primaryTherapySlug, branchId, startIso });
-          if (alloc) {
-            resourceId = alloc.resourceId;
-            resourceName = alloc.resourceName;
-            blockedFrom = alloc.blockedFrom;
-            blockedTo = alloc.blockedTo;
+          const { allocateJourney } = await import('@/lib/scheduling');
+          const r = await allocateJourney({ therapySlugs, branchId, startIso });
+          if (r.ok) {
+            resourceId   = r.resourceId;
+            resourceName = r.resourceName;
+            blockedFrom  = r.blockedFrom;
+            blockedTo    = r.blockedTo;
+            schedule     = r.schedule;
           }
-        } catch (e) { console.error('allocateResource failed', e); }
+        } catch (e) { console.error('allocateJourney failed', e); }
       }
 
       const doc = {
@@ -251,7 +268,7 @@ async function handle(req, method, segs) {
         outcomeLabel: body.outcomeLabel || null,
         therapy:      body.therapy      || null,
         therapyLabel: body.therapyLabel || null,
-        therapies:    Array.isArray(body.therapies) ? body.therapies : (body.therapy ? [{ slug: body.therapy, label: body.therapyLabel, role: 'Primary' }] : []),
+        therapies:    bodyTherapies.length > 0 ? bodyTherapies : (body.therapy ? [{ slug: body.therapy, label: body.therapyLabel, role: 'Primary' }] : []),
         slotDate:   body.slotDate   || null,
         slotTime:   body.slotTime   || null,
         startAt:    startIso        || null,
@@ -259,10 +276,13 @@ async function handle(req, method, segs) {
         contact:    body.contact    || {},
         customerId: body.customerId || null,
         branchId,
+        // Primary (first therapy) — surfaced for calendar row rendering
         resourceId,
         resourceName,
         blockedFrom,
         blockedTo,
+        // Full journey schedule with per-therapy resource assignment
+        schedule,
         payment:    body.payment    || 'at-visit',
         priceLine:  body.priceLine  || null,
         total:      body.total      || 0,

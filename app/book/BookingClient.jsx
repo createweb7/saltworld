@@ -23,20 +23,6 @@ const STEPS = [
   { id: 'contact',  label: 'Confirm' },
 ];
 
-const SESSION_TIMES = [
-  { block: 'Morning',   times: ['07:00', '08:30', '10:00', '11:30'] },
-  { block: 'Afternoon', times: ['13:00', '14:30', '16:00'] },
-  { block: 'Evening',   times: ['17:30', '19:00', '20:30'] },
-];
-
-// Deterministic capacity so screenshots are stable.
-function capacityFor(dateStr, time) {
-  let h = 0;
-  const s = dateStr + time;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) & 0x7fffffff;
-  return h % 5; // 0–4 seats left
-}
-
 function fmtDate(d) {
   return d.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' });
 }
@@ -243,10 +229,10 @@ function StepTherapy({ outcome, values, onChange, mappingOverride }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Step 3 — Slot                                                      */
+/* Step 3 — Slot (dynamic, journey-aware)                             */
 /* ------------------------------------------------------------------ */
 
-function StepSlot({ value, onChange }) {
+function StepSlot({ therapies, therapyMeta, value, onChange }) {
   const days = useMemo(() => {
     const start = new Date(); start.setHours(0,0,0,0);
     return Array.from({ length: 7 }).map((_, i) => {
@@ -255,6 +241,26 @@ function StepSlot({ value, onChange }) {
     });
   }, []);
   const [date, setDate] = useState(value?.date || toIsoDay(days[0]));
+  const [slotsData, setSlotsData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  // Fetch dynamic slots whenever therapies or date changes.
+  useEffect(() => {
+    if (!therapies || therapies.length === 0 || !date) return;
+    let cancelled = false;
+    setLoading(true);
+    const q = new URLSearchParams({ therapies: therapies.join(','), date });
+    fetch(`/api/scheduling/slots?${q}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (!cancelled) { setSlotsData(d); setLoading(false); } })
+      .catch(() => { if (!cancelled) { setSlotsData(null); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [therapies, date]);
+
+  const groups = slotsData?.groups || { morning: [], afternoon: [], evening: [] };
+  const totalSlots = groups.morning.length + groups.afternoon.length + groups.evening.length;
+  const totalDurationMin = slotsData?.totalDurationMin || 0;
+  const totalVisitMin    = slotsData?.totalVisitMin    || 0;
 
   return (
     <div>
@@ -263,8 +269,42 @@ function StepSlot({ value, onChange }) {
         Pick a <span className="italic">quiet hour.</span>
       </h1>
       <p className="mt-3 text-[15px] leading-7 text-muted-foreground max-w-[560px]">
-        Sessions run seven days a week. Evenings often fill three days ahead.
+        Slots are calculated live from real resource availability. Empty periods mean the tanks are booked.
       </p>
+
+      {/* Journey summary card */}
+      {therapies?.length > 0 && (
+        <div className="mt-6 rounded-2xl border border-border bg-card p-5 md:p-6">
+          <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold flex items-center gap-1.5">
+            <Sparkles className="h-3.5 w-3.5" /> Your wellness journey
+          </div>
+          <div className="mt-3 space-y-1.5">
+            {therapies.map((slug) => {
+              const meta = therapyMeta?.[slug];
+              if (!meta) return null;
+              return (
+                <div key={slug} className="flex items-center justify-between text-[14px]">
+                  <div className="flex items-center gap-2"><Check className="h-3.5 w-3.5 text-brand" /><span className="font-medium">{meta.name}</span></div>
+                  <div className="text-[12.5px] text-muted-foreground font-mono">{meta.durationMin} min</div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-4 pt-3 border-t border-border grid grid-cols-2 gap-3 text-[12.5px]">
+            <div>
+              <div className="text-muted-foreground">Therapy time</div>
+              <div className="font-mono font-semibold text-[15px] mt-0.5">{totalDurationMin} min</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Estimated visit</div>
+              <div className="font-mono font-semibold text-[15px] mt-0.5">
+                {totalVisitMin >= 60 ? `~${Math.floor(totalVisitMin/60)}h ${totalVisitMin%60 ? (totalVisitMin%60)+'m' : ''}` : `${totalVisitMin} min`}
+                <span className="ml-1.5 text-[10.5px] font-sans text-muted-foreground uppercase tracking-[0.14em]">incl. buffers</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mt-8 -mx-4 md:mx-0">
         <div className="flex gap-2 overflow-x-auto px-4 md:px-0 no-scrollbar pb-2">
@@ -287,33 +327,46 @@ function StepSlot({ value, onChange }) {
       </div>
 
       <div className="mt-8 space-y-6">
-        {SESSION_TIMES.map((group) => (
-          <div key={group.block}>
-            <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-semibold mb-3">{group.block}</div>
-            <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
-              {group.times.map((t) => {
-                const cap = capacityFor(date, t);
-                const full = cap === 0;
-                const isSel = value?.date === date && value?.time === t;
-                return (
-                  <button key={t} disabled={full}
-                    onClick={() => onChange({ date, time: t })}
-                    className={cn(
-                      'rounded-xl border py-3 px-2 flex flex-col items-center transition-all',
-                      full && 'opacity-40 cursor-not-allowed',
-                      isSel ? 'border-brand bg-brand text-white'
-                            : 'border-border bg-card hover:border-foreground/40'
-                    )}>
-                    <div className="font-mono text-[14px] font-semibold tracking-tight">{t}</div>
-                    <div className={cn('text-[10.5px] mt-0.5', isSel ? 'text-white/80' : 'text-muted-foreground')}>
-                      {full ? 'Full' : cap === 1 ? '1 seat left' : `${cap} seats`}
-                    </div>
-                  </button>
-                );
-              })}
+        {loading && (
+          <div className="text-center py-12 text-muted-foreground text-[13px] flex items-center justify-center gap-2">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Finding available times…
+          </div>
+        )}
+        {!loading && totalSlots === 0 && (
+          <div className="rounded-xl border border-dashed border-border p-8 text-center">
+            <div className="font-medium text-[15px]">No slots available on this day</div>
+            <div className="mt-1 text-[13px] text-muted-foreground">
+              {slotsData?.closed ? 'The branch is closed on this day.' : 'Try a different day, or contact us to explore other options.'}
             </div>
           </div>
-        ))}
+        )}
+        {!loading && ['morning','afternoon','evening'].map((key) => {
+          const label = key.charAt(0).toUpperCase() + key.slice(1);
+          const slots = groups[key];
+          if (slots.length === 0) return null;
+          return (
+            <div key={key}>
+              <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-semibold mb-3 flex items-center justify-between">
+                <span>{label}</span>
+                <span className="text-[10.5px] normal-case tracking-normal font-normal text-muted-foreground/70">{slots.length} times</span>
+              </div>
+              <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+                {slots.map((s) => {
+                  const isSel = value?.date === date && value?.time === s.time;
+                  return (
+                    <button key={s.time} onClick={() => onChange({ date, time: s.time, startIso: s.startIso, visitFromIso: s.visitFromIso, visitToIso: s.visitToIso })}
+                      className={cn(
+                        'rounded-xl border py-2.5 px-2 flex flex-col items-center transition-all',
+                        isSel ? 'border-brand bg-brand text-white' : 'border-border bg-card hover:border-foreground/40'
+                      )}>
+                      <div className="font-mono text-[14px] font-semibold tracking-tight">{s.time}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -462,7 +515,23 @@ export default function BookingClient({ initialOutcome }) {
   const [error, setError] = useState(null);
   const [payCfg, setPayCfg] = useState({ configured: false, keyId: null });
   const [outcomeMap, setOutcomeMap] = useState(null); // admin-configured overrides
+  const [therapyMeta, setTherapyMeta] = useState({}); // slug → {name, durationMin, ...} from DB
   const therapy = therapies[0] || null; // convenience alias
+
+  // Load therapy metadata once (for the journey summary in step 3).
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/therapies')
+      .then((r) => r.ok ? r.json() : [])
+      .then((docs) => {
+        if (cancelled) return;
+        const bySlug = {};
+        for (const d of docs) bySlug[d.slug] = d;
+        setTherapyMeta(bySlug);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   // Pre-fill contact from query params (used when staff launches "New booking" from
   // /admin/customers/:id — we hand off to the same flow with contact already known).
@@ -641,7 +710,7 @@ export default function BookingClient({ initialOutcome }) {
       <main className="max-w-[1200px] mx-auto px-4 md:px-8 pt-10 md:pt-14 pb-28 md:pb-16">
         {stepIdx === 0 && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); }} />}
         {stepIdx === 1 && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} />}
-        {stepIdx === 2 && <StepSlot value={slot} onChange={setSlot} />}
+        {stepIdx === 2 && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} />}
         {stepIdx === 3 && (
           <StepContact
             outcome={outcome} therapy={therapy} slot={slot}

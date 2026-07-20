@@ -1067,6 +1067,112 @@ frontend:
         agent: "main"
         comment: "RSC route with generateMetadata(). Not asked to test frontend yet."
 
+  - task: "Scheduling engine + journey-aware slot API"
+    implemented: true
+    working: true
+    file: "lib/scheduling.js, app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          NEW: Centralized scheduling engine (`lib/scheduling.js`). Single source of truth for
+          all booking flows. Ships:
+            • buildJourneyPlan(candidateStart, therapies) → sequential per-therapy sub-windows
+              honoring pre/post/cleaning buffers between adjacent therapies.
+            • checkJourneyAvailability({plan, therapies, branchId}) → for each step verifies a
+              resource (attached to therapy + matching branch) is free; considers legacy
+              single-resource bookings AND new journey bookings (schedule[].resourceId), and
+              maintenance_blocks.
+            • availableJourneySlots({therapySlugs, branchId, dateIso}) → walks a 15-min grid
+              across branch hours; returns {totalDurationMin, totalVisitMin, groups:{morning,
+              afternoon, evening}}. Respects branch hours (per-weekday), holidays, and only
+              includes starts where the ENTIRE journey fits.
+            • allocateJourney({therapySlugs, branchId, startIso}) → called on POST /api/bookings.
+              Returns per-therapy schedule + primary resourceId/blockedFrom/blockedTo.
+
+          NEW PUBLIC ENDPOINT:
+            GET /api/scheduling/slots?therapies=slug1,slug2&branchId=…&date=YYYY-MM-DD
+              → {totalDurationMin, totalVisitMin, groups:{morning:[{time,startIso,visitFromIso,visitToIso}], afternoon, evening}}
+
+          UPDATED POST /api/bookings:
+            • Reads full `therapies[]` array from body (not just primary)
+            • Calls allocateJourney to schedule the whole sequence
+            • Stores booking.schedule = [{therapySlug, resourceId, resourceName, from, to}]
+            • Sets top-level resourceId/blockedFrom/blockedTo from primary (first therapy)
+
+          Please verify:
+            S1) GET /api/scheduling/slots with therapies=float-therapy&date=<future-date> → 200 with
+                totalDurationMin=60, totalVisitMin=80, groups populated with 15-min-grid times.
+            S2) GET /api/scheduling/slots with three therapies
+                (therapies=float-therapy,infrared-sauna,cold-plunge) → 200 with totalDurationMin=100,
+                totalVisitMin≈135 (~2h15m).
+            S3) Missing therapies param → 400 {error:'therapies_required'}.
+            S4) Missing date param → 400 {error:'date_required'}.
+            S5) POST /api/bookings with therapies=[{slug:'float-therapy'},{slug:'infrared-sauna'},
+                {slug:'cold-plunge'}] + slotDate + slotTime → 200 with:
+                  • schedule: 3-item array, each with therapySlug, resourceId, resourceName, from, to
+                  • resourceId + resourceName populated (primary = Float Tank X)
+                  • blockedFrom / blockedTo covering full visit window
+            S6) Book 2 Float journeys at the same start time → 1st gets Float Tank 1, 2nd gets Float
+                Tank 2 (parallel allocation working).
+            S7) Book a 3rd Float journey at the same start time → gets no resource (both tanks busy).
+            S8) After a 10:00 Float booking, GET /api/scheduling/slots for float-therapy on same
+                date should NOT include 10:00 in the morning slots (excluded due to overlap).
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ VERIFIED ALL JOURNEY-AWARE SCHEDULING TESTS (7/7 PASSED):
+          
+          S1 — Single therapy slot generation:
+          - GET /api/scheduling/slots?therapies=float-therapy&date=2027-01-15 returns 200
+          - totalDurationMin === 60 ✅
+          - totalVisitMin === 80 ✅ (5 pre + 60 duration + 15 cleaning)
+          - groups.morning is non-empty array with 24 slots ✅
+          - Slot structure correct: {time, startIso, visitFromIso, visitToIso} ✅
+          - Times follow 15-min grid pattern: ['06:00', '06:15', '06:30', '06:45', '07:00'] ✅
+          
+          S2 — Multi-therapy journey:
+          - GET /api/scheduling/slots?therapies=float-therapy,infrared-sauna,cold-plunge&date=2027-01-15 returns 200
+          - totalDurationMin === 100 ✅ (60 + 35 + 5)
+          - totalVisitMin === 135 ✅ (within 130-145 range, ~2h15m)
+          - All three groups (morning/afternoon/evening) exist as arrays ✅
+          
+          S3 — Validation:
+          - GET /api/scheduling/slots?date=2027-01-15 (no therapies) → 400 {error:'therapies_required'} ✅
+          - GET /api/scheduling/slots?therapies=float-therapy (no date) → 400 {error:'date_required'} ✅
+          
+          S4 — Booking allocates full journey schedule:
+          - POST /api/bookings with 3 therapies (float-therapy, infrared-sauna, cold-plunge) returns 200 ✅
+          - ref matches /^SW-/ (SW-2607-WZZZ) ✅
+          - resourceId + resourceName populated (Float Tank 1) ✅
+          - blockedFrom/blockedTo cover 135 minutes (~2h15m) ✅
+          - schedule is array of length 3 ✅
+          - Each schedule item has {therapySlug, resourceId, resourceName, from, to} ✅
+          - Therapy slugs in correct order: [float-therapy, infrared-sauna, cold-plunge] ✅
+          - Times are sequential: schedule[i].to <= schedule[i+1].from ✅
+          
+          S5 — Parallel allocation on 2 Float tanks:
+          - First booking at 2027-01-17T11:00 → Float Tank 1 ✅
+          - Second booking at same time → Float Tank 2 ✅
+          - Third booking at same time → resourceName is null (no free tank) ✅
+          
+          S6 — Slot exclusion after booking:
+          - GET /api/scheduling/slots?therapies=float-therapy&date=2027-01-17 after bookings
+          - 11:00 NOT in morning slots (both tanks blocked) ✅
+          - Later times still available (07:00, 07:15, 07:30, etc.) ✅
+          
+          S7 — Journey conflict detection:
+          - First 3-therapy journey at 2027-01-18T14:00 → allocated successfully with schedule ✅
+          - Second 3-therapy journey at same time → returns 200 with resourceId=null ✅
+          - Allocation gracefully failed (schedule/resourceId is null) ✅
+          - First booking's schedule intact (length 3) ✅
+          
+          All journey-aware scheduling features working correctly. Resource allocation, parallel booking, 
+          conflict detection, and slot exclusion all functional. Created 6 test bookings.
+
   - task: "M3 Referral System — customer + admin endpoints"
     implemented: true
     working: true
