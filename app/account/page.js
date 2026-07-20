@@ -1,27 +1,36 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowRight, Calendar, Wallet, Gift, ClipboardList, User as UserIcon, LogOut } from 'lucide-react';
+import { ArrowRight, Calendar, Wallet, Gift, ClipboardList, User as UserIcon, LogOut, Users } from 'lucide-react';
 import { getCurrentCustomer } from '@/lib/customer-auth';
 import { getDb } from '@/lib/mongo';
 import { TopNav, SiteFooter } from '@/components/site/shell';
-import { formatDate, formatTime } from '@/lib/date';
+import { formatDate } from '@/lib/date';
 
 export const metadata = { title: 'My account · Salt World' };
 export const dynamic = 'force-dynamic';
 
-async function loadCustomerBookings(customerId, phone) {
+async function loadDashboard(customerId, phone) {
   const db = await getDb();
   const filter = customerId ? { $or: [{ customerId }, { 'contact.phone': phone }] } : { 'contact.phone': phone };
-  const docs = await db.collection('bookings').find(filter).sort({ createdAt: -1 }).limit(20).toArray();
-  return docs.map(({ _id, ...rest }) => rest);
+  const [bookings, activeSubs, recentTxs] = await Promise.all([
+    db.collection('bookings').find(filter).sort({ createdAt: -1 }).limit(20).toArray(),
+    db.collection('memberSubscriptions').find({ customerId, status: 'active' }).toArray(),
+    db.collection('wallet_transactions').find({ customerId }).sort({ createdAt: -1 }).limit(3).toArray(),
+  ]);
+  return {
+    bookings:  bookings.map(({ _id, ...r }) => r),
+    activeSubs: activeSubs.map(({ _id, ...r }) => r),
+    recentTxs:  recentTxs.map(({ _id, ...r }) => r),
+  };
 }
 
 export default async function AccountHome() {
   const customer = await getCurrentCustomer();
   if (!customer) redirect('/account/login');
-  const bookings = await loadCustomerBookings(customer.id, customer.phone);
+  const { bookings, activeSubs, recentTxs } = await loadDashboard(customer.id, customer.phone);
 
-  const upcoming = bookings.filter((b) => b.slotDate && new Date(b.slotDate) >= new Date(new Date().toDateString()));
+  const today = new Date(new Date().toDateString());
+  const upcoming = bookings.filter((b) => b.slotDate && new Date(b.slotDate) >= today).slice(0, 5);
   const past     = bookings.filter((b) => !upcoming.includes(b)).slice(0, 5);
 
   return (
@@ -48,13 +57,35 @@ export default async function AccountHome() {
 
       <section className="py-10 md:py-14">
         <div className="max-w-[1080px] mx-auto px-5 md:px-8 space-y-10">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 md:gap-4">
-            <QuickAction href="/book"        icon={Calendar}      label="Book a session" />
-            <QuickAction href="/gifts"        icon={Gift}          label="Buy a gift card" />
-            <QuickAction href="/memberships" icon={ClipboardList} label="Explore memberships" />
-            <QuickAction href="/account/profile" icon={UserIcon}   label="Update profile" />
+          {/* Quick actions */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
+            <QuickAction href="/book"                icon={Calendar}      label="Book a session" />
+            <QuickAction href="/account/wallet"      icon={Wallet}        label="Wallet & credits" />
+            <QuickAction href="/account/memberships" icon={ClipboardList} label="Memberships" />
+            <QuickAction href="/account/referrals"   icon={Users}         label="Refer friends" />
+            <QuickAction href="/gifts"               icon={Gift}          label="Gift cards" />
           </div>
 
+          {/* Balance + memberships strip */}
+          <div className="grid md:grid-cols-3 gap-4">
+            <BalanceCard label="Wallet balance" value={`₹${(customer.walletBalance || 0).toLocaleString('en-IN')}`} icon={Wallet} href="/account/wallet" />
+            <BalanceCard
+              label="Active memberships"
+              value={activeSubs.length === 0 ? '—' : `${activeSubs.length}`}
+              icon={ClipboardList}
+              href="/account/memberships"
+              hint={activeSubs.length > 0 ? activeSubs.map((s) => s.membershipName || s.membershipId).join(', ') : 'Explore plans'}
+            />
+            <BalanceCard
+              label="Recent activity"
+              value={recentTxs.length > 0 ? `${recentTxs.length} tx` : '—'}
+              icon={ArrowRight}
+              href="/account/wallet"
+              hint={recentTxs.length > 0 ? new Date(recentTxs[0].createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : 'No transactions yet'}
+            />
+          </div>
+
+          {/* Upcoming */}
           <div>
             <div className="flex items-baseline justify-between mb-4">
               <h2 className="font-serif text-[24px] leading-none tracking-tight">Upcoming visits</h2>
@@ -71,25 +102,12 @@ export default async function AccountHome() {
             )}
           </div>
 
-          <div>
-            <h2 className="font-serif text-[24px] leading-none tracking-tight mb-4">Wallet & memberships</h2>
-            <div className="rounded-xl border border-border bg-card p-5 flex items-center gap-6 flex-wrap">
-              <div className="flex items-center gap-3">
-                <Wallet className="h-5 w-5 text-muted-foreground" />
-                <div>
-                  <div className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground">Wallet balance</div>
-                  <div className="font-mono text-[22px] mt-0.5">₹{(customer.walletBalance || 0).toLocaleString('en-IN')}</div>
-                </div>
-              </div>
-              <div className="text-[13px] text-muted-foreground ml-auto">
-                Membership sessions & referral rewards land here.
-              </div>
-            </div>
-          </div>
-
+          {/* Past */}
           {past.length > 0 && (
             <div>
-              <h2 className="font-serif text-[24px] leading-none tracking-tight mb-4">Past visits</h2>
+              <div className="flex items-baseline justify-between mb-4">
+                <h2 className="font-serif text-[24px] leading-none tracking-tight">Past visits</h2>
+              </div>
               <div className="grid gap-3 md:gap-4">
                 {past.map((b) => <BookingRow key={b.id} b={b} muted />)}
               </div>
@@ -115,21 +133,34 @@ function QuickAction({ href, icon: Icon, label }) {
   );
 }
 
+function BalanceCard({ label, value, icon: Icon, href, hint }) {
+  return (
+    <Link href={href} className="rounded-xl border border-border bg-card p-5 hover:border-foreground/30 transition-colors block">
+      <div className="flex items-center gap-2 text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" /> {label}
+      </div>
+      <div className="mt-2 font-serif text-[26px] leading-none tracking-tight">{value}</div>
+      {hint && <div className="mt-1.5 text-[11.5px] text-muted-foreground truncate">{hint}</div>}
+    </Link>
+  );
+}
+
 function BookingRow({ b, muted }) {
   const isoDate = b.slotDate ? formatDate(b.slotDate) : '';
   return (
-    <div className={`rounded-xl border border-border p-4 md:p-5 flex items-center gap-4 flex-wrap ${muted ? 'bg-muted/30' : 'bg-card'}`}>
+    <Link href={`/account/bookings/${b.id}`} className={`rounded-xl border border-border p-4 md:p-5 flex items-center gap-4 flex-wrap hover:border-foreground/30 transition-colors ${muted ? 'bg-muted/30' : 'bg-card'}`}>
       <div className="flex-1 min-w-0">
         <div className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground">Ref · {b.ref}</div>
         <div className="mt-1 font-serif text-[19px] leading-tight tracking-tight">
           {b.outcomeLabel || b.therapyLabel || b.therapy || 'Salt World session'}
         </div>
-        <div className="mt-1 text-[12.5px] text-muted-foreground">{isoDate}{b.slotTime ? ` · ${b.slotTime}` : ''}</div>
+        <div className="mt-1 text-[12.5px] text-muted-foreground">{isoDate}{b.slotTime ? ` · ${b.slotTime}` : ''}{b.schedule?.length > 1 ? ` · ${b.schedule.length} therapies` : ''}</div>
       </div>
       <div className="flex items-center gap-3 ml-auto">
         {b.total > 0 && <div className="font-mono text-[14px] font-semibold">₹{Number(b.total).toLocaleString('en-IN')}</div>}
         <span className="inline-flex items-center h-6 px-2.5 rounded-full text-[10.5px] font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">{b.status || 'confirmed'}</span>
+        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
       </div>
-    </div>
+    </Link>
   );
 }

@@ -199,6 +199,9 @@ async function handle(req, method, segs) {
       const result = await verifyOtp(body.phone, body.otp);
       if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
       const customer = await upsertCustomerByPhone(result.phone);
+      if (customer.disabled) {
+        return NextResponse.json({ ok: false, error: 'account_disabled' }, { status: 403 });
+      }
       const token = await signCustomerToken({ sub: customer.id, phone: customer.phone });
       await setCustomerCookie(token);
       return NextResponse.json({ ok: true, customer: { id: customer.id, name: customer.name, phone: customer.phone } });

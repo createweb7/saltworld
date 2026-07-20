@@ -80,12 +80,30 @@ export default function CustomerDetailClient({ user, id }) {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {c.disabled && (
+                  <span className="h-6 px-2.5 rounded-full bg-red-500/10 text-red-700 dark:text-red-400 text-[10.5px] uppercase tracking-[0.12em] font-semibold inline-flex items-center">Access disabled</span>
+                )}
                 {c.phone && (
                   <a href={`https://wa.me/${c.phone.replace(/\D/g,'')}`} target="_blank" rel="noreferrer"
                     className="h-9 px-3 rounded-md border border-border text-[12.5px] font-medium hover:bg-muted inline-flex items-center gap-1.5">
                     <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
                   </a>
                 )}
+                <button type="button"
+                  onClick={async () => {
+                    const action = c.disabled ? 'enable' : 'disable';
+                    if (!confirm(c.disabled ? 'Restore login access for this customer?' : 'Disable login access? The customer will not be able to sign in or verify OTP.')) return;
+                    try {
+                      const r = await fetch(`/api/admin/customers/${id}/${action}`, { method: 'POST' });
+                      if (!r.ok) throw new Error();
+                      toast.success(c.disabled ? 'Access restored' : 'Access disabled');
+                      qc.invalidateQueries({ queryKey: ['customer', id] });
+                    } catch { toast.error('Could not update access'); }
+                  }}
+                  className={cn('h-9 px-3 rounded-md text-[12.5px] font-medium inline-flex items-center gap-1.5',
+                    c.disabled ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'border border-red-500/40 text-red-600 hover:bg-red-500/10')}>
+                  {c.disabled ? 'Enable access' : 'Disable access'}
+                </button>
                 <button type="button" onClick={startNewBooking} className="h-9 px-3 rounded-md bg-foreground text-background text-[12.5px] font-semibold hover:bg-foreground/90 inline-flex items-center gap-1.5">
                   <Plus className="h-3.5 w-3.5" /> New booking
                 </button>
