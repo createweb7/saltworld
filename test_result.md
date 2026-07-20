@@ -2213,3 +2213,43 @@ agent_communication:
       - All validation and error handling working as expected
       
       NOTE: Did NOT retest S1, S3-S8 as instructed - they were already verified as passing in previous test run.
+
+
+  - agent: "main"
+    message: |
+      ✅ P0 VERIFICATION COMPLETE — ADMIN MEMBERSHIPS FORM & CUSTOMER AUTH WIDGET
+
+      **1. Admin Memberships Configuration UI**
+      - Verified the rewritten /app/app/admin/memberships/MembershipsClient.jsx renders
+        end-to-end. All 10 seeded plans display correctly with the new schema
+        (Type chip, price+GST, validity, includes, coverage, status).
+      - PlanEditor wide-drawer opens correctly with 6 tabs: General, Billing, Coverage,
+        Usage, Benefits, Policy. Each tab renders its dynamic fields per membership type.
+      - Backend `normalizePlan` in /app/lib/memberships.js was extended to persist the
+        new UI fields the form now sends: `code`, `billingCycle`, `startsOnFirstVisit`,
+        and added `trial` to MEMBERSHIP_TYPES + exported BILLING_CYCLES.
+      - API create + list flow verified for all three membership types
+        (sessions / unlimited / wallet) via cURL. All fields round-trip correctly.
+      - Legacy data migration: 10 pre-existing plans that were missing `type` and/or had
+        invalid `billingCycle` (e.g. "annual") were normalized in-place via PATCH so the
+        Plans table now shows correct Type chips for every row.
+
+      **2. Customer AuthWidget (Header)**
+      - /app/components/site/auth-widget.jsx confirmed rendering in both states:
+        - **Signed-out** — "Sign in" link with LogIn icon between "Gift" and "Book"
+          (works in both transparent hero and light scrolled variants).
+        - **Signed-in** — Avatar + name + chevron opens a polished dropdown with
+          "Signed in as" header, 4 menu items (My account, Memberships, Wallet & credits,
+          Refer friends), and Sign out (red). Outside-click and Escape both close it.
+      - /api/customer/me returns {customer: null} 200 when no cookie; returns full
+        customer object when sw_customer cookie present. OTP → verify → dropdown flow
+        end-to-end verified via cURL + screenshot.
+
+      **3. Dev-Environment Note**
+      - Next.js dev server hits its memory threshold when first compiling /admin/*
+        routes (2200+ modules due to Tiptap 3.x + tanstack-query bundle). It self-
+        restarts once, then subsequent hits are cached and instant. This only affects
+        cold-start dev experience — no production impact.
+
+      **Next up**: Awaiting user confirmation to move to P1 items (Outcomes → MongoDB
+      CMS migration; Lighthouse 95+ via next/image; Module 6 Shop).

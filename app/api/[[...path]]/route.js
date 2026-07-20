@@ -79,6 +79,18 @@ async function handle(req, method, segs) {
   }
 
   // ------- Public memberships (plans, customer subs, purchase) -------
+  // GET /api/customer/me — used by the header widget to render sign-in state.
+  if (segs[0] === 'customer' && segs[1] === 'me' && method === 'GET') {
+    const { getCurrentCustomer } = await import('@/lib/customer-auth');
+    const customer = await getCurrentCustomer();
+    if (!customer) return NextResponse.json({ customer: null }, { status: 200 });
+    return NextResponse.json({ customer: {
+      id: customer.id, name: customer.name || '', email: customer.email || '',
+      phone: customer.phone || '', picture: customer.picture || '',
+      walletBalance: customer.walletBalance || 0,
+    } });
+  }
+
   if (segs[0] === 'memberships') {
     // GET /api/memberships → all active plans (public catalog)
     if (segs.length === 1 && method === 'GET') {

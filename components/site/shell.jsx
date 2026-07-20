@@ -6,6 +6,7 @@ import {
   Menu, X, Phone, MessageCircle, ArrowRight, MapPin, Instagram, Mail, Clock, Sparkles,
 } from 'lucide-react';
 import { cn } from '@/components/ss/utils';
+import AuthWidget from '@/components/site/auth-widget';
 
 /* ------------------------------------------------------------------ */
 /* Announcement Bar — dismissible, persists in localStorage           */
@@ -188,10 +189,11 @@ export function TopNav({ transparentHero = true }) {
                 )}>{l.label}</Link>
             ))}
           </nav>
-          <div className="hidden md:flex items-center gap-2">
+          <div className="hidden md:flex items-center gap-3">
             <Link href="/gifts" className={cn('text-[13.5px] font-medium transition-colors',
               inverted ? 'text-white/80 hover:text-white' : 'text-foreground/70 hover:text-foreground'
             )}>Gift</Link>
+            <AuthWidget inverted={inverted} />
             <Link href="/book" className={cn(
               'inline-flex items-center gap-1.5 h-9 px-4 rounded-full text-[13.5px] font-semibold transition-all',
               inverted
