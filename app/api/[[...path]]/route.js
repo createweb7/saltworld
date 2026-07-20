@@ -78,6 +78,68 @@ async function handle(req, method, segs) {
     return NextResponse.json(rest);
   }
 
+  // ------- Public memberships (plans, customer subs, purchase) -------
+  if (segs[0] === 'memberships') {
+    // GET /api/memberships → all active plans (public catalog)
+    if (segs.length === 1 && method === 'GET') {
+      const docs = await db.collection('memberships').find({ active: { $ne: false } }).sort({ order: 1, price: 1 }).toArray();
+      return NextResponse.json(docs.map(({ _id, ...r }) => r));
+    }
+    // GET /api/memberships/:slug → one plan by slug OR id
+    if (segs.length === 2 && method === 'GET') {
+      const doc = await db.collection('memberships').findOne({ $or: [{ slug: segs[1] }, { id: segs[1] }], active: { $ne: false } });
+      if (!doc) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      const { _id, ...r } = doc;
+      return NextResponse.json(r);
+    }
+    // POST /api/memberships/purchase → { planId, paymentMethod:'online'|'offline', razorpayPaymentId? }
+    // For online path, the caller has already completed a Razorpay checkout via a
+    // pre-purchase order (see /api/payments/create-membership-order below).
+    if (segs[1] === 'purchase' && method === 'POST') {
+      const { getCurrentCustomer } = await import('@/lib/customer-auth');
+      const customer = await getCurrentCustomer();
+      if (!customer) return NextResponse.json({ error: 'not_signed_in' }, { status: 401 });
+      const body = await req.json().catch(() => ({}));
+      if (!body.planId) return NextResponse.json({ error: 'plan_required' }, { status: 400 });
+      try {
+        const { grantSubscription } = await import('@/lib/memberships');
+        const sub = await grantSubscription({
+          customerId: customer.id,
+          planId: body.planId,
+          payment: { method: body.paymentMethod || 'online', ref: body.razorpayPaymentId || null },
+        });
+        return NextResponse.json({ ok: true, subscription: sub });
+      } catch (e) {
+        return NextResponse.json({ error: e.message || 'purchase_failed' }, { status: 400 });
+      }
+    }
+  }
+
+  // ------- Customer subscriptions (signed-in) -------
+  if (segs[0] === 'customer' && segs[1] === 'subscriptions') {
+    const { getCurrentCustomer } = await import('@/lib/customer-auth');
+    const customer = await getCurrentCustomer();
+    if (!customer) return NextResponse.json({ error: 'not_signed_in' }, { status: 401 });
+    if (segs.length === 2 && method === 'GET') {
+      const subs = await db.collection('memberSubscriptions').find({ customerId: customer.id }).sort({ startAt: -1 }).toArray();
+      return NextResponse.json(subs.map(({ _id, ...r }) => r));
+    }
+    const sid = segs[2];
+    if (sid && segs[3] === 'usage' && method === 'GET') {
+      const rows = await db.collection('membership_usage').find({ subscriptionId: sid, customerId: customer.id }).sort({ consumedAt: -1 }).limit(50).toArray();
+      return NextResponse.json(rows.map(({ _id, ...r }) => r));
+    }
+    if (sid && segs[3] === 'freeze' && method === 'POST') {
+      try {
+        const { freezeSubscription } = await import('@/lib/memberships');
+        const sub = await db.collection('memberSubscriptions').findOne({ id: sid, customerId: customer.id });
+        if (!sub) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+        const after = await freezeSubscription({ subscriptionId: sid, actorId: customer.id, reason: 'customer_freeze' });
+        return NextResponse.json({ ok: true, subscription: after });
+      } catch (e) { return NextResponse.json({ error: e.message || 'freeze_failed' }, { status: 400 }); }
+    }
+  }
+
   // ------- Public scheduling engine (single source of truth) -------
   if (segs[0] === 'scheduling' && segs[1] === 'slots' && method === 'GET') {
     const u = new URL(req.url);
@@ -352,7 +414,55 @@ async function handle(req, method, segs) {
         status:     'confirmed',
         createdAt:  now.toISOString(),
       };
+
+      // Membership auto-consume — if a signed-in customer has an eligible active
+      // subscription for the primary therapy, apply it and zero out the total.
+      // Customer can opt out by explicitly setting body.skipMembership=true.
+      let membershipApplied = null;
+      if (doc.customerId && !body.skipMembership && therapySlugs.length > 0) {
+        try {
+          const { findEligibleSubscription, consumeForBooking } = await import('@/lib/memberships');
+          const sub = await findEligibleSubscription({
+            customerId: doc.customerId,
+            therapySlug: therapySlugs[0],
+            branchId,
+            atIso: startIso,
+          });
+          if (sub) {
+            membershipApplied = {
+              subscriptionId: sub.id,
+              planName: sub.planName || sub.planSnapshot?.name,
+              type: sub.planSnapshot?.type,
+            };
+            doc.membershipSubscriptionId = sub.id;
+            doc.membershipApplied = membershipApplied;
+            doc.total = 0;         // covered by membership
+            doc.payment = 'membership';
+            doc.priceLine = `Covered by "${membershipApplied.planName}"`;
+            // Fire consumption right after insertOne so we have bookingId.
+          }
+        } catch (e) { console.error('membership auto-apply failed', e); }
+      }
+
       await bookings.insertOne(doc);
+
+      // If membership auto-applied, log the consumption now that we have booking id.
+      if (membershipApplied) {
+        try {
+          const { consumeForBooking } = await import('@/lib/memberships');
+          const subDoc = await db.collection('memberSubscriptions').findOne({ id: membershipApplied.subscriptionId });
+          if (subDoc) {
+            await consumeForBooking({
+              subscription: subDoc,
+              bookingId: doc.id,
+              therapySlug: therapySlugs[0],
+              branchId,
+              atIso: startIso || new Date().toISOString(),
+            });
+          }
+        } catch (e) { console.error('consumeForBooking failed', e); }
+      }
+
 
       // Loyalty: award earn points for signed-in customers.
       if (doc.customerId && Number(doc.total) > 0) {
