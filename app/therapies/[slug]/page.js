@@ -4,6 +4,50 @@ import { ArrowRight, ArrowLeft, Clock, Check, XCircle, Sparkles, Gift, Award } f
 import { TopNav, SiteFooter, StickyBookingBar } from '@/components/site/shell';
 import { getTherapy, allTherapies } from '@/lib/therapies';
 import { getOutcome } from '@/lib/outcomes';
+import { getDb } from '@/lib/mongo';
+
+// Merge DB-configured ops fields (duration/price/description/images/SEO/heroImage)
+// with the dev-controlled rich content in lib/therapies.js (whoFor, benefits,
+// science, howItWorks, FAQs, gallery, related). DB is the source of truth for
+// anything the marketing/ops team can edit; static content is version-controlled
+// long-form copy.
+async function loadTherapy(slug) {
+  const staticData = getTherapy(slug);
+  try {
+    const db = await getDb();
+    const dbDoc = await db.collection('therapies').findOne({ slug, active: { $ne: false } });
+    if (!dbDoc) return staticData || null;
+    const { _id, ...rest } = dbDoc;
+    if (!staticData) {
+      // DB-only therapy (added by admin later): synthesize minimal shape.
+      return {
+        slug: rest.slug,
+        label: rest.name,
+        eyebrow: 'Therapy',
+        heroTagline: rest.description || '',
+        heroBody: rest.description || '',
+        heroImage: rest.heroImage || null,
+        durationMin: rest.durationMin || 60,
+        price: `₹${Number(rest.defaultPrice || 0).toLocaleString('en-IN')} / session`,
+        seo: rest.seo || null,
+        gallery: rest.images || [],
+      };
+    }
+    // Merge: DB overrides for ops fields, static for rich content.
+    return {
+      ...staticData,
+      durationMin: rest.durationMin ?? staticData.durationMin,
+      price: rest.defaultPrice ? `₹${Number(rest.defaultPrice).toLocaleString('en-IN')} / session` : staticData.price,
+      heroImage: rest.heroImage || staticData.heroImage,
+      heroBody: rest.description || staticData.heroBody,
+      seo: rest.seo || staticData.seo,
+      gallery: (rest.images && rest.images.length) ? rest.images : staticData.gallery,
+    };
+  } catch (e) {
+    console.error('therapy DB load failed, falling back to static', e);
+    return staticData || null;
+  }
+}
 
 export function generateStaticParams() {
   return allTherapies().map((t) => ({ slug: t.slug }));
@@ -11,7 +55,7 @@ export function generateStaticParams() {
 
 export async function generateMetadata({ params }) {
   const { slug } = await params;
-  const t = getTherapy(slug);
+  const t = await loadTherapy(slug);
   if (!t) return { title: 'Not found' };
   const url = `${process.env.NEXT_PUBLIC_BASE_URL || ''}/therapies/${slug}`;
   return {
@@ -30,7 +74,7 @@ export async function generateMetadata({ params }) {
 
 export default async function TherapyLandingPage({ params }) {
   const { slug } = await params;
-  const t = getTherapy(slug);
+  const t = await loadTherapy(slug);
   if (!t) notFound();
 
   const journeys = (t.recommendedJourneys || []).map((slug) => getOutcome(slug)).filter(Boolean);

@@ -184,7 +184,10 @@ export default function BookingsClient({ user }) {
                     <div>{b.slotDate || '—'}</div>
                     <div className="text-[11px] mt-0.5">{b.slotTime || ''}</div>
                   </td>
-                  <td className="px-4 py-3 text-[12.5px]">{b.therapyLabel || b.therapy || b.outcomeLabel || b.outcome || '—'}</td>
+                  <td className="px-4 py-3 text-[12.5px]">
+                    <div>{b.therapyLabel || b.therapy || b.outcomeLabel || b.outcome || '—'}</div>
+                    {b.resourceName && <div className="text-[11px] text-muted-foreground mt-0.5">{b.resourceName}</div>}
+                  </td>
                   <td className="px-4 py-3 font-mono text-[12.5px]">{b.total ? '₹' + b.total.toLocaleString('en-IN') : '—'}</td>
                   <td className="px-4 py-3"><StatusPill status={b.status} /></td>
                   <td className="px-4 py-3 text-right">

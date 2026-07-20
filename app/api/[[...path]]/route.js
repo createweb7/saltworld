@@ -78,6 +78,40 @@ async function handle(req, method, segs) {
     return NextResponse.json(rest);
   }
 
+  // ------- Public therapies (used by /therapies pages + booking flow) -------
+  if (segs[0] === 'therapies') {
+    const therapiesCol = db.collection('therapies');
+    if (segs.length === 1 && method === 'GET') {
+      // Only publish therapies that are active AND online-bookable by default
+      const docs = await therapiesCol.find({ active: { $ne: false } }).sort({ isSystem: -1, name: 1 }).toArray();
+      return NextResponse.json(docs.map(({ _id, ...rest }) => rest));
+    }
+    if (segs.length === 2 && method === 'GET') {
+      const doc = await therapiesCol.findOne({ slug: segs[1], active: { $ne: false } });
+      if (!doc) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      const { _id, ...rest } = doc;
+      // Attach linked resources by branch (public: only names & count, no ids)
+      const resources = await db.collection('resources').find({ id: { $in: rest.resourceIds || [] } }).toArray();
+      const byBranch = {};
+      for (const r of resources) {
+        const bid = r.branchId || 'default';
+        byBranch[bid] = (byBranch[bid] || 0) + 1;
+      }
+      rest.resourceCountByBranch = byBranch;
+      return NextResponse.json(rest);
+    }
+    // Slot availability: GET /api/therapies/:slug/slots?date=YYYY-MM-DD&branchId=…
+    if (segs.length === 3 && segs[2] === 'slots' && method === 'GET') {
+      const u = new URL(req.url);
+      const date = u.searchParams.get('date');
+      const branchId = u.searchParams.get('branchId') || null;
+      if (!date) return NextResponse.json({ error: 'date_required' }, { status: 400 });
+      const { daySlots } = await import('@/lib/scheduling');
+      const slots = await daySlots({ therapySlug: segs[1], branchId, dateIso: date });
+      return NextResponse.json({ slug: segs[1], date, branchId, slots });
+    }
+  }
+
   // ------- Customer wallet + referrals (session-cookie protected) -------
   if (segs[0] === 'customer' && (segs[1] === 'wallet' || segs[1] === 'referrals')) {
     const { getCurrentCustomer } = await import('@/lib/customer-auth');
@@ -183,6 +217,33 @@ async function handle(req, method, segs) {
           branchId = b?.id || null;
         } catch { /* fall through */ }
       }
+      // Resource allocation — pick a free resource for the primary therapy
+      // at the requested slot. Skips when startAt/date+time can't be resolved.
+      let resourceId = null;
+      let resourceName = null;
+      let blockedFrom = null;
+      let blockedTo = null;
+      const primaryTherapySlug = Array.isArray(body.therapies) && body.therapies.length > 0
+        ? body.therapies[0].slug : body.therapy;
+      // Derive an ISO startAt: prefer explicit body.startAt, else compose from slotDate+slotTime.
+      let startIso = body.startAt || null;
+      if (!startIso && body.slotDate && body.slotTime) {
+        // slotDate: YYYY-MM-DD, slotTime: HH:mm — assume IST (+05:30).
+        startIso = `${body.slotDate}T${body.slotTime}:00+05:30`;
+      }
+      if (primaryTherapySlug && startIso) {
+        try {
+          const { allocateResource } = await import('@/lib/scheduling');
+          const alloc = await allocateResource({ therapySlug: primaryTherapySlug, branchId, startIso });
+          if (alloc) {
+            resourceId = alloc.resourceId;
+            resourceName = alloc.resourceName;
+            blockedFrom = alloc.blockedFrom;
+            blockedTo = alloc.blockedTo;
+          }
+        } catch (e) { console.error('allocateResource failed', e); }
+      }
+
       const doc = {
         id: randomUUID(),
         ref,
@@ -193,10 +254,15 @@ async function handle(req, method, segs) {
         therapies:    Array.isArray(body.therapies) ? body.therapies : (body.therapy ? [{ slug: body.therapy, label: body.therapyLabel, role: 'Primary' }] : []),
         slotDate:   body.slotDate   || null,
         slotTime:   body.slotTime   || null,
+        startAt:    startIso        || null,
         guests:     body.guests     || 1,
         contact:    body.contact    || {},
         customerId: body.customerId || null,
         branchId,
+        resourceId,
+        resourceName,
+        blockedFrom,
+        blockedTo,
         payment:    body.payment    || 'at-visit',
         priceLine:  body.priceLine  || null,
         total:      body.total      || 0,

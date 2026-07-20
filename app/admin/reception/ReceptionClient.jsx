@@ -130,7 +130,7 @@ function Column({ label, hint, items, onSelect, selectedId }) {
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-[13px] font-medium truncate">{b.contact?.name || 'Guest'}</div>
-              <div className="text-[11px] text-muted-foreground truncate">{b.slotTime} · {b.therapy || b.outcome}</div>
+              <div className="text-[11px] text-muted-foreground truncate">{b.slotTime} · {b.therapy || b.outcome}{b.resourceName ? ` · ${b.resourceName}` : ''}</div>
             </div>
             <div className="text-[11.5px] font-mono text-muted-foreground">{b.ref}</div>
           </button>
