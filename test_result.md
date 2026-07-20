@@ -2215,6 +2215,78 @@ agent_communication:
       NOTE: Did NOT retest S1, S3-S8 as instructed - they were already verified as passing in previous test run.
 
 
+frontend:
+  - task: "Admin Memberships — Coverage tab: Applicable Therapies picker visibility"
+    implemented: true
+    working: "NA"
+    file: "/app/app/admin/memberships/MembershipsClient.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: false
+        -agent: "user"
+        -comment: "User reported the therapies list is not visible in the Coverage tab of the New Membership Plan drawer. Screenshot shows 'All therapies' pill active but no therapy chips visible below it — user cannot pick specific therapies. Branches list ('HSR Layout', 'Hyderabad') renders correctly right below."
+        -working: "NA"
+        -agent: "main"
+        -comment: |
+            ROOT CAUSE: The therapy chip grid was gated behind `!isAllTherapies`, i.e. it
+            only rendered when `applicableTherapies.length > 0`. Since new plans start
+            with an empty array, the grid was never rendered — there was no path to
+            select a first specific therapy.
+
+            FIX APPLIED to /app/app/admin/memberships/MembershipsClient.jsx (Coverage tab):
+            - The therapy chip grid is now ALWAYS rendered (whenever `therapies.length > 0`).
+            - The "All therapies" pill remains a visual toggle (checkmark when active).
+            - Clicking any therapy chip auto-selects it (and implicitly deactivates
+              "All therapies", since applicableTherapies is no longer empty).
+            - Clicking "All therapies" while it's already active is now a no-op with
+              a tooltip-style hint "or pick specific ones below".
+            - Added empty-state message when no therapies are configured yet.
+            - Fixed potential key collision by falling back to `th.slug` when `th.id`
+              is undefined.
+
+            Backend endpoint /api/admin/services/therapies verified returning 5 therapies
+            (float-therapy, salt-therapy, infrared-sauna, cold-plunge, red-light-therapy).
+        -working: "NA"
+        -agent: "testing"
+        -comment: |
+            ⚠️ CODE REVIEW VERIFICATION (UI testing blocked by infrastructure constraints)
+            
+            **CODE REVIEW FINDINGS:**
+            ✅ FIX CONFIRMED CORRECT in /app/app/admin/memberships/MembershipsClient.jsx (lines 318-332):
+            - The therapy chip grid is now ALWAYS rendered (no longer gated behind `!isAllTherapies`)
+            - Grid renders whenever `therapies.length > 0`, regardless of `applicableTherapies` state
+            - "All therapies" toggle (line 310-316) remains visible with proper active/inactive states
+            - Clicking a therapy chip (line 325) calls `toggleArr('applicableTherapies', th.slug)` which:
+              * Adds therapy to applicableTherapies array (making isAllTherapies false)
+              * Changes chip prefix from "+ " to "✓ " with brand-teal styling
+            - Clicking "All therapies" button (line 310) calls `toggleAllTherapies()` which clears the array
+            - Branch chips (lines 335-349) render correctly below therapy chips
+            
+            **UI TESTING ATTEMPTED:**
+            ❌ UNABLE TO VERIFY IN UI due to dev environment constraints:
+            - Next.js dev server compiles /admin/memberships with 2200+ modules (Tiptap 3.x bundle)
+            - Server hits 512 MB memory threshold and restarts during compilation
+            - Page stuck on "Loading page..." for 60+ seconds, never fully renders
+            - This is the exact issue mentioned in review request: "dev server may take ~10-15s cold-start"
+            - Multiple test attempts with extended timeouts (60s+) all failed at same point
+            
+            **CONCLUSION:**
+            The fix is CORRECT based on code review. The therapy chip grid will now be visible
+            in the Coverage tab even when "All therapies" is active, allowing users to select
+            specific therapies. The implementation matches the fix description exactly.
+            
+            UI verification cannot be completed in current dev environment due to memory constraints
+            causing constant server restarts. This is an infrastructure limitation, not a code issue.
+            
+            **RECOMMENDATION:**
+            - Mark as working: "NA" (cannot verify UI due to infrastructure)
+            - Code review confirms fix is correct
+            - Consider testing in production/staging environment with higher memory limits
+            - Or test after optimizing Tiptap bundle size to reduce memory pressure
+
+
   - agent: "main"
     message: |
       ✅ P0 VERIFICATION COMPLETE — ADMIN MEMBERSHIPS FORM & CUSTOMER AUTH WIDGET
@@ -2253,3 +2325,31 @@ agent_communication:
 
       **Next up**: Awaiting user confirmation to move to P1 items (Outcomes → MongoDB
       CMS migration; Lighthouse 95+ via next/image; Module 6 Shop).
+
+  - agent: "testing"
+    message: |
+      ⚠️ ADMIN MEMBERSHIPS COVERAGE TAB BUG FIX — CODE REVIEW VERIFICATION ONLY
+      
+      **TASK:** Verify fix for reported bug where therapy chips were not visible in the 
+      Coverage tab of the New Membership Plan drawer when "All therapies" was active.
+      
+      **CODE REVIEW RESULT:**
+      ✅ FIX CONFIRMED CORRECT — The therapy chip grid (lines 318-332 in MembershipsClient.jsx) 
+      is now ALWAYS rendered when therapies.length > 0, no longer gated behind !isAllTherapies.
+      This allows users to select specific therapies even when starting with "All therapies" active.
+      
+      **UI TESTING RESULT:**
+      ❌ UNABLE TO COMPLETE — Dev environment infrastructure constraints prevented UI verification:
+      - /admin/memberships page compiles 2200+ modules (Tiptap 3.x bundle)
+      - Server hits 512 MB memory limit and restarts during compilation
+      - Page stuck on "Loading page..." for 60+ seconds across multiple test attempts
+      - This matches the "10-15s cold-start" warning in the review request
+      
+      **CONCLUSION:**
+      The fix is architecturally correct based on code review. The implementation matches the 
+      fix description exactly. UI verification cannot be completed in current dev environment 
+      due to memory constraints causing constant server restarts.
+      
+      **RECOMMENDATION:**
+      Consider testing in production/staging environment with higher memory limits, or after 
+      optimizing the Tiptap bundle size to reduce memory pressure during dev compilation.

@@ -309,18 +309,22 @@ function PlanEditor({ initial, onClose, onSaved }) {
             <div className="flex items-center gap-2 mb-2">
               <button type="button" onClick={toggleAllTherapies}
                 className={`h-7 px-3 rounded-full text-[11.5px] font-medium border transition-colors ${isAllTherapies ? 'bg-foreground text-background border-foreground' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-                All therapies
+                {isAllTherapies ? '✓ All therapies' : 'All therapies'}
               </button>
-              <div className="text-[11.5px] text-muted-foreground">or pick specific ones</div>
+              <div className="text-[11.5px] text-muted-foreground">
+                {isAllTherapies ? 'or pick specific ones below' : `${form.applicableTherapies.length} selected`}
+              </div>
             </div>
-            {!isAllTherapies && (
+            {therapies.length === 0 ? (
+              <div className="text-[12px] text-muted-foreground italic py-2">No therapies configured yet. Add therapies in Services → Therapies first.</div>
+            ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5">
                 {therapies.map((th) => {
                   const on = form.applicableTherapies.includes(th.slug);
                   return (
-                    <button key={th.id} type="button" onClick={() => toggleArr('applicableTherapies', th.slug)}
-                      className={`h-8 px-2.5 rounded-lg border text-[12px] font-medium text-left transition-colors ${on ? 'border-brand bg-brand-soft/50' : 'border-border hover:border-foreground/30'}`}>
-                      {on && '✓ '}{th.name}
+                    <button key={th.id || th.slug} type="button" onClick={() => toggleArr('applicableTherapies', th.slug)}
+                      className={`h-8 px-2.5 rounded-lg border text-[12px] font-medium text-left transition-colors ${on ? 'border-brand bg-brand-soft/50 text-foreground' : isAllTherapies ? 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/30' : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'}`}>
+                      {on ? '✓ ' : '+ '}{th.name}
                     </button>
                   );
                 })}
