@@ -1108,9 +1108,15 @@ frontend:
                 totalDurationMin=60, totalVisitMin=80, groups populated with 15-min-grid times.
             S2) GET /api/scheduling/slots with three therapies
                 (therapies=float-therapy,infrared-sauna,cold-plunge) → 200 with totalDurationMin=100,
-                totalVisitMin≈135 (~2h15m).
+                totalVisitMin≈135 (~2h15m). Each slot now MUST contain a `plan[]` sub-array with
+                entries {therapySlug, name, from, to, durationMin} for the itinerary UI.
             S3) Missing therapies param → 400 {error:'therapies_required'}.
             S4) Missing date param → 400 {error:'date_required'}.
+            S9) NEW: GET /api/scheduling/therapy-slots?therapy=infrared-sauna&date=<future>&after=11:20
+                → 200 with groups where every returned slot.time is >= '11:20'. Without `after`
+                param, all times from open to close are returned.
+            S10) NEW: therapy-slots validation — missing `therapy` param → 400 therapy_required;
+                 missing `date` → 400 date_required.
             S5) POST /api/bookings with therapies=[{slug:'float-therapy'},{slug:'infrared-sauna'},
                 {slug:'cold-plunge'}] + slotDate + slotTime → 200 with:
                   • schedule: 3-item array, each with therapySlug, resourceId, resourceName, from, to
@@ -1172,6 +1178,49 @@ frontend:
           
           All journey-aware scheduling features working correctly. Resource allocation, parallel booking, 
           conflict detection, and slot exclusion all functional. Created 6 test bookings.
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ VERIFIED NEW/UPDATED SCHEDULING ENDPOINTS (S2, S9, S10) - ALL TESTS PASSED (6/6):
+          
+          S2 — Updated /api/scheduling/slots with plan[] array:
+          - GET /api/scheduling/slots?therapies=float-therapy,infrared-sauna,cold-plunge&date=2027-03-15 returns 200 ✅
+          - totalDurationMin === 100 ✅
+          - totalVisitMin === 135 (within 130-145 range) ✅
+          - groups.morning is non-empty (24 slots) ✅
+          - **groups.morning[0].plan is an array of 3 items** ✅
+          - Each plan item has: therapySlug, name, from, to, durationMin ✅
+          - Therapy slugs in correct order: [float-therapy, infrared-sauna, cold-plunge] ✅
+          - Durations correct: [60, 35, 5] ✅
+          - Times are sequential: plan[0].to <= plan[1].from <= plan[2].to ✅
+          
+          S9 — New /api/scheduling/therapy-slots endpoint:
+          Test A (no 'after' filter):
+          - GET /api/scheduling/therapy-slots?therapy=infrared-sauna&date=2027-03-15 returns 200 ✅
+          - groups has correct structure (morning/afternoon/evening arrays) ✅
+          - Total slots: 58 (covering full working hours) ✅
+          - Slots have correct structure: {time, startIso, visitFromIso, visitToIso, plan} ✅
+          
+          Test B (with 'after=11:20' cutoff):
+          - GET /api/scheduling/therapy-slots?therapy=infrared-sauna&date=2027-03-15&after=11:20 returns 200 ✅
+          - All 36 returned slots have time >= '11:20' ✅
+          - First slot time: '11:30' (correctly filtered) ✅
+          - No slots before 11:20 ✅
+          
+          Test C (cutoff after close):
+          - GET /api/scheduling/therapy-slots?therapy=infrared-sauna&date=2027-03-15&after=22:00 returns 200 ✅
+          - All groups empty (morning: 0, afternoon: 0, evening: 0) ✅
+          - Correctly handles cutoff after branch closes at 20:00 ✅
+          
+          S10 — Validation on therapy-slots:
+          - GET /api/scheduling/therapy-slots?date=2027-03-15 (no therapy) → 400 {error:'therapy_required'} ✅
+          - GET /api/scheduling/therapy-slots?therapy=float-therapy (no date) → 400 {error:'date_required'} ✅
+          
+          **SUCCESS RATE: 100% (6/6 tests passed)**
+          
+          All new/updated scheduling endpoints working correctly. The plan[] array is now properly included
+          in each slot for the itinerary UI. The new therapy-slots endpoint with 'after' filter is working
+          as expected for the manual-mode Wellness Journey planner.
 
   - task: "M3 Referral System — customer + admin endpoints"
     implemented: true
@@ -2117,3 +2166,50 @@ agent_communication:
       All authentication, validation, insufficient balance protection, history tracking, and automatic booking earn working correctly.
       
       NOTE: Did NOT retest Phase 3.1/3.2/3.3 endpoints (79+) as instructed - they were already verified as passing.
+
+
+  - agent: "testing"
+    message: |
+      ✅ SCHEDULING ENDPOINTS (S2, S9, S10) VERIFICATION COMPLETE - ALL TESTS PASSED (6/6)
+      
+      Executed targeted backend API testing for the two new/updated scheduling endpoints as requested
+      using /app/backend_test_scheduling_s2_s9_s10.py against https://saltwell-arch.preview.emergentagent.com/api
+      
+      **TEST RESULTS SUMMARY:**
+      
+      **S2 — Updated /api/scheduling/slots with plan[] array (1/1 test passed)**
+      ✅ GET /api/scheduling/slots?therapies=float-therapy,infrared-sauna,cold-plunge&date=2027-03-15
+          - Returns 200 with totalDurationMin=100, totalVisitMin=135
+          - groups.morning[0].plan is an array of 3 items ✅
+          - Each plan item contains: therapySlug, name, from, to, durationMin
+          - Therapy order correct: [float-therapy → infrared-sauna → cold-plunge]
+          - Durations correct: [60, 35, 5]
+          - Times are sequential (plan[0].to <= plan[1].from <= plan[2].to)
+      
+      **S9 — New /api/scheduling/therapy-slots endpoint (3/3 tests passed)**
+      ✅ Test A (no 'after' filter):
+          - GET /api/scheduling/therapy-slots?therapy=infrared-sauna&date=2027-03-15
+          - Returns 200 with 58 total slots covering full working hours
+          - groups structure correct (morning/afternoon/evening arrays)
+      
+      ✅ Test B (with 'after=11:20' cutoff):
+          - GET /api/scheduling/therapy-slots?therapy=infrared-sauna&date=2027-03-15&after=11:20
+          - Returns 200 with 36 slots, all with time >= '11:20'
+          - First slot time: '11:30' (correctly filtered)
+      
+      ✅ Test C (cutoff after close):
+          - GET /api/scheduling/therapy-slots?therapy=infrared-sauna&date=2027-03-15&after=22:00
+          - Returns 200 with all groups empty (no slots after 20:00 close)
+      
+      **S10 — Validation on therapy-slots (2/2 tests passed)**
+      ✅ Missing 'therapy' param → 400 {error:'therapy_required'}
+      ✅ Missing 'date' param → 400 {error:'date_required'}
+      
+      **SUCCESS RATE: 100% (6/6 tests passed)**
+      
+      NO CRITICAL ISSUES FOUND. Both new/updated scheduling endpoints are production-ready.
+      - The plan[] array is now properly included in each slot for the itinerary UI
+      - The new therapy-slots endpoint with 'after' filter works correctly for the manual-mode Wellness Journey planner
+      - All validation and error handling working as expected
+      
+      NOTE: Did NOT retest S1, S3-S8 as instructed - they were already verified as passing in previous test run.

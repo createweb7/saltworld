@@ -91,6 +91,30 @@ async function handle(req, method, segs) {
     return NextResponse.json(r || { groups: { morning: [], afternoon: [], evening: [] }, totalDurationMin: 0, totalVisitMin: 0 });
   }
 
+  // Single-therapy slot list with optional 'after' cutoff. Used by the
+  // manual-mode Wellness Journey planner to filter downstream therapy cards.
+  if (segs[0] === 'scheduling' && segs[1] === 'therapy-slots' && method === 'GET') {
+    const u = new URL(req.url);
+    const therapy = u.searchParams.get('therapy');
+    const branchId = u.searchParams.get('branchId') || null;
+    const date = u.searchParams.get('date');
+    const after = u.searchParams.get('after'); // 'HH:mm' local, exclusive
+    if (!therapy) return NextResponse.json({ error: 'therapy_required' }, { status: 400 });
+    if (!date) return NextResponse.json({ error: 'date_required' }, { status: 400 });
+    const { availableJourneySlots } = await import('@/lib/scheduling');
+    const r = await availableJourneySlots({ therapySlugs: [therapy], branchId, dateIso: date });
+    if (!r) return NextResponse.json({ groups: { morning: [], afternoon: [], evening: [] }, totalDurationMin: 0, totalVisitMin: 0 });
+    if (after) {
+      const filt = (arr) => arr.filter((s) => s.time >= after);
+      r.groups = {
+        morning:   filt(r.groups.morning),
+        afternoon: filt(r.groups.afternoon),
+        evening:   filt(r.groups.evening),
+      };
+    }
+    return NextResponse.json(r);
+  }
+
   // ------- Public therapies (used by /therapies pages + booking flow) -------
   if (segs[0] === 'therapies') {
     const therapiesCol = db.collection('therapies');
