@@ -2218,7 +2218,7 @@ agent_communication:
 frontend:
   - task: "Admin Memberships — Coverage tab: Applicable Therapies picker visibility"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/app/admin/memberships/MembershipsClient.jsx"
     stuck_count: 0
     priority: "high"
@@ -2285,6 +2285,62 @@ frontend:
             - Code review confirms fix is correct
             - Consider testing in production/staging environment with higher memory limits
             - Or test after optimizing Tiptap bundle size to reduce memory pressure
+        -working: true
+        -agent: "testing"
+        -comment: |
+            ✅ RETEST COMPLETE — ADMIN MEMBERSHIPS COVERAGE TAB FIX VERIFIED (ALL TESTS PASSED)
+            
+            **RETEST APPROACH:**
+            - Used pre-warmed /admin/memberships route (cached, 105ms load time)
+            - Injected admin cookie directly to avoid /admin/dashboard redirect (memory restart trigger)
+            - Navigated straight to /admin/memberships with 4s hydration wait
+            
+            **TEST RESULTS (14/14 verification steps passed):**
+            
+            ✅ STEP 1-4: Page Load & Setup
+            - Plans list loaded successfully with 10 plans visible
+            - "New plan" button clicked, drawer opened with title "New membership plan"
+            - Coverage tab clicked and rendered
+            
+            ✅ STEP 9: FIX VERIFICATION (THE KEY TEST)
+            - "All therapies" pill visible and active with "✓ All therapies" text
+            - Hint text "or pick specific ones below" visible
+            - **CRITICAL: Therapy chip grid is now VISIBLE with 5 therapies:**
+              1. + Float Therapy
+              2. + Halotherapy
+              3. + Infrared Sauna
+              4. + Cold Plunge
+              5. + Red-light Therapy
+            - Branch chips visible (HSR Layout, Hyderabad)
+            
+            ✅ STEP 11: INTERACTION VERIFICATION (Float Therapy selection)
+            - Float Therapy chip changed to "✓ Float Therapy" (checkmark prefix)
+            - "All therapies" pill deactivated (no checkmark)
+            - Hint text changed to "1 selected"
+            
+            ✅ STEP 12: SECOND SELECTION (Cold Plunge)
+            - Cold Plunge chip changed to "✓ Cold Plunge" (checkmark prefix)
+            - Hint text changed to "2 selected"
+            
+            ✅ STEP 14: REACTIVATION VERIFICATION (All therapies pill clicked)
+            - Float Therapy chip deselected (back to "+ Float Therapy")
+            - Cold Plunge chip deselected (back to "+ Cold Plunge")
+            - "All therapies" pill reactivated (has "✓ All therapies")
+            - Hint text back to "or pick specific ones below"
+            
+            **SCREENSHOTS CAPTURED:**
+            1. memberships_plans_list.png - 10 plans visible in table
+            2. coverage_tab_initial.png - Coverage tab with therapy grid visible
+            3. coverage_tab_float_selected.png - Float Therapy selected with checkmark
+            4. coverage_tab_all_therapies_reactivated.png - All therapies reactivated
+            
+            **CONCLUSION:**
+            The bug fix is 100% working! The therapy chip grid is now always rendered when
+            therapies exist, regardless of the `isAllTherapies` state. This allows users to
+            select specific therapies even when starting with "All therapies" active. The
+            reported bug has been completely resolved.
+            
+            **SUCCESS RATE: 100% (14/14 verification steps passed)**
 
 
   - agent: "main"
@@ -2353,3 +2409,52 @@ frontend:
       **RECOMMENDATION:**
       Consider testing in production/staging environment with higher memory limits, or after 
       optimizing the Tiptap bundle size to reduce memory pressure during dev compilation.
+
+
+  - agent: "testing"
+    message: |
+      ✅ RETEST COMPLETE — ADMIN MEMBERSHIPS COVERAGE TAB FIX FULLY VERIFIED (100% SUCCESS)
+      
+      **RETEST CONTEXT:**
+      - Previous test attempt failed due to memory constraints (512 MB limit causing server restarts)
+      - Main agent pre-warmed the /admin/memberships route (cached, 105ms load time)
+      - Used recommended approach: inject admin cookie directly, navigate straight to /admin/memberships
+      
+      **TEST EXECUTION:**
+      - Injected sw_admin cookie to avoid /admin/dashboard redirect (memory restart trigger)
+      - Navigated directly to http://localhost:3000/admin/memberships
+      - Waited 4s for React hydration + tanstack-query data fetch
+      - Page loaded successfully with 10 plans visible in table
+      
+      **VERIFICATION RESULTS (14/14 steps passed):**
+      
+      ✅ **FIX VERIFICATION (Step 9) — THE KEY TEST:**
+      - "All therapies" pill visible and active with "✓ All therapies" text
+      - Hint text "or pick specific ones below" visible
+      - **CRITICAL: Therapy chip grid is now VISIBLE with 5 therapies:**
+        1. + Float Therapy
+        2. + Halotherapy
+        3. + Infrared Sauna
+        4. + Cold Plunge
+        5. + Red-light Therapy
+      - Branch chips visible below (HSR Layout, Hyderabad)
+      
+      ✅ **INTERACTION VERIFICATION (Steps 11-14):**
+      - Clicking Float Therapy chip: Changed to "✓ Float Therapy", "All therapies" deactivated, hint → "1 selected"
+      - Clicking Cold Plunge chip: Changed to "✓ Cold Plunge", hint → "2 selected"
+      - Clicking "All therapies" pill: Both chips deselected (back to "+ " prefix), pill reactivated, hint → "or pick specific ones below"
+      
+      **SCREENSHOTS CAPTURED:**
+      1. memberships_plans_list.png - 10 plans visible in table
+      2. coverage_tab_initial.png - Coverage tab with therapy grid visible (all 5 therapies with "+ " prefix)
+      3. coverage_tab_float_selected.png - Float Therapy selected with "✓" checkmark
+      4. coverage_tab_all_therapies_reactivated.png - All therapies reactivated after clicking pill
+      
+      **CONCLUSION:**
+      The bug fix is 100% working! The therapy chip grid is now always rendered when therapies exist,
+      regardless of the `isAllTherapies` state. Users can now select specific therapies even when
+      starting with "All therapies" active. The reported bug has been completely resolved.
+      
+      **SUCCESS RATE: 100% (14/14 verification steps passed)**
+      
+      NO ISSUES FOUND. The Coverage tab functionality is working perfectly as designed.
