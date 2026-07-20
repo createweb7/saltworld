@@ -93,7 +93,7 @@ export default async function TherapyLandingPage({ params }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <TopNav transparentHero />
+      <TopNav transparentHero={false} />
 
       {/* Hero */}
       <section className="relative pt-24 md:pt-32 pb-16 md:pb-24 overflow-hidden">
