@@ -2827,3 +2827,143 @@ frontend:
             
             All validation, error handling, data integrity checks, and security measures functioning correctly.
 
+
+  - task: "BUG FIX — Calendar block ignored when customer has no branch context"
+    implemented: true
+    working: true
+    file: "/app/lib/scheduling.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: false
+        -agent: "user"
+        -comment: |
+            Reported: A whole day is blocked via Admin → Calendar Blocks, but the
+            customer is still shown available slots for that day when they visit
+            /book or hit /api/scheduling/slots.
+        -working: "NA"
+        -agent: "main"
+        -comment: |
+            ROOT CAUSE: When the admin creates a branch-scoped block (e.g., HSR
+            Layout for 2026-07-22), the block doc gets `branchId:'HSR-ID'`. However,
+            the customer visits /book without any branch pre-selected, so the
+            scheduling endpoint runs with `branchId=null`. The block-conflict query
+            was:  `{ scope:'branch', $or:[{branchId:null},{branchId:null}] }` — which
+            NEVER matched a block scoped to a specific branch. So the branch check
+            silently passed and slots were rendered.
+
+            FIX APPLIED to /app/lib/scheduling.js:
+            - Refactored `checkJourneyAvailability` to move the calendar-block check
+              INSIDE the resource loop and use `r.branchId` (the CANDIDATE
+              RESOURCE'S actual branch) instead of the query's branchId. This is
+              semantically correct because a customer can only be allocated a
+              resource, and that resource belongs to a specific branch — so blocks
+              affecting THAT branch should filter it out.
+            - The per-resource check now covers all three scopes (branch / therapy
+              / resource) in one call via `findConflictingBlock`.
+            - Preserves the "first block reason" so 409 responses still surface a
+              friendly reason string like `calendar_block_branch_group_booking`.
+
+            SMOKE TEST RESULTS (main agent, cURL):
+            - Block 2026-07-22 at HSR (existing user block):
+              • /api/scheduling/slots?date=2026-07-22           → 0 slots ✅ (was 57 before fix)
+              • /api/scheduling/slots?date=2026-07-22&branchId=HSR → 0 slots ✅
+              • /api/scheduling/slots?date=2026-07-23           → 57 slots ✅ (control)
+        -working: true
+        -agent: "testing"
+        -comment: |
+            ✅ VERIFIED ALL CALENDAR BLOCK BUG FIX TESTS (16/16 PASSED):
+            
+            Executed comprehensive backend API testing for the calendar block bug fix
+            using /app/backend_test_calendar_block_bugfix.py against https://saltwell-arch.preview.emergentagent.com/api
+            
+            **BUG FIX VERIFICATION — THE EXACT USER-REPORTED BUG (Tests A1-A4: 4/4 passed)**
+            ✅ A1: GET /api/scheduling/slots?therapies=salt-therapy&date=2026-07-22 (NO branchId)
+                - Returns 200 with 0 total slots (all groups empty)
+                - **THIS IS THE EXACT BUG REPORTED BY USER** — branch block now correctly blocks slots even without branchId in query
+                - Before fix: returned 57 slots (bug)
+                - After fix: returns 0 slots (correct) ✅
+            ✅ A2: Same with explicit &branchId=HSR → 200 with 0 slots (branch block honored)
+            ✅ A3: Same with &date=2026-07-23 (day after block) → 200 with 57 slots (control test, unblocked day works)
+            ✅ A4: POST /api/bookings on 2026-07-22 at 10:00 → 409 with:
+                - error='slot_unavailable'
+                - reason='calendar_block_branch_group_booking' (correct reason surfaced)
+                - suggestions array with 5 next-day slots
+            
+            **NEW BLOCK SCENARIOS (Tests B5-B9: 5/5 passed)**
+            ✅ B5: Created resource-scope block for Salt Cave on 2026-08-05 (12:00-14:00 IST) with reason=maintenance
+            ✅ B6: Verified slots for 2026-08-05 salt-therapy:
+                - 10:00 slot present (before block) ✅
+                - 12:00-14:00 slots excluded (8 slots blocked) ✅
+                - 15:00 slot present (after block) ✅
+            ✅ B7: Attempt booking at 2026-08-05 12:30 → 409 with reason='calendar_block_resource_maintenance'
+            ✅ B8: Deleted resource block successfully
+            ✅ B9: Re-checked 2026-08-05: 8 slots in 12:00-14:00 range returned after deletion
+            
+            **THERAPY-SCOPE BLOCK (Tests C10-C13: 4/4 passed)**
+            ✅ C10: Created therapy-scope block for float-therapy at HSR on 2026-08-10 (10:00-13:00 IST) with reason=staff_leave
+            ✅ C11: GET /api/scheduling/slots?therapies=float-therapy&date=2026-08-10 → 10:00-13:00 slots excluded (12 slots blocked)
+            ✅ C12: GET /api/scheduling/slots?therapies=salt-therapy&date=2026-08-10 → all 12 slots in 10:00-13:00 range present (block doesn't affect salt)
+            ✅ C13: Deleted therapy block successfully
+            
+            **MULTI-THERAPY JOURNEY (Test D14: 1/1 passed)**
+            ✅ D14: GET /api/scheduling/slots?therapies=salt-therapy,float-therapy&date=2026-07-22 → 0 slots (branch block affects entire journey)
+            
+            **REGRESSION CHECK (Tests E15-E16: 2/2 passed)**
+            ✅ E15: POST /api/bookings for 2026-07-23 10:00 salt-therapy → 200 (booking created successfully on unblocked date)
+            ✅ E16: Subsequent booking at same time → 409 with error='slot_unavailable' (double-booking guard still works)
+            
+            **CLEANUP (Test F17: completed)**
+            ✅ Deleted all test blocks (2 created during testing)
+            ✅ Deleted test booking from MongoDB (1 created)
+            ✅ Did NOT delete pre-existing 2026-07-22 branch block (as instructed in review request)
+            
+            **SUCCESS RATE: 100% (16/16 tests passed)**
+            
+            **CRITICAL FINDING:**
+            The bug fix is 100% working! Test A1 is the exact user-reported bug scenario:
+            - Customer visits /book without selecting a branch (branchId=null in query)
+            - Admin has created a branch-scoped block for HSR Layout on 2026-07-22
+            - BEFORE FIX: Customer saw 57 available slots (bug)
+            - AFTER FIX: Customer sees 0 slots (correct behavior)
+            
+            The refactored checkJourneyAvailability now correctly uses the resource's branchId
+            (not the query's branchId) when checking calendar blocks. This ensures branch-wide
+            blocks are honored even when customers haven't pre-selected a branch.
+            
+            All three block scopes (branch/therapy/resource) are working correctly with proper
+            reason surfacing in 409 responses. Suggestions generation working. Regression tests
+            confirm allocation for un-blocked cases still works correctly.
+            
+            NO CRITICAL ISSUES FOUND. Bug fix is production-ready.
+
+
+
+  - agent: "testing"
+    message: |
+      ✅ CALENDAR BLOCK BUG FIX VERIFICATION COMPLETE (16/16 TESTS PASSED)
+      
+      **CRITICAL SUCCESS:** The exact user-reported bug (Test A1) is now fixed!
+      - Customer visits /book without branch context (branchId=null)
+      - Admin has branch-scoped block for HSR Layout on 2026-07-22
+      - BEFORE FIX: Customer saw 57 slots (BUG)
+      - AFTER FIX: Customer sees 0 slots (CORRECT) ✅
+      
+      **ALL TEST SCENARIOS PASSED:**
+      ✅ A. Bug-fix verification (4/4): Branch block honored without branchId context
+      ✅ B. New block scenarios (5/5): Resource-scope block create/verify/delete
+      ✅ C. Therapy-scope block (4/4): Float-therapy block doesn't affect salt-therapy
+      ✅ D. Multi-therapy journey (1/1): Branch block affects entire journey
+      ✅ E. Regression check (2/2): Un-blocked cases still work, double-booking guard intact
+      ✅ F. Cleanup (1/1): All test data removed (except pre-existing user block)
+      
+      **ROOT CAUSE FIX VERIFIED:**
+      The refactored checkJourneyAvailability now correctly uses resource's branchId
+      (not query's branchId) when checking calendar blocks. This ensures branch-wide
+      blocks are honored even when customers haven't pre-selected a branch.
+      
+      **SUCCESS RATE: 100% (16/16 tests passed)**
+      
+      NO CRITICAL ISSUES FOUND. Bug fix is production-ready and ready for deployment.
+
