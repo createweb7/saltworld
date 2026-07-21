@@ -13,6 +13,7 @@ import { ROLES } from '@/lib/permissions';
 
 const TABS = [
   { key: 'business',     label: 'Business hours' },
+  { key: 'booking-rules',label: 'Booking rules'  },
   { key: 'taxes',        label: 'Taxes'          },
   { key: 'brand',        label: 'Brand'          },
   { key: 'resources',    label: 'Resources'      },
@@ -28,15 +29,71 @@ export default function SettingsClient({ user }) {
       <PageHeader eyebrow="Configuration" title="Settings" subtitle="Business hours, taxes, resources, staff, integrations and API keys." />
       <AdminSection>
         <div className="mb-4"><Tabs items={TABS} active={tab} onChange={setTab} /></div>
-        {tab === 'business'     && <BusinessHours />}
-        {tab === 'taxes'        && <Taxes />}
-        {tab === 'brand'        && <Brand />}
-        {tab === 'resources'    && <Resources />}
-        {tab === 'staff'        && <StaffRoles user={user} />}
-        {tab === 'integrations' && <Integrations user={user} />}
-        {tab === 'analytics'    && <AnalyticsTab />}
+        {tab === 'business'      && <BusinessHours />}
+        {tab === 'booking-rules' && <BookingRules />}
+        {tab === 'taxes'         && <Taxes />}
+        {tab === 'brand'         && <Brand />}
+        {tab === 'resources'     && <Resources />}
+        {tab === 'staff'         && <StaffRoles user={user} />}
+        {tab === 'integrations'  && <Integrations user={user} />}
+        {tab === 'analytics'     && <AnalyticsTab />}
       </AdminSection>
     </AdminShell>
+  );
+}
+
+/* ---------- Booking rules (cancel / reschedule cutoff) ---------- */
+function BookingRules() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ['settings', 'booking-rules'], queryFn: async () => (await fetch('/api/admin/settings/booking-rules')).json() });
+  const [form, setForm] = useState(null);
+  useEffect(() => {
+    if (form) return;
+    if (data) setForm({
+      cutoffTime: data.cutoffTime || '21:00',
+      cutoffDaysBefore: Number(data.cutoffDaysBefore ?? 1),
+      minRescheduleNoticeMin: Number(data.minRescheduleNoticeMin ?? 0),
+    });
+  }, [data]);
+  const [saving, setSaving] = useState(false);
+  if (!form) return <div className="text-[12.5px] text-muted-foreground">Loading…</div>;
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch('/api/admin/settings/booking-rules', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+      if (!res.ok) throw new Error('failed');
+      toast.success('Saved');
+      qc.invalidateQueries({ queryKey: ['settings', 'booking-rules'] });
+      qc.invalidateQueries({ queryKey: ['public-booking-rules'] });
+    } catch { toast.error('Could not save'); }
+    finally { setSaving(false); }
+  };
+  return (
+    <div className="max-w-2xl space-y-6">
+      <div>
+        <div className="text-[13px] font-medium mb-1">Cancellation & reschedule cutoff</div>
+        <div className="text-[12px] text-muted-foreground leading-[1.55] mb-3">
+          Customers may cancel or reschedule any booking only until this time on the day <em>before</em> their session.
+          After the cutoff, cancel and reschedule are disabled site-wide (website, customer portal, WhatsApp deep links).
+          For same-day emergency closures, use <span className="font-medium text-foreground">Calendar Blocks</span> instead.
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Cutoff time" required hint="IST · 24-hour clock">
+            <Input type="time" value={form.cutoffTime} onChange={(e) => setForm({ ...form, cutoffTime: e.target.value })} />
+          </Field>
+          <Field label="Days before booking" hint="1 = previous-day cutoff (typical)">
+            <Input type="number" min={0} max={7} value={form.cutoffDaysBefore} onChange={(e) => setForm({ ...form, cutoffDaysBefore: Number(e.target.value) })} />
+          </Field>
+        </div>
+        <div className="rounded-lg border border-border bg-muted/40 p-3 mt-3 text-[12px]">
+          <span className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground">Preview</span>
+          <div className="mt-1">Customers may cancel/reschedule until <span className="font-mono font-semibold">{form.cutoffTime} IST</span> on day&nbsp;-{form.cutoffDaysBefore || 1} before their session.</div>
+        </div>
+      </div>
+      <div className="flex items-center justify-end">
+        <PrimaryBtn onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save booking rules'}</PrimaryBtn>
+      </div>
+    </div>
   );
 }
 
@@ -223,6 +280,15 @@ function Resources() {
           { key: 'name', label: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
           { key: 'type', label: 'Type', render: (r) => <span className="capitalize text-[12.5px]">{(r.type || '').replace('_', ' ')}</span> },
           { key: 'capacity', label: 'Capacity' },
+          { key: 'modes', label: 'Modes', render: (r) => {
+            if (r.type !== 'float_tank') return <span className="text-muted-foreground">—</span>;
+            const modes = Array.isArray(r.supportedModes) && r.supportedModes.length > 0 ? r.supportedModes : ['single','couple'];
+            return (
+              <div className="flex gap-1">
+                {modes.map((m) => <span key={m} className="inline-flex items-center h-5 px-1.5 rounded-full bg-brand/10 text-brand text-[10.5px] font-semibold uppercase tracking-[0.1em]">{m}</span>)}
+              </div>
+            );
+          }},
           { key: 'active', label: 'Status', render: (r) => r.active ? <span className="text-emerald-600 text-[11.5px]">Active</span> : <span className="text-muted-foreground text-[11.5px]">Inactive</span> },
           { key: 'actions', label: '', render: (r) => (
             <button onClick={() => remove(r.id)} className="h-7 w-7 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-600 inline-flex items-center justify-center"><Trash2 className="h-3.5 w-3.5" /></button>
@@ -238,12 +304,20 @@ function Resources() {
 }
 
 function NewResource({ onClose, onSaved }) {
-  const [form, setForm] = useState({ name: '', type: 'float_tank', capacity: 1 });
+  const [form, setForm] = useState({ name: '', type: 'float_tank', capacity: 1, supportedModes: ['single','couple'] });
   const [saving, setSaving] = useState(false);
+  const toggleMode = (m) => {
+    const has = form.supportedModes.includes(m);
+    const next = has ? form.supportedModes.filter((x) => x !== m) : [...form.supportedModes, m];
+    setForm({ ...form, supportedModes: next.length > 0 ? next : [m] }); // never allow zero
+  };
   const save = async () => {
     setSaving(true);
     try {
-      const res = await fetch('/api/admin/resources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, capacity: Number(form.capacity) }) });
+      const payload = { ...form, capacity: Number(form.capacity) };
+      // Only float_tank uses supportedModes; strip for others to keep docs clean.
+      if (form.type !== 'float_tank') delete payload.supportedModes;
+      const res = await fetch('/api/admin/resources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (!res.ok) throw new Error('failed');
       toast.success('Created');
       onSaved();
@@ -262,6 +336,21 @@ function NewResource({ onClose, onSaved }) {
           </Select>
         </Field>
         <Field label="Capacity"><Input type="number" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} /></Field>
+        {form.type === 'float_tank' && (
+          <Field label="Supported session modes" hint="Which float session types this tank can host. Couple tanks are typically wider.">
+            <div className="flex gap-2">
+              {['single','couple'].map((m) => {
+                const on = form.supportedModes.includes(m);
+                return (
+                  <button key={m} type="button" onClick={() => toggleMode(m)}
+                    className={`h-8 px-3 rounded-full border text-[12px] font-medium capitalize transition-colors ${on ? 'border-brand bg-brand-soft/50 text-foreground' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                    {on ? '✓ ' : ''}{m}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+        )}
       </div>
     </Drawer>
   );

@@ -158,10 +158,11 @@ async function handle(req, method, segs) {
     const therapies = (u.searchParams.get('therapies') || '').split(',').map((s) => s.trim()).filter(Boolean);
     const branchId = u.searchParams.get('branchId') || null;
     const date = u.searchParams.get('date');
+    const sessionMode = u.searchParams.get('sessionMode') || null;
     if (therapies.length === 0) return NextResponse.json({ error: 'therapies_required' }, { status: 400 });
     if (!date) return NextResponse.json({ error: 'date_required' }, { status: 400 });
     const { availableJourneySlots } = await import('@/lib/scheduling');
-    const r = await availableJourneySlots({ therapySlugs: therapies, branchId, dateIso: date });
+    const r = await availableJourneySlots({ therapySlugs: therapies, branchId, dateIso: date, sessionMode });
     return NextResponse.json(r || { groups: { morning: [], afternoon: [], evening: [] }, totalDurationMin: 0, totalVisitMin: 0 });
   }
 
@@ -368,8 +369,10 @@ async function handle(req, method, segs) {
         } catch { /* fall through */ }
       }
       // Resource allocation — build a journey plan and pick free resources
-      // for EACH therapy in the sequence. Skips silently when startAt can't
-      // be resolved (e.g., admin creating an unscheduled placeholder).
+      // for EACH therapy in the sequence. If the selected slot is no longer
+      // free (race with another customer's booking or a fresh calendar block),
+      // return HTTP 409 with a small set of nearest suggestions so the client
+      // can offer them inline without restarting the flow.
       let resourceId = null;
       let resourceName = null;
       let blockedFrom = null;
@@ -379,6 +382,8 @@ async function handle(req, method, segs) {
       const therapySlugs = bodyTherapies.length > 0
         ? bodyTherapies.map((t) => t.slug).filter(Boolean)
         : (body.therapy ? [body.therapy] : []);
+      // Float-tank session mode ('single' | 'couple'), optional
+      const sessionMode = body.sessionMode || null;
       // Derive an ISO startAt: prefer explicit body.startAt, else compose from slotDate+slotTime.
       let startIso = body.startAt || null;
       if (!startIso && body.slotDate && body.slotTime) {
@@ -386,14 +391,25 @@ async function handle(req, method, segs) {
       }
       if (therapySlugs.length > 0 && startIso) {
         try {
-          const { allocateJourney } = await import('@/lib/scheduling');
-          const r = await allocateJourney({ therapySlugs, branchId, startIso });
+          const { allocateJourney, suggestNextAvailableSlots } = await import('@/lib/scheduling');
+          const r = await allocateJourney({ therapySlugs, branchId, startIso, sessionMode });
           if (r.ok) {
             resourceId   = r.resourceId;
             resourceName = r.resourceName;
             blockedFrom  = r.blockedFrom;
             blockedTo    = r.blockedTo;
             schedule     = r.schedule;
+          } else {
+            // Slot no longer available — do NOT create the booking. Suggest
+            // alternatives so the customer can continue without restarting.
+            const suggestions = await suggestNextAvailableSlots({
+              therapySlugs, branchId, startIso, sessionMode, limit: 5,
+            }).catch(() => []);
+            return NextResponse.json({
+              error: 'slot_unavailable',
+              reason: r.reason || 'unavailable',
+              suggestions,
+            }, { status: 409 });
           }
         } catch (e) { console.error('allocateJourney failed', e); }
       }
@@ -406,6 +422,7 @@ async function handle(req, method, segs) {
         therapy:      body.therapy      || null,
         therapyLabel: body.therapyLabel || null,
         therapies:    bodyTherapies.length > 0 ? bodyTherapies : (body.therapy ? [{ slug: body.therapy, label: body.therapyLabel, role: 'Primary' }] : []),
+        sessionMode: sessionMode || null,
         slotDate:   body.slotDate   || null,
         slotTime:   body.slotTime   || null,
         startAt:    startIso        || null,
@@ -516,6 +533,105 @@ async function handle(req, method, segs) {
       const { _id, ...cleanDoc } = doc;
       return NextResponse.json(cleanDoc);
     }
+
+    // Customer-initiated cancel / reschedule (cutoff enforced).
+    //   POST /api/bookings/:id/cancel        body: { reason? }
+    //   POST /api/bookings/:id/reschedule    body: { startAt, slotDate, slotTime, sessionMode? }
+    if (segs[1] && segs[2] === 'cancel' && method === 'POST') {
+      const bid = segs[1];
+      const { getCurrentCustomer } = await import('@/lib/customer-auth');
+      const customer = await getCurrentCustomer();
+      const doc = await bookings.findOne({ id: bid });
+      if (!doc) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      if (!customer || doc.customerId !== customer.id) {
+        return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+      }
+      if (['cancelled', 'completed', 'no_show', 'in_session'].includes(doc.status)) {
+        return NextResponse.json({ error: `already_${doc.status}` }, { status: 400 });
+      }
+      const { assertCustomerCanMutate } = await import('@/lib/booking-rules');
+      try {
+        await assertCustomerCanMutate(doc, 'cancel');
+      } catch (e) {
+        return NextResponse.json({ error: 'cutoff_passed', cutoff: e.cutoff, rules: e.rules }, { status: 403 });
+      }
+      const body = await req.json().catch(() => ({}));
+      await bookings.updateOne({ id: bid }, { $set: {
+        status: 'cancelled',
+        cancelledAt: new Date().toISOString(),
+        cancelledBy: 'customer',
+        cancelReason: body.reason || null,
+      }});
+      const after = await bookings.findOne({ id: bid });
+      const { _id, ...clean } = after;
+      return NextResponse.json({ ok: true, booking: clean });
+    }
+
+    if (segs[1] && segs[2] === 'reschedule' && method === 'POST') {
+      const bid = segs[1];
+      const { getCurrentCustomer } = await import('@/lib/customer-auth');
+      const customer = await getCurrentCustomer();
+      const doc = await bookings.findOne({ id: bid });
+      if (!doc) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      if (!customer || doc.customerId !== customer.id) {
+        return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+      }
+      if (['cancelled', 'completed', 'no_show', 'in_session'].includes(doc.status)) {
+        return NextResponse.json({ error: `already_${doc.status}` }, { status: 400 });
+      }
+      const { assertCustomerCanMutate } = await import('@/lib/booking-rules');
+      try {
+        await assertCustomerCanMutate(doc, 'reschedule');
+      } catch (e) {
+        return NextResponse.json({ error: 'cutoff_passed', cutoff: e.cutoff, rules: e.rules }, { status: 403 });
+      }
+      const body = await req.json().catch(() => ({}));
+      let newStart = body.startAt || null;
+      if (!newStart && body.slotDate && body.slotTime) newStart = `${body.slotDate}T${body.slotTime}:00+05:30`;
+      if (!newStart) return NextResponse.json({ error: 'startAt_required' }, { status: 400 });
+      const therapySlugs = (doc.therapies || []).map((t) => t.slug).filter(Boolean);
+      const sessionMode = body.sessionMode || doc.sessionMode || null;
+      const { allocateJourney, suggestNextAvailableSlots } = await import('@/lib/scheduling');
+      const r = await allocateJourney({ therapySlugs, branchId: doc.branchId, startIso: newStart, excludeBookingId: bid, sessionMode });
+      if (!r.ok) {
+        const suggestions = await suggestNextAvailableSlots({ therapySlugs, branchId: doc.branchId, startIso: newStart, sessionMode, limit: 5 }).catch(() => []);
+        return NextResponse.json({ error: 'slot_unavailable', reason: r.reason, suggestions }, { status: 409 });
+      }
+      await bookings.updateOne({ id: bid }, { $set: {
+        startAt: newStart,
+        slotDate: body.slotDate || newStart.slice(0, 10),
+        slotTime: body.slotTime || newStart.slice(11, 16),
+        sessionMode,
+        resourceId: r.resourceId,
+        resourceName: r.resourceName,
+        blockedFrom: r.blockedFrom,
+        blockedTo: r.blockedTo,
+        schedule: r.schedule,
+        rescheduledAt: new Date().toISOString(),
+        rescheduledBy: 'customer',
+      }});
+      const after = await bookings.findOne({ id: bid });
+      const { _id, ...clean } = after;
+      return NextResponse.json({ ok: true, booking: clean });
+    }
+  }
+
+  // ------- Public booking rules (used by customer portal to decide affordance) -------
+  if (segs[0] === 'booking-rules' && method === 'GET') {
+    const { loadBookingRules } = await import('@/lib/booking-rules');
+    const rules = await loadBookingRules();
+    return NextResponse.json(rules);
+  }
+
+  // ------- Public calendar blocks (read-only, used by client UI hints) -------
+  if (segs[0] === 'calendar-blocks' && method === 'GET') {
+    const u = new URL(req.url);
+    const from = u.searchParams.get('from');
+    const to = u.searchParams.get('to');
+    const branchId = u.searchParams.get('branchId') || null;
+    const { listBlocks } = await import('@/lib/calendar-blocks');
+    const blocks = await listBlocks({ from, to, branchId });
+    return NextResponse.json({ blocks });
   }
 
   // ------- Payments (Razorpay) -------

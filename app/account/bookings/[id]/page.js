@@ -5,6 +5,7 @@ import { getCurrentCustomer } from '@/lib/customer-auth';
 import { getDb } from '@/lib/mongo';
 import { TopNav, SiteFooter } from '@/components/site/shell';
 import { formatDate } from '@/lib/date';
+import BookingActions from './BookingActions';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Booking · Salt World' };
@@ -116,6 +117,7 @@ export default async function BookingDetailPage({ params }) {
             <Link href="/book" className="h-10 rounded-full bg-foreground text-background text-[13.5px] font-semibold hover:bg-foreground/90 inline-flex items-center gap-1.5 w-full justify-center">
               Book another session
             </Link>
+            <BookingActions booking={booking} />
           </aside>
         </div>
       </section>

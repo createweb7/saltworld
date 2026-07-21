@@ -2215,6 +2215,164 @@ agent_communication:
       NOTE: Did NOT retest S1, S3-S8 as instructed - they were already verified as passing in previous test run.
 
 
+  - task: "Phase 3.2.A — Booking Engine Hardening (Duplicate guard, Couple Float, Cutoff rules, Calendar Blocks)"
+    implemented: true
+    working: true
+    file: "/app/lib/scheduling.js, /app/lib/calendar-blocks.js, /app/lib/booking-rules.js, /app/lib/api/admin.js, /app/app/api/[[...path]]/route.js, /app/app/admin/calendar-blocks/*, /app/components/admin/shell.jsx, /app/app/admin/settings/SettingsClient.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: |
+            Implemented Phase 3.2.A (4 backend features + admin UI + customer UI):
+
+            **1. Duplicate-booking guard (race condition prevention)**
+            - POST /api/bookings now returns HTTP 409 with { error:'slot_unavailable', reason, suggestions:[…] } if the requested slot is no longer free at the moment of confirm.
+            - Booking is NOT created and no payment is initiated.
+            - `suggestions` = up to 5 next available slots (same day after the failed time, then next 3 days).
+            - Booking client (Step 4) shows a friendly amber banner + suggestion chips; picking one updates state and lets the customer retry immediately without restarting.
+
+            **2. Couple Float Tank support**
+            - Added `supportedModes: ['single','couple']` field to resources; float_tank type UI in Admin Settings > Resources shows togglable pills.
+            - Migrated existing 2 seeded Float Tanks to `supportedModes: ['single','couple']`.
+            - Booking flow shows a Single/Couple toggle on Step 3 whenever a float therapy is in the journey. sessionMode is passed to /api/scheduling/slots and /api/bookings; the allocator filters candidate tanks by supported mode before checking overlap.
+            - Suggestions endpoint respects sessionMode too.
+
+            **3. Booking cutoff rules (cancel + reschedule)**
+            - New settings key: `bookingRules` = { cutoffTime:'21:00', cutoffDaysBefore:1, minRescheduleNoticeMin:0 }.
+            - New public endpoint GET /api/booking-rules (read-only) used by the customer portal.
+            - New admin endpoint GET/PUT /api/admin/settings/booking-rules (super_admin only).
+            - New customer endpoints POST /api/bookings/:id/cancel and POST /api/bookings/:id/reschedule enforcing the cutoff — 403 { error:'cutoff_passed', cutoff:ISO, rules } if past cutoff.
+            - Reschedule endpoint re-uses allocateJourney and returns 409 with suggestions if the new slot is unavailable.
+            - New client component `/app/app/account/bookings/[id]/BookingActions.jsx` — cancel dialog with reason; reschedule dialog with 7-day date strip + slot grid.
+
+            **4. Calendar Blocks**
+            - New collection `calendar_blocks` with scopes: 'branch' | 'therapy' | 'resource'.
+            - Mandatory `reason` (whitelist: maintenance / holiday / staff_leave / private_event / equipment_servicing / group_booking / other) + optional freeform note.
+            - Admin CRUD at /api/admin/calendar-blocks (POST create, GET list, DELETE remove).
+            - Scheduling engine's `checkJourneyAvailability` calls `findConflictingBlock` for each step at branch+therapy level (upfront) and at resource level per candidate.
+            - Blocks cause `availableJourneySlots` to return zero-slot day and `POST /api/bookings` to return 409 with alternate-day suggestions.
+            - New Admin page `/admin/calendar-blocks` with list of active + past blocks and a drawer editor supporting Full Day / Morning / Evening / Custom time range.
+
+            **Backend smoke tests (main agent, cURL):**
+            - ✅ GET /api/booking-rules → default cutoffTime 21:00
+            - ✅ PUT /api/admin/settings/booking-rules → updates and persists
+            - ✅ POST /api/admin/calendar-blocks (branch, 2027-04-15) → block created
+            - ✅ GET /api/scheduling/slots?therapies=salt-therapy&date=2027-04-15 → 0 slots (blocked)
+            - ✅ GET /api/scheduling/slots for 2027-04-16 → 57 slots (unblocked day)
+            - ✅ POST /api/bookings on blocked day → 409 with 5 next-day suggestions
+            - ✅ DELETE /api/admin/calendar-blocks/:id → 200 ok
+            - ✅ Float tank capacity test: booked both tanks (single) then attempted couple → 409 no_free_resource with 5 suggestions
+
+            **Frontend integrations verified:**
+            - Sidebar shows new "Calendar Blocks" nav item under Operate
+            - Settings adds "Booking rules" tab
+            - Settings > Resources shows "Modes" column and pill selector on float tanks
+            - Booking Step 3 gets Single/Couple toggle when float therapy selected
+            - Booking Step 4 renders suggestion chips on 409
+            - Customer booking detail page renders cancel + reschedule buttons with cutoff-aware disabled states
+        -working: true
+        -agent: "testing"
+        -comment: |
+            ✅ VERIFIED ALL PHASE 3.2.A BACKEND TESTS (34/34 PASSED):
+            
+            Executed comprehensive backend API testing for Phase 3.2.A — Booking Engine Hardening
+            using /app/backend_test_phase_3_2_a.py against https://saltwell-arch.preview.emergentagent.com/api
+            
+            **A. BOOKING RULES SETTINGS (4/4 tests passed)**
+            ✅ A1: GET /api/booking-rules (public, no auth) returns 200 with cutoffTime=21:00, cutoffDaysBefore=1, minRescheduleNoticeMin=0
+            ✅ A2: GET /api/admin/settings/booking-rules (admin auth) returns 200 with same shape
+            ✅ A3: PUT /api/admin/settings/booking-rules updates to cutoffTime=20:30, cutoffDaysBefore=2 and persists
+            ✅ A4: Restore back to cutoffTime=21:00, cutoffDaysBefore=1 successful
+            
+            **B. CALENDAR BLOCKS CRUD (5/5 tests passed)**
+            ✅ B5: POST /api/admin/calendar-blocks validation:
+                - Missing reason → 400 with error='reason_required'
+                - Missing startAt → 400 with error='startAt_required'
+                - Missing endAt → 400 with error='endAt_required'
+                - endAt <= startAt → 400
+            ✅ B6: Valid create with scope=branch, future date, reason=private_event returns 200 with UUID id, no _id leak
+            ✅ B7: GET /api/admin/calendar-blocks?from=...&to=... returns 200 with created block in array
+            ✅ B8: GET /api/calendar-blocks?from=...&to=... (public) returns 200 with {blocks:[...]} containing created block
+            ✅ B9: DELETE /api/admin/calendar-blocks/:id returns 200 {ok:true}, subsequent GET no longer returns it
+            
+            **C. BOOKING ENGINE — CALENDAR BLOCK EFFECT (6/6 tests passed)**
+            ✅ C10: Created scope:branch block for future date (2026-09-04)
+            ✅ C11: GET /api/scheduling/slots?therapies=salt-therapy&date=<blockedDate> returns 200 with 0 total slots (morning=0, afternoon=0, evening=0)
+            ✅ C12: GET /api/scheduling/slots?therapies=salt-therapy&date=<blockedDate+1> returns 200 with 53 slots
+            ✅ C13: POST /api/bookings with slotDate=<blockedDate> returns 409 with:
+                - error='slot_unavailable'
+                - reason contains 'calendar_block'
+                - suggestions array with 5 items, each containing time, startIso, date
+            ✅ C14: Verified NO booking document was written for blocked attempt
+            ✅ C15: DELETE block cleanup successful
+            
+            **D. BOOKING ENGINE — RACE CONDITION GUARD (3/3 tests passed)**
+            ✅ D16: Create booking A at slot X (salt-therapy) returns 200 with id
+            ✅ D17: Immediately create booking B at same slot X returns 409 with:
+                - error='slot_unavailable'
+                - reason contains 'no_free_resource_for_salt-therapy'
+                - suggestions array with 5 later times
+            ✅ D18: Booking A marked for cleanup
+            
+            **E. COUPLE FLOAT TANK SUPPORT (7/7 tests passed)**
+            ✅ E19: GET /api/admin/resources shows both Float Tanks have supportedModes=['single','couple']
+            ✅ E20: POST /api/bookings with therapies=[{slug:'float-therapy'}], sessionMode='couple' returns 200:
+                - Allocates couple-capable tank (Float Tank 1)
+                - sessionMode='couple' persisted in booking
+                - resourceName populated
+            ✅ E21: PATCH /api/admin/resources/:id to set Float Tank 2 supportedModes=['single'] successful
+            ✅ E22: Book Float Tank 1 (couple-capable) for single at time X successful
+            ✅ E23: Book Float Tank 2 (single-only) for single at same time X successful
+            ✅ E24: Attempt couple booking at same time X returns 409:
+                - error='slot_unavailable'
+                - reason contains 'no_free_resource_for_float-therapy'
+                - suggestions provided
+            ✅ E25: Restore Float Tank 2 to supportedModes=['single','couple'] successful
+            
+            **F. CUSTOMER CANCEL / RESCHEDULE CUTOFF ENFORCEMENT (9/9 tests passed)**
+            ✅ F26: Create booking 5 days in future with customerId successful
+            ✅ F27: POST /api/bookings/:id/cancel (with sw_customer cookie), body {reason:'testing'} returns 200:
+                - ok=true
+                - booking.status='cancelled'
+            ✅ F28: Create another booking 6 days out successful
+            ✅ F29: POST /api/bookings/:id/reschedule body {slotDate, slotTime, sessionMode:null} returns 200:
+                - ok=true
+                - booking.slotDate and slotTime updated correctly
+            ✅ F30: Reschedule to taken slot returns 409 with suggestions
+            ✅ F31: Temporarily set cutoffDaysBefore=30, try to cancel 10-day-out booking returns 403:
+                - error='cutoff_passed'
+                - cutoff ISO timestamp provided
+                - rules object provided
+                - Restored cutoffDaysBefore=1 after test
+            ✅ F32: Cancel WITHOUT customer cookie returns 403 with error='forbidden'
+            ✅ F33: Cancel someone else's booking returns 403 with error='forbidden'
+            ✅ F34: Cancel already-cancelled booking returns 400 with error='already_cancelled'
+            
+            **G. SESSION MODE PERSISTENCE (2/2 tests passed)**
+            ✅ G35: Book float-therapy with sessionMode='couple' → booking document has sessionMode='couple' field
+            ✅ G36: Book salt-therapy (non-float) with no sessionMode → sessionMode is null
+            
+            **TEST DATA CREATED:**
+            - Calendar blocks: 2 (all cleaned up during tests)
+            - Bookings: 14 (marked for cleanup)
+            
+            **SUCCESS RATE: 100% (34/34 tests passed)**
+            
+            NO CRITICAL ISSUES FOUND. All Phase 3.2.A backend features are production-ready:
+            - Booking rules settings (public + admin endpoints) working correctly
+            - Calendar blocks CRUD with proper validation and scope filtering
+            - Calendar blocks correctly block slot availability and booking creation
+            - Race condition guard prevents double bookings with helpful suggestions
+            - Couple float tank support with mode filtering and capacity constraints
+            - Customer cancel/reschedule with cutoff enforcement and auth protection
+            - Session mode persistence for couple bookings
+            
+            All validation, error handling, suggestions generation, and data integrity checks functioning correctly.
+
+
 frontend:
   - task: "Admin Memberships — Coverage tab: Applicable Therapies picker visibility"
     implemented: true
@@ -2458,3 +2616,80 @@ frontend:
       **SUCCESS RATE: 100% (14/14 verification steps passed)**
       
       NO ISSUES FOUND. The Coverage tab functionality is working perfectly as designed.
+
+
+
+  - agent: "testing"
+    message: |
+      ✅ PHASE 3.2.A — BOOKING ENGINE HARDENING BACKEND VERIFICATION COMPLETE (34/34 TESTS PASSED)
+      
+      Executed comprehensive backend API testing for Phase 3.2.A — Booking Engine Hardening
+      using /app/backend_test_phase_3_2_a.py against https://saltwell-arch.preview.emergentagent.com/api
+      
+      **TEST RESULTS SUMMARY:**
+      
+      **A. BOOKING RULES SETTINGS (4/4 tests passed)**
+      ✅ Public endpoint GET /api/booking-rules returns default cutoffTime=21:00
+      ✅ Admin endpoint GET /api/admin/settings/booking-rules returns same shape
+      ✅ Admin PUT updates and persists rules (tested cutoffTime=20:30, cutoffDaysBefore=2)
+      ✅ Restore to defaults successful
+      
+      **B. CALENDAR BLOCKS CRUD (5/5 tests passed)**
+      ✅ Validation: missing reason/startAt/endAt all return 400 with correct errors
+      ✅ Valid create with scope=branch returns 200 with UUID id, no _id leak
+      ✅ Admin list endpoint returns created block
+      ✅ Public list endpoint returns created block in {blocks:[]} wrapper
+      ✅ Delete removes block successfully
+      
+      **C. BOOKING ENGINE — CALENDAR BLOCK EFFECT (6/6 tests passed)**
+      ✅ Created branch-scoped block for future date (2026-09-04)
+      ✅ GET /api/scheduling/slots on blocked date returns 0 slots (all groups empty)
+      ✅ GET /api/scheduling/slots on unblocked date returns 53 slots
+      ✅ POST /api/bookings on blocked date returns 409 with error='slot_unavailable', reason contains 'calendar_block', 5 suggestions provided
+      ✅ Verified NO booking document created for blocked attempt
+      ✅ Block cleanup successful
+      
+      **D. BOOKING ENGINE — RACE CONDITION GUARD (3/3 tests passed)**
+      ✅ First booking at slot X (salt-therapy) successful
+      ✅ Second booking at same slot X returns 409 with error='slot_unavailable', reason='no_free_resource_for_salt-therapy', 5 suggestions
+      ✅ Double booking prevention working correctly
+      
+      **E. COUPLE FLOAT TANK SUPPORT (7/7 tests passed)**
+      ✅ Both Float Tanks have supportedModes=['single','couple']
+      ✅ Couple booking allocates couple-capable tank with sessionMode='couple' persisted
+      ✅ Patched Float Tank 2 to single-only successful
+      ✅ Booked both tanks for single at same time successful
+      ✅ Couple booking at same time returns 409 (no free couple-capable tank)
+      ✅ Restored Float Tank 2 to support couple
+      ✅ Capacity constraints and mode filtering working correctly
+      
+      **F. CUSTOMER CANCEL / RESCHEDULE CUTOFF ENFORCEMENT (9/9 tests passed)**
+      ✅ Customer cancel within cutoff (5 days out) returns 200 with status='cancelled'
+      ✅ Customer reschedule within cutoff (6 days out) returns 200 with updated slotDate/slotTime
+      ✅ Reschedule to taken slot returns 409 with suggestions
+      ✅ Cancel past cutoff (cutoffDaysBefore=30, booking 10 days out) returns 403 with error='cutoff_passed', cutoff ISO, rules object
+      ✅ Cancel without customer cookie returns 403 with error='forbidden'
+      ✅ Cancel other customer's booking returns 403 with error='forbidden'
+      ✅ Cancel already-cancelled booking returns 400 with error='already_cancelled'
+      ✅ All auth protection and cutoff enforcement working correctly
+      
+      **G. SESSION MODE PERSISTENCE (2/2 tests passed)**
+      ✅ Couple float booking has sessionMode='couple' persisted
+      ✅ Non-float booking has sessionMode=null
+      
+      **TEST DATA CREATED:**
+      - Calendar blocks: 2 (all cleaned up during tests)
+      - Bookings: 14 (marked for cleanup)
+      
+      **SUCCESS RATE: 100% (34/34 tests passed)**
+      
+      NO CRITICAL ISSUES FOUND. All Phase 3.2.A backend features are production-ready:
+      - Booking rules settings (public + admin endpoints) ✅
+      - Calendar blocks CRUD with validation and scope filtering ✅
+      - Calendar blocks correctly block slot availability and booking creation ✅
+      - Race condition guard prevents double bookings with suggestions ✅
+      - Couple float tank support with mode filtering and capacity constraints ✅
+      - Customer cancel/reschedule with cutoff enforcement and auth protection ✅
+      - Session mode persistence ✅
+      
+      All validation, error handling, suggestions generation, and data integrity checks functioning correctly.

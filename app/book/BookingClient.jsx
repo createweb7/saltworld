@@ -246,7 +246,7 @@ function fmtVisit(mins) {
   return `${mins}m`;
 }
 
-function StepSlot({ therapies, therapyMeta, value, onChange }) {
+function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSessionMode }) {
   const days = useMemo(() => {
     const start = new Date(); start.setHours(0,0,0,0);
     return Array.from({ length: 7 }).map((_, i) => {
@@ -259,6 +259,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange }) {
   const [mode, setMode] = useState(isMulti ? 'auto' : 'manual');
   const [journeyData, setJourneyData] = useState(null); // full journey response for auto mode + summary
   const [loading, setLoading] = useState(false);
+  const hasFloat = therapies.some((t) => String(t).includes('float'));
 
   // Fetch the full journey slot data (needed for auto mode + summary in both modes)
   useEffect(() => {
@@ -266,12 +267,13 @@ function StepSlot({ therapies, therapyMeta, value, onChange }) {
     let cancelled = false;
     setLoading(true);
     const q = new URLSearchParams({ therapies: therapies.join(','), date });
+    if (hasFloat && sessionMode) q.set('sessionMode', sessionMode);
     fetch(`/api/scheduling/slots?${q}`)
       .then((r) => r.ok ? r.json() : null)
       .then((d) => { if (!cancelled) { setJourneyData(d); setLoading(false); } })
       .catch(() => { if (!cancelled) { setJourneyData(null); setLoading(false); } });
     return () => { cancelled = true; };
-  }, [therapies, date]);
+  }, [therapies, date, sessionMode, hasFloat]);
 
   const totalDurationMin = journeyData?.totalDurationMin || 0;
   const totalVisitMin    = journeyData?.totalVisitMin    || 0;
@@ -316,6 +318,30 @@ function StepSlot({ therapies, therapyMeta, value, onChange }) {
                 <span className="ml-1.5 text-[10.5px] font-sans text-muted-foreground uppercase tracking-[0.14em]">incl. buffers</span>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Float session-mode toggle — only if float-therapy is in the journey */}
+      {hasFloat && (
+        <div className="mt-6">
+          <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold mb-2">Float session type</div>
+          <div className="inline-flex rounded-full border border-border p-0.5 bg-card">
+            <button type="button" onClick={() => { setSessionMode('single'); onChange(null); }}
+              className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
+                sessionMode === 'single' ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground')}>
+              Single
+            </button>
+            <button type="button" onClick={() => { setSessionMode('couple'); onChange(null); }}
+              className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
+                sessionMode === 'couple' ? 'bg-brand text-white' : 'text-muted-foreground hover:text-foreground')}>
+              Couple
+            </button>
+          </div>
+          <div className="mt-2 text-[11.5px] text-muted-foreground max-w-[520px] leading-[1.5]">
+            {sessionMode === 'couple'
+              ? 'Couple sessions use a couple-capable float tank for two people together. Fewer tanks support couple mode — book early.'
+              : 'Standard 60-minute float in a solo tank.'}
           </div>
         </div>
       )}
@@ -603,7 +629,7 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange }) 
 /* Step 4 — Contact & confirm                                         */
 /* ------------------------------------------------------------------ */
 
-function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline }) {
+function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion }) {
   const o = getOutcome(outcome);
   const th = o?.protocol?.therapies?.find((x) => x.slug === therapy);
   const isMulti = therapies.length > 1 && slot?.plan?.length > 1;
@@ -611,8 +637,35 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
     <div>
       <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-semibold">Step 4 of 4</div>
       <h1 className="mt-2 font-serif text-[36px] md:text-[52px] leading-[1.02] tracking-tight text-balance">
-        A few details, <span className="italic">then you’re booked.</span>
+        A few details, <span className="italic">then you&rsquo;re booked.</span>
       </h1>
+
+      {slotConflict && Array.isArray(slotConflict.suggestions) && (
+        <div className="mt-6 rounded-2xl border border-amber-200 dark:border-amber-900/40 bg-amber-50/60 dark:bg-amber-500/5 p-5">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 h-8 w-8 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 inline-flex items-center justify-center flex-shrink-0">!</div>
+            <div className="flex-1">
+              <div className="text-[13.5px] font-semibold text-amber-900 dark:text-amber-200">This slot was just booked by another guest.</div>
+              <div className="mt-0.5 text-[12.5px] leading-[1.55] text-amber-800/85 dark:text-amber-200/80">
+                No booking was created and no payment was taken. Pick one of the nearby times below to keep going.
+              </div>
+              {slotConflict.suggestions.length > 0 ? (
+                <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-2">
+                  {slotConflict.suggestions.map((s, i) => (
+                    <button key={`${s.date}-${s.time}-${i}`} type="button" onClick={() => onPickSuggestion?.(s)}
+                      className="rounded-xl border border-amber-300/70 dark:border-amber-800 bg-background hover:border-foreground/40 hover:bg-card transition-colors p-3 text-left">
+                      <div className="text-[10.5px] uppercase tracking-[0.16em] text-muted-foreground font-semibold">{new Date(`${s.date}T00:00`).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })}</div>
+                      <div className="mt-1 font-mono text-[15px] font-semibold">{s.time}</div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-3 text-[12px] text-amber-800 dark:text-amber-300">No nearby slots today or tomorrow. Please go back and pick a different date.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mt-8 grid md:grid-cols-2 gap-8">
         <form onSubmit={(e) => { e.preventDefault(); onSubmit(); }} className="space-y-4">
@@ -766,6 +819,9 @@ export default function BookingClient({ initialOutcome }) {
   const [payCfg, setPayCfg] = useState({ configured: false, keyId: null });
   const [outcomeMap, setOutcomeMap] = useState(null); // admin-configured overrides
   const [therapyMeta, setTherapyMeta] = useState({}); // slug → {name, durationMin, ...} from DB
+  const [sessionMode, setSessionMode] = useState('single'); // float-therapy: single | couple
+  // Suggestions surfaced when the confirm step receives a 409 slot_unavailable
+  const [slotConflict, setSlotConflict] = useState(null); // { reason, suggestions:[{...}] }
   const therapy = therapies[0] || null; // convenience alias
 
   // Load therapy metadata once (for the journey summary in step 3).
@@ -915,6 +971,7 @@ export default function BookingClient({ initialOutcome }) {
           therapy: primary?.slug || null,
           therapyLabel: primary?.label || null,
           therapies: selected.map((t) => ({ slug: t.slug, label: t.label, role: t.role })),
+          sessionMode: therapies.some((s) => String(s).includes('float')) ? sessionMode : null,
           slotDate: slot.date, slotTime: slot.time,
           startAt: slot.startIso || null,
           plan: slot.plan || null,
@@ -925,8 +982,19 @@ export default function BookingClient({ initialOutcome }) {
           total: totalRupees,
         }),
       });
+      if (r.status === 409) {
+        // Slot got taken while the customer was checking out. Do NOT create
+        // the booking — surface friendly suggestions so they can pick another
+        // slot without restarting the flow.
+        const j = await r.json().catch(() => ({}));
+        setSlotConflict({ reason: j.reason || 'slot_unavailable', suggestions: j.suggestions || [] });
+        setError('This slot was just booked. Please pick a nearby time below.');
+        setSubmitting(false);
+        return;
+      }
       if (!r.ok) throw new Error('Failed to create booking');
       const doc = await r.json();
+      setSlotConflict(null);
 
       // If online payment requested and Razorpay is configured, open Checkout.
       if (payment === 'online' && payCfg.configured && totalRupees > 0) {
@@ -962,7 +1030,7 @@ export default function BookingClient({ initialOutcome }) {
       <main className="max-w-[1200px] mx-auto px-4 md:px-8 pt-10 md:pt-14 pb-28 md:pb-16">
         {stepIdx === 0 && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); }} />}
         {stepIdx === 1 && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} />}
-        {stepIdx === 2 && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} />}
+        {stepIdx === 2 && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode} setSessionMode={setSessionMode} />}
         {stepIdx === 3 && (
           <StepContact
             outcome={outcome} therapy={therapy} slot={slot}
@@ -971,6 +1039,19 @@ export default function BookingClient({ initialOutcome }) {
             payment={payment} setPayment={setPayment}
             canPayOnline={payCfg.configured}
             submitting={submitting} error={error} onSubmit={submit}
+            slotConflict={slotConflict}
+            onPickSuggestion={(s) => {
+              setSlot({
+                date: s.date,
+                time: s.time,
+                startIso: s.startIso,
+                visitFromIso: s.visitFromIso,
+                visitToIso: s.visitToIso,
+                plan: s.plan || [],
+              });
+              setSlotConflict(null);
+              setError(null);
+            }}
           />
         )}
       </main>

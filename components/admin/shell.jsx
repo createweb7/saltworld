@@ -6,7 +6,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import { toast } from 'sonner';
 import {
-  LayoutDashboard, Users, Calendar, MessageSquareText, ClipboardList,
+  LayoutDashboard, Users, Calendar, CalendarOff, MessageSquareText, ClipboardList,
   Waves, Sparkles, Gift, Package, IndianRupee, BarChart3, Megaphone,
   FileText, BellDot, Bot, Settings, Search, Sun, Moon, LogOut,
   ChevronsLeft, ChevronsRight, Command, ChevronDown, User as UserIcon,
@@ -26,9 +26,10 @@ const NAV_GROUPS = [
   {
     label: 'Operate',
     items: [
-      { href: '/admin/bookings',  label: 'Bookings',   icon: Calendar,        shortcut: 'g b' },
-      { href: '/admin/customers', label: 'Customers',  icon: Users,           shortcut: 'g c' },
-      { href: '/admin/services',  label: 'Services',   icon: Waves },
+      { href: '/admin/bookings',        label: 'Bookings',        icon: Calendar,        shortcut: 'g b' },
+      { href: '/admin/calendar-blocks', label: 'Calendar Blocks', icon: CalendarOff },
+      { href: '/admin/customers',       label: 'Customers',       icon: Users,           shortcut: 'g c' },
+      { href: '/admin/services',        label: 'Services',        icon: Waves },
     ],
   },
   {
