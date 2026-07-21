@@ -629,7 +629,7 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange }) 
 /* Step 4 — Contact & confirm                                         */
 /* ------------------------------------------------------------------ */
 
-function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion }) {
+function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, customerId, branchId }) {
   const o = getOutcome(outcome);
   const th = o?.protocol?.therapies?.find((x) => x.slug === therapy);
   const isMulti = therapies.length > 1 && slot?.plan?.length > 1;
@@ -775,10 +775,30 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
               <Row label="Duration" value={o?.protocol?.duration || '—'} />
             </div>
           )}
-          <div className="mt-5 pt-4 border-t border-border flex items-baseline justify-between">
-            <span className="text-[12.5px] text-muted-foreground">Total (est.)</span>
-            <span className="font-serif text-[28px] tracking-tight">{o?.pricing?.single?.price}</span>
+          <div className="mt-5 pt-4 border-t border-border">
+            <CouponInput
+              subtotalInr={Number(subtotalInr) || 0}
+              therapies={therapies}
+              customerId={customerId}
+              branchId={branchId}
+              value={coupon}
+              onChange={setCoupon}
+            />
           </div>
+          <div className="mt-4 pt-3 border-t border-border/60 flex items-baseline justify-between">
+            <span className="text-[12.5px] text-muted-foreground">Total (est.)</span>
+            <span className="font-serif text-[28px] tracking-tight">
+              {coupon?.applied
+                ? <>₹{Math.max(0, (Number(subtotalInr) || 0) - (Number(coupon.discountInr) || 0)).toLocaleString('en-IN')}</>
+                : (o?.pricing?.single?.price || `₹${Number(subtotalInr || 0).toLocaleString('en-IN')}`)}
+            </span>
+          </div>
+          {coupon?.applied && (
+            <div className="mt-1 flex items-baseline justify-between text-[11.5px] text-emerald-700 dark:text-emerald-400">
+              <span>You saved with {coupon.code}</span>
+              <span className="font-mono">– ₹{Number(coupon.discountInr).toLocaleString('en-IN')}</span>
+            </div>
+          )}
           <div className="mt-4 flex items-start gap-2 text-[11.5px] text-muted-foreground">
             <MapPin className="h-3 w-3 mt-0.5 shrink-0" />
             <span>Salt World, HSR Layout, Bengaluru 560102</span>
@@ -794,6 +814,64 @@ function Row({ label, value }) {
     <div className="flex items-baseline justify-between gap-3">
       <span className="text-muted-foreground">{label}</span>
       <span className="font-medium text-foreground text-right">{value || '—'}</span>
+    </div>
+  );
+}
+
+/** CouponInput
+ *  Optimistically validates a coupon code against POST /api/coupons/validate.
+ *  Applies if the server says ok; sets a friendly error otherwise. On apply
+ *  the parent stores `{ code, discountInr, applied:true }`; on remove, null.
+ */
+function CouponInput({ subtotalInr, therapies, customerId, branchId, value, onChange }) {
+  const [input, setInput] = useState(value?.code || '');
+  const [busy, setBusy]   = useState(false);
+  const [err, setErr]     = useState(null);
+
+  const apply = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch('/api/coupons/validate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: input, subtotalInr, therapies, branchId, customerId }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!j.ok) { setErr(j.message || 'Coupon could not be applied.'); onChange(null); return; }
+      onChange({ code: j.coupon.code, discountInr: j.discountInr, applied: true });
+    } catch { setErr('Could not validate coupon right now.'); }
+    finally { setBusy(false); }
+  };
+  const remove = () => { onChange(null); setInput(''); setErr(null); };
+
+  if (value?.applied) {
+    return (
+      <div className="flex items-center justify-between gap-2 rounded-md border border-emerald-300 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-500/5 px-3 py-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="h-5 w-5 rounded-full bg-emerald-500 text-white text-[11px] font-bold inline-flex items-center justify-center shrink-0">✓</div>
+          <div className="min-w-0">
+            <div className="text-[12.5px] font-semibold text-emerald-800 dark:text-emerald-300 truncate">{value.code} applied</div>
+            <div className="text-[10.5px] text-emerald-700/80 dark:text-emerald-400/80">You saved ₹{Number(value.discountInr).toLocaleString('en-IN')}</div>
+          </div>
+        </div>
+        <button type="button" onClick={remove} className="text-[11.5px] text-emerald-800 dark:text-emerald-300 hover:underline shrink-0">Remove</button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground mb-1.5">Coupon code</div>
+      <div className="flex items-center gap-2">
+        <input value={input} onChange={(e) => { setInput(e.target.value.toUpperCase()); setErr(null); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); apply(); } }}
+          placeholder="ANANYA10"
+          className="flex-1 h-9 rounded-md border border-border bg-background font-mono tracking-widest text-[13.5px] px-3 focus:outline-none focus:ring-2 focus:ring-brand/40" />
+        <button type="button" onClick={apply} disabled={busy || !input}
+          className="h-9 px-3 rounded-md text-[12.5px] font-semibold border border-border hover:bg-muted disabled:opacity-40">
+          {busy ? '…' : 'Apply'}
+        </button>
+      </div>
+      {err && <div className="mt-1 text-[11.5px] text-red-600">{err}</div>}
     </div>
   );
 }
@@ -820,6 +898,7 @@ export default function BookingClient({ initialOutcome }) {
   const [outcomeMap, setOutcomeMap] = useState(null); // admin-configured overrides
   const [therapyMeta, setTherapyMeta] = useState({}); // slug → {name, durationMin, ...} from DB
   const [sessionMode, setSessionMode] = useState('single'); // float-therapy: single | couple
+  const [coupon, setCoupon] = useState(null);              // { code, discountInr, applied } | null
   // Suggestions surfaced when the confirm step receives a 409 slot_unavailable
   const [slotConflict, setSlotConflict] = useState(null); // { reason, suggestions:[{...}] }
   const therapy = therapies[0] || null; // convenience alias
@@ -980,6 +1059,7 @@ export default function BookingClient({ initialOutcome }) {
           customerId,
           priceLine: o?.pricing?.single?.price + ' ' + (o?.pricing?.single?.period || ''),
           total: totalRupees,
+          couponCode: coupon?.applied ? coupon.code : null,
         }),
       });
       if (r.status === 409) {
@@ -1040,6 +1120,10 @@ export default function BookingClient({ initialOutcome }) {
             canPayOnline={payCfg.configured}
             submitting={submitting} error={error} onSubmit={submit}
             slotConflict={slotConflict}
+            coupon={coupon} setCoupon={setCoupon}
+            subtotalInr={totalRupees}
+            customerId={customerId}
+            branchId={null}
             onPickSuggestion={(s) => {
               setSlot({
                 date: s.date,

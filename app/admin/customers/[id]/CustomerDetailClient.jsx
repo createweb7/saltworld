@@ -16,6 +16,7 @@ const TABS = [
   { key: 'overview',  label: 'Overview'  },
   { key: 'visits',    label: 'Visits'    },
   { key: 'membership',label: 'Membership'},
+  { key: 'wallet',    label: 'Wallet'    },
   { key: 'giftcards', label: 'Gift cards'},
   { key: 'invoices',  label: 'Invoices'  },
   { key: 'medical',   label: 'Medical'   },
@@ -134,6 +135,7 @@ export default function CustomerDetailClient({ user, id }) {
             {tab === 'overview' && <OverviewTab customer={c} qc={qc} />}
             {tab === 'visits'   && <VisitsTab visits={data.visits} />}
             {tab === 'membership' && <ListTab items={data.subscriptions} empty="No membership yet." render={(s) => <div className="flex items-center justify-between"><div><div className="text-[13px] font-medium">{s.membershipId}</div><div className="text-[11px] text-muted-foreground">Started {new Date(s.startAt).toLocaleDateString()}</div></div><span className="text-[11px] uppercase tracking-[0.12em] font-semibold">{s.status}</span></div>} />}
+            {tab === 'wallet'    && <WalletTab customerId={id} qc={qc} />}
             {tab === 'giftcards' && <ListTab items={data.giftcards} empty="No gift cards received or purchased." render={(g) => <div className="flex items-center justify-between"><div><div className="text-[13px] font-mono">{g.code}</div><div className="text-[11px] text-muted-foreground">Balance ₹{(g.balance||g.amount).toLocaleString('en-IN')}</div></div><span className="text-[11px] uppercase tracking-[0.12em] font-semibold">{g.status}</span></div>} />}
             {tab === 'invoices'  && <ListTab items={data.invoices} empty="No invoices yet." render={(i) => <div className="flex items-center justify-between"><div><div className="text-[13px] font-mono">{i.number}</div><div className="text-[11px] text-muted-foreground">{new Date(i.createdAt).toLocaleDateString()}</div></div><div className="text-[13px] font-medium">₹{(i.total||0).toLocaleString('en-IN')}</div></div>} />}
             {tab === 'medical'   && <MedicalTab customer={c} qc={qc} canEdit={user.role !== 'reception' && user.role !== 'marketing'} />}
@@ -292,6 +294,133 @@ function Field({ label, children }) {
     <div>
       <label className="text-[11px] uppercase tracking-[0.14em] font-semibold text-muted-foreground">{label}</label>
       <div className="mt-1.5">{children}</div>
+    </div>
+  );
+}
+
+
+/* ================================================================ */
+/*  Wallet tab — admin credit/debit with immutable ledger view      */
+/* ================================================================ */
+
+function WalletTab({ customerId, qc }) {
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['customer-wallet', customerId],
+    queryFn: async () => (await fetch(`/api/admin/customers/${customerId}/wallet-history`)).json(),
+  });
+  const [open, setOpen] = useState(false);
+
+  const balance = Number(data?.balance || 0);
+  const rows = Array.isArray(data?.history) ? data.history : [];
+
+  return (
+    <div>
+      <div className="flex items-start justify-between gap-3 mb-5">
+        <div>
+          <div className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground">Wallet balance</div>
+          <div className="mt-1 font-serif text-4xl">₹{balance.toLocaleString('en-IN')}</div>
+          <div className="text-[11.5px] text-muted-foreground mt-1">Every transaction below is immutable — records are never edited or deleted.</div>
+        </div>
+        <button onClick={() => setOpen(true)} className="h-9 px-3 rounded-md bg-foreground text-background text-[12.5px] font-semibold inline-flex items-center gap-1.5 hover:bg-foreground/90">
+          <Plus className="h-3.5 w-3.5" /> Adjust wallet
+        </button>
+      </div>
+
+      {isLoading ? (
+        <div className="text-[12.5px] text-muted-foreground py-4">Loading…</div>
+      ) : rows.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border p-6 text-[13px] text-muted-foreground text-center">No wallet activity yet.</div>
+      ) : (
+        <div className="rounded-lg border border-border overflow-hidden">
+          <table className="w-full text-[12.5px]">
+            <thead className="bg-muted/50 text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+              <tr>
+                <th className="text-left px-3 py-2 font-semibold">When</th>
+                <th className="text-left px-3 py-2 font-semibold">Type</th>
+                <th className="text-left px-3 py-2 font-semibold">Note</th>
+                <th className="text-right px-3 py-2 font-semibold">Amount</th>
+                <th className="text-right px-3 py-2 font-semibold">Points</th>
+                <th className="text-right px-3 py-2 font-semibold">Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((tx) => {
+                const isCredit = Number(tx.points) >= 0;
+                return (
+                  <tr key={tx.id} className="border-t border-border">
+                    <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{new Date(tx.createdAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                    <td className="px-3 py-2"><span className="capitalize text-[11.5px] font-medium">{String(tx.type || '').replace(/_/g, ' ')}</span></td>
+                    <td className="px-3 py-2 text-muted-foreground max-w-xs truncate" title={tx.note}>{tx.note || '—'}</td>
+                    <td className="px-3 py-2 text-right font-mono">{tx.amountInr ? `₹${Number(tx.amountInr).toLocaleString('en-IN')}` : '—'}</td>
+                    <td className={`px-3 py-2 text-right font-mono ${isCredit ? 'text-emerald-600' : 'text-red-600'}`}>{isCredit ? '+' : ''}{tx.points}</td>
+                    <td className="px-3 py-2 text-right font-mono text-foreground">{tx.balanceAfter}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {open && <WalletAdjustDialog customerId={customerId} onClose={() => setOpen(false)} onSaved={() => { setOpen(false); refetch(); qc.invalidateQueries({ queryKey: ['customer', customerId] }); }} />}
+    </div>
+  );
+}
+
+function WalletAdjustDialog({ customerId, onClose, onSaved }) {
+  const [direction, setDirection] = useState('credit');
+  const [amount, setAmount] = useState(500);
+  const [note, setNote]     = useState('');
+  const [busy, setBusy]     = useState(false);
+  const [err, setErr]       = useState(null);
+  const submit = async () => {
+    if (!note.trim())    return setErr('Reason is required.');
+    if (!amount || amount <= 0) return setErr('Amount must be greater than zero.');
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch(`/api/admin/customers/${customerId}/wallet-adjust`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amountInr: Number(amount), direction, note }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || 'failed');
+      toast.success(`Wallet ${direction === 'credit' ? 'credited' : 'debited'} ₹${amount}`);
+      onSaved();
+    } catch (e) { setErr(String(e.message || 'Could not adjust wallet')); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-[100] bg-foreground/50 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-background rounded-2xl border border-border shadow-xl w-full max-w-md p-6">
+        <div className="text-[10.5px] uppercase tracking-[0.16em] text-muted-foreground font-semibold">Adjust wallet</div>
+        <h2 className="mt-1 font-serif text-2xl">Credit or debit customer wallet</h2>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          {['credit','debit'].map((d) => (
+            <button key={d} type="button" onClick={() => setDirection(d)}
+              className={`h-10 rounded-md border text-[12.5px] font-semibold capitalize transition-colors ${direction === d ? (d === 'credit' ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'border-red-500 bg-red-500/10 text-red-700 dark:text-red-400') : 'border-border text-muted-foreground hover:text-foreground'}`}>
+              {d === 'credit' ? '+ Credit' : '− Debit'}
+            </button>
+          ))}
+        </div>
+        <div className="mt-3">
+          <label className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground">Amount (₹)</label>
+          <input type="number" min={1} value={amount} onChange={(e) => setAmount(Number(e.target.value))}
+            className="mt-1 w-full h-10 rounded-md border border-border bg-background px-3 font-mono text-[14px] focus:outline-none focus:ring-2 focus:ring-brand/40" />
+        </div>
+        <div className="mt-3">
+          <label className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground">Reason (required)</label>
+          <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)}
+            placeholder="e.g., Goodwill credit for delayed session on 12 Feb"
+            className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-brand/40" />
+        </div>
+        {err && <div className="mt-2 text-[12px] text-red-600">{err}</div>}
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <button onClick={onClose} className="h-9 px-3 rounded-md text-[12.5px] font-medium border border-border hover:bg-muted">Cancel</button>
+          <button onClick={submit} disabled={busy} className="h-9 px-4 rounded-md text-[12.5px] font-semibold bg-foreground text-background disabled:opacity-40 hover:bg-foreground/90">
+            {busy ? 'Saving…' : `${direction === 'credit' ? 'Credit' : 'Debit'} ₹${amount}`}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

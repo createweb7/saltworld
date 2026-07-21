@@ -63,7 +63,7 @@ export default async function AccountHome() {
             <QuickAction href="/account/wallet"      icon={Wallet}        label="Wallet & credits" />
             <QuickAction href="/account/memberships" icon={ClipboardList} label="Memberships" />
             <QuickAction href="/account/referrals"   icon={Users}         label="Refer friends" />
-            <QuickAction href="/gifts"               icon={Gift}          label="Gift cards" />
+            <QuickAction href="/account/giftcards"   icon={Gift}          label="Gift cards" />
           </div>
 
           {/* Balance + memberships strip */}

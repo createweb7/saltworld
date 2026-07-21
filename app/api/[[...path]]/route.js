@@ -91,6 +91,66 @@ async function handle(req, method, segs) {
     } });
   }
 
+  // ------- Customer Gift Cards (claim / list) -------
+  if (segs[0] === 'customer' && segs[1] === 'giftcards') {
+    const { getCurrentCustomer } = await import('@/lib/customer-auth');
+    const customer = await getCurrentCustomer();
+
+    // POST /api/customer/giftcards/claim  body { code, pin }
+    if (segs[2] === 'claim' && method === 'POST') {
+      if (!customer) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+      const body = await req.json().catch(() => ({}));
+      const code = String(body.code || '').trim().toUpperCase();
+      const pin  = String(body.pin  || '').trim();
+      if (!code || !pin) return NextResponse.json({ error: 'code_and_pin_required' }, { status: 400 });
+      const gc = await db.collection('giftcards').findOne({ code });
+      if (!gc)             return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      if (gc.pin && gc.pin !== pin) return NextResponse.json({ error: 'invalid_pin' }, { status: 403 });
+      if (gc.status !== 'active')   return NextResponse.json({ error: `card_${gc.status}` }, { status: 400 });
+      if (gc.expiresAt && new Date(gc.expiresAt).getTime() < Date.now()) return NextResponse.json({ error: 'expired' }, { status: 400 });
+      if (gc.claimedByCustomerId && gc.claimedByCustomerId !== customer.id) {
+        return NextResponse.json({ error: 'already_claimed' }, { status: 400 });
+      }
+      await db.collection('giftcards').updateOne({ id: gc.id }, { $set: {
+        claimedByCustomerId: customer.id,
+        claimedAt: new Date().toISOString(),
+      }});
+      const after = await db.collection('giftcards').findOne({ id: gc.id });
+      const { _id, pin: _p, ...rest } = after;
+      return NextResponse.json({ ok: true, giftcard: rest });
+    }
+
+    // GET /api/customer/giftcards → all cards owned by this customer
+    if (segs.length === 2 && method === 'GET') {
+      if (!customer) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+      const docs = await db.collection('giftcards').find({ claimedByCustomerId: customer.id }).sort({ createdAt: -1 }).toArray();
+      return NextResponse.json(docs.map(({ _id, pin, ...rest }) => rest));
+    }
+  }
+
+  // ------- Coupons (validate at checkout) -------
+  if (segs[0] === 'coupons' && segs[1] === 'validate' && method === 'POST') {
+    const body = await req.json().catch(() => ({}));
+    const { getByCode, validateCoupon } = await import('@/lib/coupons');
+    const coupon = await getByCode(body.code || '');
+    if (!coupon) return NextResponse.json({ ok: false, error: 'not_found', message: 'Coupon code is invalid.' }, { status: 200 });
+    // customer bookings count (only if a customerId is provided)
+    let customerBookingsCount = 0;
+    if (body.customerId) {
+      customerBookingsCount = await db.collection('bookings').countDocuments({
+        customerId: body.customerId, status: { $nin: ['cancelled'] },
+      });
+    }
+    const result = await validateCoupon(coupon, {
+      subtotalInr: Number(body.subtotalInr) || 0,
+      therapies:   Array.isArray(body.therapies) ? body.therapies : [],
+      branchId:    body.branchId || null,
+      customerId:  body.customerId || null,
+      customerBookingsCount,
+    });
+    return NextResponse.json(result);
+  }
+
   if (segs[0] === 'memberships') {
     // GET /api/memberships → all active plans (public catalog)
     if (segs.length === 1 && method === 'GET') {
@@ -440,9 +500,42 @@ async function handle(req, method, segs) {
         payment:    body.payment    || 'at-visit',
         priceLine:  body.priceLine  || null,
         total:      body.total      || 0,
+        // Coupon fields (populated below if a valid coupon is supplied)
+        couponCode:      null,
+        couponId:        null,
+        couponDiscount:  0,
         status:     'confirmed',
         createdAt:  now.toISOString(),
       };
+
+      // Coupon apply — validated server-side to prevent client tampering.
+      const inputCouponCode = String(body.couponCode || '').trim().toUpperCase();
+      let couponResult = null;
+      if (inputCouponCode) {
+        try {
+          const { getByCode, validateCoupon } = await import('@/lib/coupons');
+          const coupon = await getByCode(inputCouponCode);
+          if (coupon) {
+            const customerBookingsCount = doc.customerId
+              ? await db.collection('bookings').countDocuments({ customerId: doc.customerId, status: { $nin: ['cancelled'] } })
+              : 0;
+            const r = await validateCoupon(coupon, {
+              subtotalInr: Number(doc.total) || 0,
+              therapies:   therapySlugs,
+              branchId:    doc.branchId,
+              customerId:  doc.customerId,
+              customerBookingsCount,
+            });
+            if (r.ok) {
+              couponResult = { couponId: coupon.id, code: coupon.code, discountInr: r.discountInr };
+              doc.couponCode     = coupon.code;
+              doc.couponId       = coupon.id;
+              doc.couponDiscount = r.discountInr;
+              doc.total          = Math.max(0, (Number(doc.total) || 0) - r.discountInr);
+            }
+          }
+        } catch (e) { console.error('coupon apply failed', e); }
+      }
 
       // Membership auto-consume — if a signed-in customer has an eligible active
       // subscription for the primary therapy, apply it and zero out the total.
@@ -492,6 +585,21 @@ async function handle(req, method, segs) {
         } catch (e) { console.error('consumeForBooking failed', e); }
       }
 
+
+      // Coupon redemption ledger
+      if (couponResult) {
+        try {
+          const { recordRedemption } = await import('@/lib/coupons');
+          await recordRedemption({
+            couponId: couponResult.couponId,
+            code: couponResult.code,
+            customerId: doc.customerId,
+            bookingId:  doc.id,
+            subtotalInr: (Number(doc.total) || 0) + (Number(doc.couponDiscount) || 0),
+            discountInr: Number(doc.couponDiscount) || 0,
+          });
+        } catch (e) { console.error('coupon redemption record failed', e); }
+      }
 
       // Loyalty: award earn points for signed-in customers.
       if (doc.customerId && Number(doc.total) > 0) {
