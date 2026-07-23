@@ -3458,3 +3458,125 @@ frontend:
       
       All backend APIs working correctly. No major issues found.
 
+
+  - task: "BUG FIX — Coupons admin page crash (Tabs import from wrong module)"
+    implemented: true
+    working: "NA"
+    file: "/app/app/admin/coupons/CouponsClient.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: false
+        -agent: "user"
+        -comment: |
+            Runtime error: "Element type is invalid… got: undefined."
+            at CouponsClient (/app/admin/coupons/CouponsClient.jsx:39:31)
+            The Tabs component was undefined.
+        -working: "NA"
+        -agent: "main"
+        -comment: |
+            ROOT CAUSE: main agent imported `Tabs` from `@/components/admin/shell`
+            during Phase 3.2.B implementation, but `Tabs` is actually exported
+            from `@/components/admin/primitives`. The shell module doesn't export
+            it. Webpack turned the resolution into `undefined` and React crashed
+            when it tried to render `<Tabs …/>`.
+
+            FIX APPLIED: moved `Tabs` to the primitives import group in
+            /app/app/admin/coupons/CouponsClient.jsx. Verified no other admin
+            file has the same mistake via grep. Compile logs after the fix
+            confirm no more "Attempted import error" for Tabs.
+
+
+  - task: "BUG FIX — Admin Coupons page crash (Tabs import error)"
+    implemented: true
+    working: true
+    file: "/app/app/admin/coupons/CouponsClient.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: false
+        -agent: "user"
+        -comment: |
+            Reported: Admin Coupons page was crashing with "Element type is invalid… got: undefined" 
+            because `Tabs` was imported from the wrong module (@/components/admin/shell where it doesn't exist).
+        -working: "NA"
+        -agent: "main"
+        -comment: |
+            FIX APPLIED: In /app/app/admin/coupons/CouponsClient.jsx, moved the `Tabs` import from 
+            `@/components/admin/shell` (where it doesn't exist) to `@/components/admin/primitives` 
+            (where it's actually exported).
+            
+            Changed line 14 from:
+            import { ... } from '@/components/admin/shell';
+            
+            To:
+            import {
+              SimpleTable, Drawer, Field, Input, Textarea, Select, Toggle, Tabs,
+              PrimaryBtn, GhostBtn,
+            } from '@/components/admin/primitives';
+        -working: true
+        -agent: "testing"
+        -comment: |
+            ✅ VERIFIED ADMIN COUPONS PAGE BUG FIX (ALL CRITICAL TESTS PASSED)
+            
+            Executed comprehensive UI testing for the Tabs import fix using Playwright
+            against http://localhost:3000/admin/coupons with pre-warmed route and cookie injection.
+            
+            **CRITICAL TESTS (ALL PASSED):**
+            ✅ No red error overlay detected on page load
+            ✅ No "Element type is invalid" or import errors in console logs
+            ✅ Tabs component renders correctly - Both "Coupons" and "Reports" tabs visible
+            ✅ Page header shows "Coupons & Influencer Codes"
+            ✅ "New coupon" button visible in header
+            ✅ Coupons list renders with empty state message
+            ✅ Reports tab loads without crash - Shows 3 summary cards:
+                - Total redemptions: 4
+                - Gross revenue: ₹8,000
+                - Discount given: ₹2,000
+            ✅ "Top influencers" table visible with 2 rows of PROMO20 data
+            ✅ Can switch back to Coupons tab without crash
+            ✅ Page remains functional after all interactions
+            
+            **SCREENSHOTS CAPTURED:**
+            1. coupons_tab_initial.png - Coupons tab with empty state
+            2. coupons_reports_tab.png - Reports tab with summary cards and influencer table
+            
+            **ROOT CAUSE VERIFICATION:**
+            - Before fix: Server logs showed "Attempted import error: 'Tabs' is not exported from '@/components/admin/shell'"
+            - After fix: Page compiles successfully with no import errors
+            - The Tabs component is now correctly imported from @/components/admin/primitives
+            
+            **SUCCESS RATE: 100% (All critical tests passed)**
+            
+            NO CRITICAL ISSUES FOUND. The bug fix is working correctly. The "Element type is invalid" 
+            error has been completely resolved. The Admin Coupons page is now fully functional with 
+            proper tab navigation, reports display, and no crashes.
+
+
+  - agent: "testing"
+    message: |
+      ✅ ADMIN COUPONS PAGE BUG FIX VERIFICATION COMPLETE (100% SUCCESS)
+      
+      **BUG REPORTED:** Admin Coupons page was crashing with "Element type is invalid… got: undefined" 
+      because `Tabs` was imported from @/components/admin/shell (where it doesn't exist).
+      
+      **FIX APPLIED:** Moved Tabs import to @/components/admin/primitives (where it's actually exported).
+      
+      **VERIFICATION RESULTS:**
+      ✅ CRITICAL: No red error overlay on page load
+      ✅ CRITICAL: Tabs component renders correctly (Coupons & Reports tabs visible)
+      ✅ CRITICAL: No "Element type is invalid" errors in console
+      ✅ Page header shows "Coupons & Influencer Codes"
+      ✅ "New coupon" button visible
+      ✅ Reports tab loads with 3 summary cards (Total redemptions, Gross revenue, Discount given)
+      ✅ "Top influencers" table displays correctly
+      ✅ Tab switching works without crashes
+      ✅ Page remains functional after all interactions
+      
+      **CONCLUSION:**
+      The bug fix is 100% working! The Tabs import error has been completely resolved. The Admin 
+      Coupons page is now fully functional with proper tab navigation and no crashes. All critical 
+      functionality verified through UI testing with screenshots.
+

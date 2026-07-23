@@ -9,9 +9,9 @@ import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2, Edit3, TrendingUp, IndianRupee, Percent, Copy } from 'lucide-react';
-import AdminShell, { PageHeader, AdminSection, Tabs } from '@/components/admin/shell';
+import AdminShell, { PageHeader, AdminSection } from '@/components/admin/shell';
 import {
-  SimpleTable, Drawer, Field, Input, Textarea, Select, Toggle,
+  SimpleTable, Drawer, Field, Input, Textarea, Select, Toggle, Tabs,
   PrimaryBtn, GhostBtn,
 } from '@/components/admin/primitives';
 
