@@ -446,7 +446,9 @@ function Integrations({ user }) {
   const [editing, setEditing] = useState(null);
   const CATALOG = [
     { key: 'razorpay', name: 'Razorpay',   desc: 'Card / UPI / netbanking checkout for the customer site.', fields: ['keyId', 'keySecret', 'webhookSecret'] },
-    { key: 'whatsapp', name: 'WhatsApp Cloud API', desc: 'Send booking confirmations and reminders via WhatsApp.', fields: ['phoneNumberId', 'accessToken', 'appSecret'] },
+    { key: 'gallabox', name: 'Gallabox (WhatsApp)', desc: 'Send booking confirmations, reminders and OTPs via WhatsApp Business.', fields: ['apiKey', 'apiSecret', 'channelId', 'baseUrl'] },
+    { key: 'whatsapp', name: 'WhatsApp Cloud API (Meta)', desc: 'Alternative WhatsApp provider (Meta Cloud). Optional fallback.', fields: ['phoneNumberId', 'accessToken', 'appSecret'] },
+    { key: 'bhashsms', name: 'BhashSMS',   desc: 'Transactional SMS delivery for OTPs and booking events.', fields: ['user', 'password', 'sender', 'dltEntityId', 'dltTemplateId'] },
     { key: 'email',    name: 'Email (SendGrid / Resend)', desc: 'Transactional emails for confirmations and reset links.', fields: ['apiKey', 'fromAddress', 'fromName'] },
     { key: 's3',       name: 'AWS S3', desc: 'Media library storage for the CMS.', fields: ['bucket', 'region', 'accessKeyId', 'secretAccessKey', 'cdnUrl'] },
     { key: 'openai',   name: 'OpenAI / Claude', desc: 'AI Assistant, copywriter and dashboard insights.', fields: ['provider', 'apiKey', 'model'] },
@@ -455,6 +457,7 @@ function Integrations({ user }) {
   const configuredMap = Object.fromEntries((data || []).map((d) => [d.key, d]));
   return (
     <div>
+      <NotificationProviderSelector />
       <div className="text-[12.5px] text-muted-foreground mb-4">API keys are stored on the server. Secrets are masked on read — only Super Admin can update.</div>
       <div className="grid md:grid-cols-2 gap-3">
         {CATALOG.map((int) => {
@@ -482,6 +485,71 @@ function Integrations({ user }) {
         })}
       </div>
       {editing && <IntegrationEditor int={editing} current={configuredMap[editing.key]} onClose={() => setEditing(null)} onSaved={() => { qc.invalidateQueries({ queryKey: ['integrations'] }); setEditing(null); }} />}
+    </div>
+  );
+}
+
+function NotificationProviderSelector() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ['notif-providers'], queryFn: async () => (await fetch('/api/admin/notifications/providers')).json() });
+  const [form, setForm] = useState(null);
+  useEffect(() => { if (data && !form) setForm({ whatsapp: data.whatsapp, sms: data.sms }); }, [data]);
+  const save = async () => {
+    try {
+      const r = await fetch('/api/admin/notifications/providers', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+      if (!r.ok) throw new Error();
+      toast.success('Providers saved');
+      qc.invalidateQueries({ queryKey: ['notif-providers'] });
+    } catch { toast.error('Could not save'); }
+  };
+  if (!data || !form) return null;
+  const av = data.available || { whatsapp: {}, sms: {} };
+  const dot = (ready) => (
+    <span className={`inline-block h-1.5 w-1.5 rounded-full ${ready ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
+  );
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 mb-6">
+      <div className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground">Active providers</div>
+      <div className="mt-1 text-[13px] font-medium">Notification routing</div>
+      <div className="text-[11.5px] text-muted-foreground mt-0.5 max-w-2xl leading-[1.55]">Salt World supports multiple providers for each channel. Whichever is selected here will be used by the notification engine — no code changes needed.</div>
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <div className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground mb-1.5">WhatsApp provider</div>
+          <div className="flex flex-col gap-1.5">
+            {[
+              { id: 'gallabox',   label: 'Gallabox' },
+              { id: 'meta_cloud', label: 'WhatsApp Cloud API (Meta)' },
+            ].map((opt) => (
+              <label key={opt.id} className={`flex items-center gap-2 rounded-md border p-2 cursor-pointer transition-colors ${form.whatsapp === opt.id ? 'border-brand bg-brand-soft/40' : 'border-border hover:border-foreground/30'}`}>
+                <input type="radio" name="wa" checked={form.whatsapp === opt.id} onChange={() => setForm({ ...form, whatsapp: opt.id })} className="sr-only" />
+                <div className={`h-3.5 w-3.5 rounded-full border-2 ${form.whatsapp === opt.id ? 'border-brand bg-brand' : 'border-border'}`} />
+                <span className="text-[12.5px] font-medium">{opt.label}</span>
+                <div className="ml-auto flex items-center gap-1 text-[10.5px] text-muted-foreground uppercase tracking-[0.14em]">
+                  {dot(av.whatsapp?.[opt.id])}{av.whatsapp?.[opt.id] ? 'ready' : 'no creds'}
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground mb-1.5">SMS provider</div>
+          <div className="flex flex-col gap-1.5">
+            {[{ id: 'bhashsms', label: 'BhashSMS' }].map((opt) => (
+              <label key={opt.id} className={`flex items-center gap-2 rounded-md border p-2 cursor-pointer transition-colors ${form.sms === opt.id ? 'border-brand bg-brand-soft/40' : 'border-border hover:border-foreground/30'}`}>
+                <input type="radio" name="sms" checked={form.sms === opt.id} onChange={() => setForm({ ...form, sms: opt.id })} className="sr-only" />
+                <div className={`h-3.5 w-3.5 rounded-full border-2 ${form.sms === opt.id ? 'border-brand bg-brand' : 'border-border'}`} />
+                <span className="text-[12.5px] font-medium">{opt.label}</span>
+                <div className="ml-auto flex items-center gap-1 text-[10.5px] text-muted-foreground uppercase tracking-[0.14em]">
+                  {dot(av.sms?.[opt.id])}{av.sms?.[opt.id] ? 'ready' : 'no creds'}
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="mt-4 flex items-center justify-end">
+        <PrimaryBtn onClick={save} className="h-8 px-3">Save providers</PrimaryBtn>
+      </div>
     </div>
   );
 }

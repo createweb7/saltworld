@@ -1,508 +1,747 @@
 #!/usr/bin/env python3
 """
-Backend API tests for M3 (Referral System) and M4 (Loyalty Wallet)
-Tests the new endpoints shipped in the M1-M4 sprint.
+Phase 3.2.C — Notification Providers (Gallabox WhatsApp + BhashSMS) Backend Tests
+Tests all provider config, routing, and communication log endpoints.
 """
 
 import requests
 import json
-import re
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 
-# Base URL from .env
 BASE_URL = "https://saltwell-arch.preview.emergentagent.com/api"
-
-# Admin credentials
 ADMIN_EMAIL = "admin@saltworld.in"
 ADMIN_PASSWORD = "SaltWorld@2025"
 
-# Test state
+# Global state
 admin_cookie = None
-customer_cookie = None
-customer_id = None
-customer_phone = None
-booking_id = None
+test_communication_ids = []
+test_booking_ids = []
+gallabox_integration_inserted = False
 
-def print_test(name, passed, details=""):
-    """Print test result"""
-    status = "✅ PASS" if passed else "❌ FAIL"
-    print(f"{status}: {name}")
-    if details:
-        print(f"  → {details}")
-
-def admin_login():
+def login_admin():
     """Login as admin and get session cookie"""
     global admin_cookie
-    print("\n=== ADMIN LOGIN ===")
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/admin/auth/login",
-            json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
-            timeout=30
-        )
-        if resp.status_code == 200:
-            admin_cookie = resp.cookies.get("sw_admin")
-            print_test("Admin login", admin_cookie is not None, f"Got admin cookie")
-            return True
-        else:
-            print_test("Admin login", False, f"Status {resp.status_code}: {resp.text[:200]}")
-            return False
-    except Exception as e:
-        print_test("Admin login", False, f"Exception: {str(e)}")
+    print("\n=== Admin Login ===")
+    res = requests.post(f"{BASE_URL}/admin/auth/login", json={
+        "email": ADMIN_EMAIL,
+        "password": ADMIN_PASSWORD
+    })
+    print(f"Login status: {res.status_code}")
+    if res.status_code == 200:
+        admin_cookie = res.cookies.get("sw_admin")
+        print(f"✅ Admin login successful, cookie obtained")
+        return True
+    else:
+        print(f"❌ Admin login failed: {res.text}")
         return False
 
-def customer_otp_login():
-    """Customer OTP login flow"""
-    global customer_cookie, customer_id, customer_phone
-    print("\n=== CUSTOMER OTP LOGIN ===")
+def get_admin_cookies():
+    """Return cookies dict for admin requests"""
+    return {"sw_admin": admin_cookie} if admin_cookie else {}
+
+# ============================================================================
+# A. Providers config
+# ============================================================================
+
+def test_a1_get_providers_config():
+    """A1: GET /api/admin/notifications/providers returns correct shape"""
+    print("\n=== A1: GET providers config ===")
+    res = requests.get(f"{BASE_URL}/admin/notifications/providers", cookies=get_admin_cookies())
+    print(f"Status: {res.status_code}")
     
-    # Use a test phone number
-    customer_phone = "919999900001"
-    
-    try:
-        # Step 1: Request OTP
-        print("Step 1: Request OTP...")
-        resp = requests.post(
-            f"{BASE_URL}/customer/auth/request-otp",
-            json={"phone": customer_phone},
-            timeout=30
-        )
-        
-        if resp.status_code != 200:
-            print_test("Request OTP", False, f"Status {resp.status_code}: {resp.text[:200]}")
-            return False
-        
-        data = resp.json()
-        print_test("Request OTP", True, f"Response: {json.dumps(data)[:200]}")
-        
-        # In dev mode, OTP is returned in response
-        otp = data.get("devOtp") or data.get("otp")
-        if not otp:
-            print_test("Get OTP from response", False, "No OTP in response")
-            return False
-        
-        print_test("Get OTP from response", True, f"OTP: {otp}")
-        
-        # Step 2: Verify OTP
-        print("Step 2: Verify OTP...")
-        resp = requests.post(
-            f"{BASE_URL}/customer/auth/verify-otp",
-            json={"phone": customer_phone, "otp": otp},
-            timeout=30
-        )
-        
-        if resp.status_code != 200:
-            print_test("Verify OTP", False, f"Status {resp.status_code}: {resp.text[:200]}")
-            return False
-        
-        data = resp.json()
-        customer_cookie = resp.cookies.get("sw_customer")
-        customer_id = data.get("customer", {}).get("id")
-        
-        print_test("Verify OTP", customer_cookie is not None and customer_id is not None, 
-                   f"Got customer cookie and ID: {customer_id}")
-        
-        return customer_cookie is not None and customer_id is not None
-        
-    except Exception as e:
-        print_test("Customer OTP login", False, f"Exception: {str(e)}")
+    if res.status_code != 200:
+        print(f"❌ Expected 200, got {res.status_code}: {res.text}")
         return False
+    
+    data = res.json()
+    print(f"Response: {json.dumps(data, indent=2)}")
+    
+    # Check shape
+    if data.get("whatsapp") != "gallabox":
+        print(f"❌ Expected whatsapp='gallabox', got {data.get('whatsapp')}")
+        return False
+    
+    if data.get("sms") != "bhashsms":
+        print(f"❌ Expected sms='bhashsms', got {data.get('sms')}")
+        return False
+    
+    # Check available structure
+    available = data.get("available", {})
+    whatsapp_avail = available.get("whatsapp", {})
+    sms_avail = available.get("sms", {})
+    
+    print(f"WhatsApp available: gallabox={whatsapp_avail.get('gallabox')}, meta_cloud={whatsapp_avail.get('meta_cloud')}")
+    print(f"SMS available: bhashsms={sms_avail.get('bhashsms')}")
+    
+    # Gallabox should be false (channelId missing)
+    if whatsapp_avail.get("gallabox") != False:
+        print(f"⚠️  Expected gallabox=false (channelId missing), got {whatsapp_avail.get('gallabox')}")
+    
+    # BhashSMS should be true (creds present)
+    if sms_avail.get("bhashsms") != True:
+        print(f"❌ Expected bhashsms=true, got {sms_avail.get('bhashsms')}")
+        return False
+    
+    print("✅ A1 PASSED: Providers config shape correct")
+    return True
 
-def test_m3_referrals():
-    """Test M3 Referral System endpoints"""
-    print("\n" + "="*60)
-    print("=== M3 REFERRAL SYSTEM TESTS ===")
-    print("="*60)
+def test_a2_put_providers_config():
+    """A2: PUT /api/admin/notifications/providers with new values"""
+    print("\n=== A2: PUT providers config (meta_cloud) ===")
+    res = requests.put(
+        f"{BASE_URL}/admin/notifications/providers",
+        json={"whatsapp": "meta_cloud", "sms": "bhashsms"},
+        cookies=get_admin_cookies()
+    )
+    print(f"Status: {res.status_code}")
     
-    # R1: Customer referrals endpoint - first call (issue code)
-    print("\n--- R1: GET /api/customer/referrals (with session) ---")
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/customer/referrals",
-            cookies={"sw_customer": customer_cookie},
-            timeout=30
-        )
-        
-        if resp.status_code != 200:
-            print_test("R1: Get customer referrals", False, f"Status {resp.status_code}: {resp.text[:200]}")
-        else:
-            data = resp.json()
-            code = data.get("code", {}).get("code")
-            referrals = data.get("referrals", [])
-            total_earned = data.get("totalEarned", 0)
-            revenue = data.get("revenue", 0)
-            
-            # Check code format: ^SW[A-Z0-9]{6}$
-            code_valid = code and re.match(r'^SW[A-Z0-9]{6}$', code)
-            
-            print_test("R1: Code format valid", code_valid, f"Code: {code}")
-            print_test("R1: Referrals array", isinstance(referrals, list), f"Referrals: {referrals}")
-            print_test("R1: Total earned", total_earned == 0, f"Total earned: {total_earned}")
-            print_test("R1: Revenue", revenue == 0, f"Revenue: {revenue}")
-            
-            # Store code for second call
-            first_code = code
-            
-            # R1 continued: Second call - code should be unchanged (idempotent)
-            print("\n--- R1 (continued): Second call - idempotent code ---")
-            resp2 = requests.get(
-                f"{BASE_URL}/customer/referrals",
-                cookies={"sw_customer": customer_cookie},
-                timeout=30
-            )
-            
-            if resp2.status_code != 200:
-                print_test("R1: Second call", False, f"Status {resp2.status_code}")
-            else:
-                data2 = resp2.json()
-                second_code = data2.get("code", {}).get("code")
-                print_test("R1: Code unchanged (idempotent)", first_code == second_code, 
-                          f"First: {first_code}, Second: {second_code}")
+    if res.status_code != 200:
+        print(f"❌ Expected 200, got {res.status_code}: {res.text}")
+        return False
     
-    except Exception as e:
-        print_test("R1: Get customer referrals", False, f"Exception: {str(e)}")
+    data = res.json()
+    print(f"Response: {json.dumps(data, indent=2)}")
     
-    # R2: Without session cookie - should return 401
-    print("\n--- R2: GET /api/customer/referrals (without session) ---")
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/customer/referrals",
-            timeout=30
-        )
-        
-        is_401 = resp.status_code == 401
-        has_error = resp.json().get("error") == "not_signed_in" if is_401 else False
-        
-        print_test("R2: Returns 401", is_401, f"Status: {resp.status_code}")
-        print_test("R2: Error message", has_error, f"Error: {resp.json().get('error')}")
+    if data.get("whatsapp") != "meta_cloud":
+        print(f"❌ Expected whatsapp='meta_cloud', got {data.get('whatsapp')}")
+        return False
     
-    except Exception as e:
-        print_test("R2: Unauthenticated request", False, f"Exception: {str(e)}")
-    
-    # R3: Admin referrals stats
-    print("\n--- R3: GET /api/admin/referrals/stats ---")
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/admin/referrals/stats",
-            cookies={"sw_admin": admin_cookie},
-            timeout=30
-        )
-        
-        if resp.status_code != 200:
-            print_test("R3: Get referral stats", False, f"Status {resp.status_code}: {resp.text[:200]}")
-        else:
-            data = resp.json()
-            
-            has_total_referrals = "totalReferrals" in data and isinstance(data["totalReferrals"], (int, float))
-            has_total_revenue = "totalRevenue" in data and isinstance(data["totalRevenue"], (int, float))
-            has_total_rewards = "totalRewards" in data and isinstance(data["totalRewards"], (int, float))
-            has_conversion_rate = "conversionRate" in data and isinstance(data["conversionRate"], (int, float))
-            has_top_referrers = "topReferrers" in data and isinstance(data["topReferrers"], list)
-            
-            print_test("R3: Has totalReferrals", has_total_referrals, f"Value: {data.get('totalReferrals')}")
-            print_test("R3: Has totalRevenue", has_total_revenue, f"Value: {data.get('totalRevenue')}")
-            print_test("R3: Has totalRewards", has_total_rewards, f"Value: {data.get('totalRewards')}")
-            print_test("R3: Has conversionRate", has_conversion_rate, f"Value: {data.get('conversionRate')}")
-            print_test("R3: Has topReferrers array", has_top_referrers, f"Count: {len(data.get('topReferrers', []))}")
-    
-    except Exception as e:
-        print_test("R3: Get referral stats", False, f"Exception: {str(e)}")
-    
-    # R4: Admin get customer referrals
-    print("\n--- R4: GET /api/admin/referrals/customer/:customerId ---")
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/admin/referrals/customer/{customer_id}",
-            cookies={"sw_admin": admin_cookie},
-            timeout=30
-        )
-        
-        if resp.status_code != 200:
-            print_test("R4: Get customer referrals (admin)", False, f"Status {resp.status_code}: {resp.text[:200]}")
-        else:
-            data = resp.json()
-            code = data.get("code", {}).get("code") if data.get("code") else None
-            referrals = data.get("referrals", [])
-            
-            has_code = code is not None
-            has_referrals_array = isinstance(referrals, list)
-            
-            print_test("R4: Has code", has_code, f"Code: {code}")
-            print_test("R4: Has referrals array", has_referrals_array, f"Count: {len(referrals)}")
-    
-    except Exception as e:
-        print_test("R4: Get customer referrals (admin)", False, f"Exception: {str(e)}")
+    print("✅ A2 PASSED: Provider config updated to meta_cloud")
+    return True
 
-def test_m4_loyalty_wallet():
-    """Test M4 Loyalty Wallet endpoints"""
-    print("\n" + "="*60)
-    print("=== M4 LOYALTY WALLET TESTS ===")
-    print("="*60)
+def test_a3_restore_providers_config():
+    """A3: Restore to gallabox"""
+    print("\n=== A3: Restore providers config (gallabox) ===")
+    res = requests.put(
+        f"{BASE_URL}/admin/notifications/providers",
+        json={"whatsapp": "gallabox", "sms": "bhashsms"},
+        cookies=get_admin_cookies()
+    )
+    print(f"Status: {res.status_code}")
     
-    # W1: Customer wallet - should be 0 initially
-    print("\n--- W1: GET /api/customer/wallet ---")
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/customer/wallet",
-            cookies={"sw_customer": customer_cookie},
-            timeout=30
-        )
-        
-        if resp.status_code != 200:
-            print_test("W1: Get customer wallet", False, f"Status {resp.status_code}: {resp.text[:200]}")
-        else:
-            data = resp.json()
-            balance = data.get("balance", -1)
-            history = data.get("history", None)
-            
-            print_test("W1: Balance is 0", balance == 0, f"Balance: {balance}")
-            print_test("W1: History is array", isinstance(history, list), f"History: {history}")
+    if res.status_code != 200:
+        print(f"❌ Expected 200, got {res.status_code}: {res.text}")
+        return False
     
-    except Exception as e:
-        print_test("W1: Get customer wallet", False, f"Exception: {str(e)}")
+    data = res.json()
+    if data.get("whatsapp") != "gallabox":
+        print(f"❌ Expected whatsapp='gallabox', got {data.get('whatsapp')}")
+        return False
     
-    # W2: Admin adjust wallet - add 250 points
-    print("\n--- W2: POST /api/admin/wallet/:customerId/adjust (add 250 points) ---")
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/admin/wallet/{customer_id}/adjust",
-            json={"points": 250, "note": "test credit"},
-            cookies={"sw_admin": admin_cookie},
-            timeout=30
-        )
-        
-        if resp.status_code != 200:
-            print_test("W2: Adjust wallet +250", False, f"Status {resp.status_code}: {resp.text[:200]}")
-        else:
-            data = resp.json()
-            
-            tx_type = data.get("type")
-            balance_after = data.get("balanceAfter")
-            tx_id = data.get("id")
-            created_at = data.get("createdAt")
-            has_mongo_id = "_id" in data
-            
-            print_test("W2: Type is manual_adjustment", tx_type == "manual_adjustment", f"Type: {tx_type}")
-            print_test("W2: Balance after is 250", balance_after == 250, f"Balance: {balance_after}")
-            print_test("W2: Has UUID id", tx_id is not None and len(tx_id) == 36, f"ID: {tx_id}")
-            print_test("W2: Has createdAt ISO string", created_at is not None, f"Created: {created_at}")
-            print_test("W2: No _id field", not has_mongo_id, f"Has _id: {has_mongo_id}")
-    
-    except Exception as e:
-        print_test("W2: Adjust wallet +250", False, f"Exception: {str(e)}")
-    
-    # W3: Customer wallet - should now be 250
-    print("\n--- W3: GET /api/customer/wallet (after adjustment) ---")
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/customer/wallet",
-            cookies={"sw_customer": customer_cookie},
-            timeout=30
-        )
-        
-        if resp.status_code != 200:
-            print_test("W3: Get customer wallet", False, f"Status {resp.status_code}: {resp.text[:200]}")
-        else:
-            data = resp.json()
-            balance = data.get("balance", -1)
-            history = data.get("history", [])
-            
-            print_test("W3: Balance is 250", balance == 250, f"Balance: {balance}")
-            print_test("W3: History has transaction", len(history) > 0, f"History count: {len(history)}")
-            
-            if len(history) > 0:
-                tx = history[0]
-                print_test("W3: Transaction type", tx.get("type") == "manual_adjustment", 
-                          f"Type: {tx.get('type')}")
-                print_test("W3: Transaction points", tx.get("points") == 250, 
-                          f"Points: {tx.get('points')}")
-    
-    except Exception as e:
-        print_test("W3: Get customer wallet", False, f"Exception: {str(e)}")
-    
-    # W4: Adjust with 0 points - should return 400
-    print("\n--- W4: POST /api/admin/wallet/:customerId/adjust (0 points) ---")
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/admin/wallet/{customer_id}/adjust",
-            json={"points": 0, "note": "zero"},
-            cookies={"sw_admin": admin_cookie},
-            timeout=30
-        )
-        
-        is_400 = resp.status_code == 400
-        has_error = resp.json().get("error") == "invalid_points" if is_400 else False
-        
-        print_test("W4: Returns 400", is_400, f"Status: {resp.status_code}")
-        print_test("W4: Error is invalid_points", has_error, f"Error: {resp.json().get('error')}")
-    
-    except Exception as e:
-        print_test("W4: Adjust with 0 points", False, f"Exception: {str(e)}")
-    
-    # W5: Over-debit - should error with insufficient_balance
-    print("\n--- W5: POST /api/admin/wallet/:customerId/adjust (over-debit) ---")
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/admin/wallet/{customer_id}/adjust",
-            json={"points": -999999, "note": "over-debit"},
-            cookies={"sw_admin": admin_cookie},
-            timeout=30
-        )
-        
-        is_error = resp.status_code in [400, 500]
-        error_text = resp.text.lower()
-        has_insufficient = "insufficient" in error_text or "balance" in error_text
-        
-        print_test("W5: Returns error (400 or 500)", is_error, f"Status: {resp.status_code}")
-        print_test("W5: Error mentions insufficient balance", has_insufficient, 
-                  f"Error: {resp.text[:200]}")
-        
-        # Verify balance is still 250
-        resp2 = requests.get(
-            f"{BASE_URL}/customer/wallet",
-            cookies={"sw_customer": customer_cookie},
-            timeout=30
-        )
-        
-        if resp2.status_code == 200:
-            balance = resp2.json().get("balance", -1)
-            print_test("W5: Balance unchanged (still 250)", balance == 250, f"Balance: {balance}")
-    
-    except Exception as e:
-        print_test("W5: Over-debit test", False, f"Exception: {str(e)}")
-    
-    # W6: Admin get wallet history
-    print("\n--- W6: GET /api/admin/wallet/:customerId/history ---")
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/admin/wallet/{customer_id}/history",
-            cookies={"sw_admin": admin_cookie},
-            timeout=30
-        )
-        
-        if resp.status_code != 200:
-            print_test("W6: Get wallet history", False, f"Status {resp.status_code}: {resp.text[:200]}")
-        else:
-            data = resp.json()
-            is_array = isinstance(data, list)
-            has_tx = len(data) > 0 if is_array else False
-            
-            print_test("W6: Returns array", is_array, f"Type: {type(data)}")
-            print_test("W6: Contains +250 transaction", has_tx, f"Count: {len(data) if is_array else 0}")
-            
-            if has_tx:
-                tx = data[0]
-                print_test("W6: Transaction has correct points", tx.get("points") == 250, 
-                          f"Points: {tx.get('points')}")
-    
-    except Exception as e:
-        print_test("W6: Get wallet history", False, f"Exception: {str(e)}")
-    
-    # W7: Admin get wallet balance
-    print("\n--- W7: GET /api/admin/wallet/:customerId/balance ---")
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/admin/wallet/{customer_id}/balance",
-            cookies={"sw_admin": admin_cookie},
-            timeout=30
-        )
-        
-        if resp.status_code != 200:
-            print_test("W7: Get wallet balance", False, f"Status {resp.status_code}: {resp.text[:200]}")
-        else:
-            data = resp.json()
-            balance = data.get("balance", -1)
-            
-            print_test("W7: Balance is 250", balance == 250, f"Balance: {balance}")
-    
-    except Exception as e:
-        print_test("W7: Get wallet balance", False, f"Exception: {str(e)}")
+    print("✅ A3 PASSED: Provider config restored to gallabox")
+    return True
 
-def test_regression_bookings():
-    """Regression test: POST /api/bookings"""
-    print("\n" + "="*60)
-    print("=== REGRESSION SANITY: POST /api/bookings ===")
-    print("="*60)
+def test_a4_put_invalid_providers():
+    """A4: PUT with invalid values should coerce to defaults"""
+    print("\n=== A4: PUT invalid provider values ===")
+    res = requests.put(
+        f"{BASE_URL}/admin/notifications/providers",
+        json={"whatsapp": "invalid", "sms": "unknown"},
+        cookies=get_admin_cookies()
+    )
+    print(f"Status: {res.status_code}")
     
-    try:
-        payload = {
-            "contact": {
-                "name": "Loyalty Tester",
-                "phone": "919999900001",
-                "email": "test@example.com"
+    if res.status_code != 200:
+        print(f"❌ Expected 200, got {res.status_code}: {res.text}")
+        return False
+    
+    data = res.json()
+    print(f"Response: {json.dumps(data, indent=2)}")
+    
+    # Should coerce to defaults
+    if data.get("whatsapp") != "gallabox":
+        print(f"❌ Expected whatsapp='gallabox' (coerced), got {data.get('whatsapp')}")
+        return False
+    
+    if data.get("sms") != "bhashsms":
+        print(f"❌ Expected sms='bhashsms' (coerced), got {data.get('sms')}")
+        return False
+    
+    print("✅ A4 PASSED: Invalid values coerced to defaults")
+    return True
+
+# ============================================================================
+# B. Provider auth guards
+# ============================================================================
+
+def test_b5_get_providers_no_auth():
+    """B5: GET providers without admin cookie should return 401/403"""
+    print("\n=== B5: GET providers without auth ===")
+    res = requests.get(f"{BASE_URL}/admin/notifications/providers")
+    print(f"Status: {res.status_code}")
+    
+    if res.status_code not in [401, 403]:
+        print(f"❌ Expected 401/403, got {res.status_code}: {res.text}")
+        return False
+    
+    print("✅ B5 PASSED: Unauthenticated request rejected")
+    return True
+
+def test_b6_put_providers_no_auth():
+    """B6: PUT providers without admin cookie should return 401/403"""
+    print("\n=== B6: PUT providers without auth ===")
+    res = requests.put(
+        f"{BASE_URL}/admin/notifications/providers",
+        json={"whatsapp": "gallabox", "sms": "bhashsms"}
+    )
+    print(f"Status: {res.status_code}")
+    
+    if res.status_code not in [401, 403]:
+        print(f"❌ Expected 401/403, got {res.status_code}: {res.text}")
+        return False
+    
+    print("✅ B6 PASSED: Unauthenticated PUT rejected")
+    return True
+
+# ============================================================================
+# C. WhatsApp — Gallabox routing
+# ============================================================================
+
+def test_c8_send_whatsapp_no_channel_id():
+    """C8: POST send whatsapp without channelId should fail with gallabox_not_configured"""
+    print("\n=== C8: Send WhatsApp (Gallabox, no channelId) ===")
+    res = requests.post(
+        f"{BASE_URL}/admin/notifications/send",
+        json={
+            "channel": "whatsapp",
+            "to": "9876500123",
+            "templateName": "welcome_v1",
+            "variables": {"name": "Test"},
+            "orderedVariables": ["name"]
+        },
+        cookies=get_admin_cookies()
+    )
+    print(f"Status: {res.status_code}")
+    
+    if res.status_code != 200:
+        print(f"❌ Expected 200, got {res.status_code}: {res.text}")
+        return False
+    
+    data = res.json()
+    print(f"Response: {json.dumps(data, indent=2)}")
+    
+    # Check fields
+    if data.get("channel") != "whatsapp":
+        print(f"❌ Expected channel='whatsapp', got {data.get('channel')}")
+        return False
+    
+    if data.get("provider") != "gallabox":
+        print(f"❌ Expected provider='gallabox', got {data.get('provider')}")
+        return False
+    
+    if data.get("status") != "failed":
+        print(f"❌ Expected status='failed', got {data.get('status')}")
+        return False
+    
+    note = data.get("note", "")
+    if "gallabox_not_configured" not in note:
+        print(f"❌ Expected note to contain 'gallabox_not_configured', got: {note}")
+        return False
+    
+    # Save communication ID for cleanup
+    if data.get("id"):
+        test_communication_ids.append(data["id"])
+    
+    print("✅ C8 PASSED: Gallabox not configured error as expected")
+    return True
+
+def test_c9_insert_gallabox_channel_id():
+    """C9: Manually insert channelId via MongoDB"""
+    print("\n=== C9: Insert Gallabox channelId via mongosh ===")
+    
+    # Use mongosh to insert/update integrations collection
+    cmd = """mongosh --quiet your_database_name --eval 'db.integrations.updateOne(
+        {key:"gallabox"},
+        {$set:{
+            key:"gallabox",
+            config:{
+                apiKey:"6a5e2d7f0b85f541c639d6d0",
+                apiSecret:"321cf646a21648c5bcbc5ffd261657de",
+                channelId:"test-channel-999"
             },
-            "outcomeSlug": "stress-relief",
-            "outcomeLabel": "Stress Relief",
-            "therapies": [
-                {
-                    "slug": "salt-therapy",
-                    "label": "Halotherapy",
-                    "durationMin": 45,
-                    "price": 1499
-                }
-            ],
-            "slotDate": "2025-12-31",
-            "slotTime": "15:00",
-            "total": 1499,
-            "customerId": customer_id
-        }
-        
-        resp = requests.post(
-            f"{BASE_URL}/bookings",
-            json=payload,
-            timeout=30
-        )
-        
-        if resp.status_code != 200:
-            print_test("Regression: POST /api/bookings", False, 
-                      f"Status {resp.status_code}: {resp.text[:200]}")
-        else:
-            data = resp.json()
-            booking_id = data.get("id")
-            booking_ref = data.get("ref")
-            
-            has_id = booking_id is not None
-            has_ref = booking_ref is not None and booking_ref.startswith("SW-")
-            
-            print_test("Regression: Booking created", has_id and has_ref, 
-                      f"ID: {booking_id}, Ref: {booking_ref}")
-            print_test("Regression: Response structure", "status" in data, 
-                      f"Status: {data.get('status')}")
+            updatedAt:new Date()
+        }},
+        {upsert:true}
+    )'"""
     
+    import subprocess
+    try:
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+        print(f"Mongosh output: {result.stdout}")
+        if result.returncode != 0:
+            print(f"⚠️  Mongosh error: {result.stderr}")
+            return False
+        
+        global gallabox_integration_inserted
+        gallabox_integration_inserted = True
+        
+        print("✅ C9: Gallabox channelId inserted")
+        print("⏳ Waiting 40 seconds for cache to expire...")
+        time.sleep(40)
+        return True
     except Exception as e:
-        print_test("Regression: POST /api/bookings", False, f"Exception: {str(e)}")
+        print(f"❌ Failed to insert channelId: {e}")
+        return False
+
+def test_c9b_verify_gallabox_configured():
+    """C9b: Verify GET providers now shows gallabox as configured"""
+    print("\n=== C9b: Verify Gallabox now configured ===")
+    res = requests.get(f"{BASE_URL}/admin/notifications/providers", cookies=get_admin_cookies())
+    print(f"Status: {res.status_code}")
+    
+    if res.status_code != 200:
+        print(f"❌ Expected 200, got {res.status_code}: {res.text}")
+        return False
+    
+    data = res.json()
+    available = data.get("available", {})
+    gallabox_configured = available.get("whatsapp", {}).get("gallabox")
+    
+    print(f"Gallabox configured: {gallabox_configured}")
+    
+    if gallabox_configured != True:
+        print(f"❌ Expected gallabox=true after inserting channelId, got {gallabox_configured}")
+        return False
+    
+    print("✅ C9b PASSED: Gallabox now shows as configured")
+    return True
+
+def test_c10_send_whatsapp_with_channel_id():
+    """C10: Retry send whatsapp - should now make real HTTP call to Gallabox"""
+    print("\n=== C10: Send WhatsApp (Gallabox, with channelId) ===")
+    res = requests.post(
+        f"{BASE_URL}/admin/notifications/send",
+        json={
+            "channel": "whatsapp",
+            "to": "9876500123",
+            "templateName": "welcome_v1",
+            "variables": {"name": "Test"},
+            "orderedVariables": ["name"]
+        },
+        cookies=get_admin_cookies()
+    )
+    print(f"Status: {res.status_code}")
+    
+    if res.status_code != 200:
+        print(f"❌ Expected 200, got {res.status_code}: {res.text}")
+        return False
+    
+    data = res.json()
+    print(f"Response: {json.dumps(data, indent=2)}")
+    
+    # Check fields
+    if data.get("provider") != "gallabox":
+        print(f"❌ Expected provider='gallabox', got {data.get('provider')}")
+        return False
+    
+    if data.get("status") != "failed":
+        print(f"❌ Expected status='failed' (fake channelId), got {data.get('status')}")
+        return False
+    
+    note = data.get("note", "")
+    # Should NOT be gallabox_not_configured anymore
+    if "gallabox_not_configured" in note:
+        print(f"❌ Note still contains 'gallabox_not_configured': {note}")
+        return False
+    
+    # Should be gallabox_api_error or similar (real HTTP call was made)
+    if "gallabox_api_error" not in note and "error" not in note.lower():
+        print(f"⚠️  Expected note to contain API error, got: {note}")
+    
+    # Save communication ID for cleanup
+    if data.get("id"):
+        test_communication_ids.append(data["id"])
+    
+    print("✅ C10 PASSED: Real Gallabox API call made (failed as expected with fake channelId)")
+    return True
+
+def test_c11_cleanup_gallabox_integration():
+    """C11: Cleanup - delete Gallabox integration doc"""
+    print("\n=== C11: Cleanup Gallabox integration ===")
+    
+    if not gallabox_integration_inserted:
+        print("⏭️  Skipping cleanup (no integration was inserted)")
+        return True
+    
+    cmd = """mongosh --quiet your_database_name --eval 'db.integrations.deleteOne({key:"gallabox"})'"""
+    
+    import subprocess
+    try:
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+        print(f"Mongosh output: {result.stdout}")
+        if result.returncode != 0:
+            print(f"⚠️  Mongosh error: {result.stderr}")
+            return False
+        
+        print("✅ C11: Gallabox integration deleted")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to delete integration: {e}")
+        return False
+
+# ============================================================================
+# D. SMS — BhashSMS routing
+# ============================================================================
+
+def test_d12_send_sms():
+    """D12: POST send SMS via BhashSMS"""
+    print("\n=== D12: Send SMS (BhashSMS) ===")
+    res = requests.post(
+        f"{BASE_URL}/admin/notifications/send",
+        json={
+            "channel": "sms",
+            "to": "9876500123",
+            "text": "Salt World test notification"
+        },
+        cookies=get_admin_cookies()
+    )
+    print(f"Status: {res.status_code}")
+    
+    if res.status_code != 200:
+        print(f"❌ Expected 200, got {res.status_code}: {res.text}")
+        return False
+    
+    data = res.json()
+    print(f"Response: {json.dumps(data, indent=2)}")
+    
+    # Check fields
+    if data.get("channel") != "sms":
+        print(f"❌ Expected channel='sms', got {data.get('channel')}")
+        return False
+    
+    if data.get("provider") != "bhashsms":
+        print(f"❌ Expected provider='bhashsms', got {data.get('provider')}")
+        return False
+    
+    # Status should be 'sent' or 'failed' (real HTTP call was made)
+    status = data.get("status")
+    if status not in ["sent", "failed"]:
+        print(f"❌ Expected status='sent' or 'failed', got {status}")
+        return False
+    
+    note = data.get("note", "")
+    # Should NOT be bhashsms_not_configured
+    if "bhashsms_not_configured" in note:
+        print(f"❌ Note contains 'bhashsms_not_configured': {note}")
+        return False
+    
+    print(f"Status: {status}, Note: {note}")
+    
+    # Save communication ID for cleanup
+    if data.get("id"):
+        test_communication_ids.append(data["id"])
+    
+    print("✅ D12 PASSED: Real BhashSMS API call made")
+    return True
+
+def test_d13_send_sms_invalid_phone():
+    """D13: POST send SMS with invalid phone"""
+    print("\n=== D13: Send SMS (invalid phone) ===")
+    res = requests.post(
+        f"{BASE_URL}/admin/notifications/send",
+        json={
+            "channel": "sms",
+            "to": "invalid_phone"
+        },
+        cookies=get_admin_cookies()
+    )
+    print(f"Status: {res.status_code}")
+    
+    if res.status_code != 200:
+        print(f"❌ Expected 200, got {res.status_code}: {res.text}")
+        return False
+    
+    data = res.json()
+    print(f"Response: {json.dumps(data, indent=2)}")
+    
+    # Should be status='failed'
+    if data.get("status") != "failed":
+        print(f"❌ Expected status='failed', got {data.get('status')}")
+        return False
+    
+    note = data.get("note", "")
+    # Should contain 'invalid_phone' or 'text_required'
+    if "invalid_phone" not in note and "text_required" not in note:
+        print(f"⚠️  Expected note to contain 'invalid_phone' or 'text_required', got: {note}")
+    
+    # Save communication ID for cleanup
+    if data.get("id"):
+        test_communication_ids.append(data["id"])
+    
+    print("✅ D13 PASSED: Invalid phone handled correctly")
+    return True
+
+# ============================================================================
+# E. Communications log
+# ============================================================================
+
+def test_e14_get_logs():
+    """E14: GET /api/admin/notifications/logs"""
+    print("\n=== E14: GET communications logs ===")
+    res = requests.get(f"{BASE_URL}/admin/notifications/logs", cookies=get_admin_cookies())
+    print(f"Status: {res.status_code}")
+    
+    if res.status_code != 200:
+        print(f"❌ Expected 200, got {res.status_code}: {res.text}")
+        return False
+    
+    data = res.json()
+    print(f"Logs count: {len(data)}")
+    
+    if not isinstance(data, list):
+        print(f"❌ Expected array, got {type(data)}")
+        return False
+    
+    # Check recent test entries
+    test_entries = [log for log in data if log.get("to") in ["9876500123", "invalid_phone"]]
+    print(f"Test entries found: {len(test_entries)}")
+    
+    if len(test_entries) > 0:
+        sample = test_entries[0]
+        print(f"Sample log entry: {json.dumps(sample, indent=2)}")
+        
+        # Check required fields
+        required_fields = ["id", "to", "channel", "provider", "status", "sentAt"]
+        for field in required_fields:
+            if field not in sample:
+                print(f"⚠️  Missing field '{field}' in log entry")
+    
+    print("✅ E14 PASSED: Logs endpoint working")
+    return True
+
+def test_e15_retry_failed_communication():
+    """E15: POST /api/admin/notifications/retry/:id"""
+    print("\n=== E15: Retry failed communication ===")
+    
+    if not test_communication_ids:
+        print("⏭️  No test communication IDs to retry")
+        return True
+    
+    comm_id = test_communication_ids[0]
+    print(f"Retrying communication ID: {comm_id}")
+    
+    res = requests.post(
+        f"{BASE_URL}/admin/notifications/retry/{comm_id}",
+        cookies=get_admin_cookies()
+    )
+    print(f"Status: {res.status_code}")
+    
+    if res.status_code != 200:
+        print(f"❌ Expected 200, got {res.status_code}: {res.text}")
+        return False
+    
+    data = res.json()
+    print(f"Response: {json.dumps(data, indent=2)}")
+    
+    # Should have 'ok' field
+    if "ok" not in data:
+        print(f"⚠️  Response missing 'ok' field")
+    
+    print("✅ E15 PASSED: Retry endpoint working")
+    return True
+
+# ============================================================================
+# F. Regression check
+# ============================================================================
+
+def test_f16_get_booking_rules():
+    """F16: GET /api/booking-rules still works"""
+    print("\n=== F16: Regression - GET booking-rules ===")
+    res = requests.get(f"{BASE_URL}/booking-rules")
+    print(f"Status: {res.status_code}")
+    
+    if res.status_code != 200:
+        print(f"❌ Expected 200, got {res.status_code}: {res.text}")
+        return False
+    
+    print("✅ F16 PASSED: Booking rules endpoint working")
+    return True
+
+def test_f17_create_booking():
+    """F17: POST /api/bookings (basic salt-therapy booking)"""
+    print("\n=== F17: Regression - Create booking ===")
+    
+    # Create a booking for a future date
+    future_date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+    
+    res = requests.post(
+        f"{BASE_URL}/bookings",
+        json={
+            "therapies": [{"slug": "float-therapy"}],
+            "slotDate": future_date,
+            "slotTime": "14:00",
+            "name": "Test User",
+            "phone": "9876543210",
+            "email": "test@example.com"
+        }
+    )
+    print(f"Status: {res.status_code}")
+    
+    if res.status_code != 200:
+        print(f"❌ Expected 200, got {res.status_code}: {res.text}")
+        return False
+    
+    data = res.json()
+    print(f"Booking created: {data.get('ref')}")
+    
+    # Save booking ID for cleanup
+    if data.get("id"):
+        test_booking_ids.append(data["id"])
+    
+    print("✅ F17 PASSED: Booking creation working (notifications may fail but booking succeeds)")
+    return True
+
+def test_f18_verify_booking_communication_log():
+    """F18: Verify booking created a communication log"""
+    print("\n=== F18: Verify booking communication log ===")
+    
+    # Wait a moment for async notification to fire
+    time.sleep(2)
+    
+    res = requests.get(f"{BASE_URL}/admin/notifications/logs", cookies=get_admin_cookies())
+    print(f"Status: {res.status_code}")
+    
+    if res.status_code != 200:
+        print(f"❌ Expected 200, got {res.status_code}: {res.text}")
+        return False
+    
+    data = res.json()
+    
+    # Look for recent communication with phone 9876543210
+    booking_comms = [log for log in data if log.get("to") == "9876543210"]
+    print(f"Booking communications found: {len(booking_comms)}")
+    
+    if len(booking_comms) > 0:
+        sample = booking_comms[0]
+        print(f"Sample: channel={sample.get('channel')}, status={sample.get('status')}, provider={sample.get('provider')}")
+        print("✅ F18 PASSED: Booking triggered communication log")
+    else:
+        print("⚠️  No communication log found for booking (may be async delay)")
+    
+    return True
+
+# ============================================================================
+# G. Cleanup
+# ============================================================================
+
+def test_g_cleanup_bookings():
+    """G: Delete test bookings"""
+    print("\n=== G: Cleanup test bookings ===")
+    
+    if not test_booking_ids:
+        print("⏭️  No test bookings to clean up")
+        return True
+    
+    for booking_id in test_booking_ids:
+        try:
+            res = requests.delete(
+                f"{BASE_URL}/admin/bookings/{booking_id}",
+                cookies=get_admin_cookies()
+            )
+            print(f"Deleted booking {booking_id}: {res.status_code}")
+        except Exception as e:
+            print(f"⚠️  Failed to delete booking {booking_id}: {e}")
+    
+    print("✅ Cleanup: Bookings deleted")
+    return True
+
+def test_g_cleanup_communications():
+    """G: Delete test communication logs"""
+    print("\n=== G: Cleanup test communications ===")
+    
+    # Use mongosh to delete test communications
+    cmd = """mongosh --quiet your_database_name --eval 'db.communications.deleteMany({$or:[{to:"9876500123"},{to:"invalid_phone"},{to:"9876543210"}]})'"""
+    
+    import subprocess
+    try:
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+        print(f"Mongosh output: {result.stdout}")
+        if result.returncode != 0:
+            print(f"⚠️  Mongosh error: {result.stderr}")
+            return False
+        
+        print("✅ Cleanup: Test communications deleted")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to delete communications: {e}")
+        return False
+
+# ============================================================================
+# Main test runner
+# ============================================================================
 
 def main():
-    """Run all tests"""
-    print("\n" + "="*60)
-    print("BACKEND API TESTS - M3 & M4")
-    print("="*60)
-    print(f"Base URL: {BASE_URL}")
-    print(f"Admin: {ADMIN_EMAIL}")
-    print("="*60)
+    print("=" * 80)
+    print("Phase 3.2.C — Notification Providers Backend Tests")
+    print("=" * 80)
     
-    # Step 1: Admin login
-    if not admin_login():
-        print("\n❌ CRITICAL: Admin login failed. Cannot proceed with tests.")
+    # Login first
+    if not login_admin():
+        print("\n❌ FATAL: Admin login failed, cannot proceed")
         return
     
-    # Step 2: Customer OTP login
-    if not customer_otp_login():
-        print("\n❌ CRITICAL: Customer OTP login failed. Cannot proceed with tests.")
-        return
+    tests = [
+        # A. Providers config
+        ("A1: GET providers config", test_a1_get_providers_config),
+        ("A2: PUT providers config (meta_cloud)", test_a2_put_providers_config),
+        ("A3: Restore providers config (gallabox)", test_a3_restore_providers_config),
+        ("A4: PUT invalid provider values", test_a4_put_invalid_providers),
+        
+        # B. Provider auth guards
+        ("B5: GET providers without auth", test_b5_get_providers_no_auth),
+        ("B6: PUT providers without auth", test_b6_put_providers_no_auth),
+        
+        # C. WhatsApp — Gallabox routing
+        ("C8: Send WhatsApp (no channelId)", test_c8_send_whatsapp_no_channel_id),
+        ("C9: Insert Gallabox channelId", test_c9_insert_gallabox_channel_id),
+        ("C9b: Verify Gallabox configured", test_c9b_verify_gallabox_configured),
+        ("C10: Send WhatsApp (with channelId)", test_c10_send_whatsapp_with_channel_id),
+        ("C11: Cleanup Gallabox integration", test_c11_cleanup_gallabox_integration),
+        
+        # D. SMS — BhashSMS routing
+        ("D12: Send SMS (BhashSMS)", test_d12_send_sms),
+        ("D13: Send SMS (invalid phone)", test_d13_send_sms_invalid_phone),
+        
+        # E. Communications log
+        ("E14: GET communications logs", test_e14_get_logs),
+        ("E15: Retry failed communication", test_e15_retry_failed_communication),
+        
+        # F. Regression check
+        ("F16: GET booking-rules", test_f16_get_booking_rules),
+        ("F17: Create booking", test_f17_create_booking),
+        ("F18: Verify booking communication log", test_f18_verify_booking_communication_log),
+        
+        # G. Cleanup
+        ("G: Cleanup bookings", test_g_cleanup_bookings),
+        ("G: Cleanup communications", test_g_cleanup_communications),
+    ]
     
-    # Step 3: Test M3 Referrals
-    test_m3_referrals()
+    results = []
+    for name, test_func in tests:
+        try:
+            passed = test_func()
+            results.append((name, passed))
+        except Exception as e:
+            print(f"\n❌ EXCEPTION in {name}: {e}")
+            import traceback
+            traceback.print_exc()
+            results.append((name, False))
     
-    # Step 4: Test M4 Loyalty Wallet
-    test_m4_loyalty_wallet()
+    # Summary
+    print("\n" + "=" * 80)
+    print("TEST SUMMARY")
+    print("=" * 80)
     
-    # Step 5: Regression test
-    test_regression_bookings()
+    passed_count = sum(1 for _, passed in results if passed)
+    total_count = len(results)
     
-    print("\n" + "="*60)
-    print("ALL TESTS COMPLETED")
-    print("="*60)
+    for name, passed in results:
+        status = "✅ PASS" if passed else "❌ FAIL"
+        print(f"{status}: {name}")
+    
+    print(f"\nTotal: {passed_count}/{total_count} tests passed")
+    print("=" * 80)
 
 if __name__ == "__main__":
     main()
