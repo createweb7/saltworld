@@ -903,6 +903,22 @@ export default function BookingClient({ initialOutcome }) {
   const [slotConflict, setSlotConflict] = useState(null); // { reason, suggestions:[{...}] }
   const therapy = therapies[0] || null; // convenience alias
 
+  // Compute subtotal at component scope so both StepContact (for coupon preview)
+  // and submit() can share the same value.
+  const totalRupees = useMemo(() => {
+    const o = getOutcome(outcome);
+    const staticTherapies = o?.protocol?.therapies || [];
+    const merged = (outcomeMap?.therapies?.length ? outcomeMap.therapies : staticTherapies);
+    const selected = merged.filter((t) => therapies.includes(t.slug));
+    const basePrice = parsePrice(o?.pricing?.single?.price);
+    const sum = selected.reduce((s, t) => {
+      const role = String(t.role || '').toLowerCase();
+      const mult = PRICE_MULTIPLIER[role] ?? 0.5;
+      return s + Math.round(basePrice * mult);
+    }, 0);
+    return sum || basePrice || 0;
+  }, [outcome, outcomeMap, therapies]);
+
   // Load therapy metadata once (for the journey summary in step 3).
   useEffect(() => {
     let cancelled = false;
@@ -1035,12 +1051,6 @@ export default function BookingClient({ initialOutcome }) {
       const staticTherapies = o?.protocol?.therapies || [];
       const merged = (outcomeMap?.therapies?.length ? outcomeMap.therapies : staticTherapies);
       const selected = merged.filter((t) => therapies.includes(t.slug));
-      const basePrice = parsePrice(o?.pricing?.single?.price);
-      const totalRupees = selected.reduce((sum, t) => {
-        const role = String(t.role || '').toLowerCase();
-        const mult = PRICE_MULTIPLIER[role] ?? 0.5;
-        return sum + Math.round(basePrice * mult);
-      }, 0) || basePrice;
       const primary = selected.find((t) => String(t.role || '').toLowerCase() === 'primary') || selected[0];
 
       const r = await fetch('/api/bookings', {
