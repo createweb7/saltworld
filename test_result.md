@@ -3580,3 +3580,155 @@ frontend:
       Coupons page is now fully functional with proper tab navigation and no crashes. All critical 
       functionality verified through UI testing with screenshots.
 
+
+  - task: "BUG FIX — Wallet credit stores 10x the amount (points vs rupees)"
+    implemented: true
+    working: "NA"
+    file: "/app/lib/api/admin.js, /app/app/admin/customers/[id]/CustomerDetailClient.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: false
+        -agent: "user"
+        -comment: |
+            Admin wallet credit UI: crediting ₹500 shows 5000 in the balance.
+            "while credit, add the actual amount, remove the points. currently,
+            it is adding 10x. - bug to be fixed."
+        -working: "NA"
+        -agent: "main"
+        -comment: |
+            ROOT CAUSE: The wallet-adjust admin endpoint was converting ₹ → loyalty
+            points using the loyalty `redeemRate` (default 0.1). So a ₹500 credit
+            became `500 / 0.1 = 5000 points`. Balance was expressed in points,
+            producing the 10x visual bug for manual adjustments.
+
+            FIX APPLIED:
+            1. `/app/lib/api/admin.js` (wallet-adjust handler): Removed the
+               redeemRate conversion. Manual admin adjustments now store
+               `points = ± amountInr` (1:1 rupees). Automated loyalty rewards
+               (bookings, referrals) still use the earn/redeem rates through
+               their own paths — untouched.
+            2. `/app/app/admin/customers/[id]/CustomerDetailClient.jsx`
+               (WalletTab table): Removed the "Points" column. "Amount" column
+               now displays signed ₹ (green +₹500 credit, red −₹200 debit).
+               "Balance" column shows ₹balanceAfter with ₹ prefix.
+            3. Cleaned up the customer's orphaned `walletBalance:5500` (which
+               was the buggy 5000 pts + 500 test) by recomputing from the
+               (now-empty) tx ledger.
+
+            BACKEND SMOKE TEST (cURL):
+            - POST wallet-adjust {amountInr:500, direction:credit} → tx doc has
+              points=500, amountInr=500, balanceAfter=500 ✅ (was 5000 before fix)
+
+
+        -working: true
+        -agent: "testing"
+        -comment: |
+            ✅ VERIFIED WALLET CREDIT BUG FIX (ALL TESTS PASSED):
+            
+            Executed comprehensive UI testing for the wallet credit 10x bug fix using Playwright
+            against http://localhost:3000/admin/customers/cb51fc79-fd77-4ddb-bf0d-3ce74396188f
+            
+            **TEST RESULTS (12/12 tests passed):**
+            
+            ✅ TEST 1-3: Initial State Verification
+            - Navigated to customer detail page (Rajesh N)
+            - Clicked "Wallet" tab successfully
+            - Verified initial wallet balance: ₹0
+            - Verified empty state message: "No wallet activity yet"
+            
+            ✅ TEST 4-5: Adjust Wallet Dialog
+            - Clicked "Adjust wallet" button
+            - Dialog opened with correct title: "Credit or debit customer wallet"
+            - Credit and Debit buttons visible
+            - Amount input default value: 500
+            - Reason textarea visible
+            
+            ✅ TEST 6: CRITICAL - First Credit (₹500)
+            - Filled reason: "Bug-fix verification credit"
+            - Clicked "Credit ₹500" button
+            - Dialog closed successfully
+            - **CRITICAL SUCCESS: Wallet balance shows EXACTLY ₹500 (NOT ₹5,000)**
+            - **BUG FIX VERIFIED: 10x multiplier bug is FIXED!**
+            
+            ✅ TEST 7-8: Ledger Table Verification
+            - Ledger table appeared with correct structure
+            - **CRITICAL SUCCESS: 'Points' column REMOVED** (was previously shown)
+            - Table headers verified: ['When', 'Type', 'Note', 'Amount', 'Balance']
+            - First row data: ['23 Jul, 01:36 pm', 'manual adjustment', '[credit] Bug-fix verification credit', '+₹500', '₹500']
+            - **Amount column shows '+₹500' (signed rupees, NOT '5000 pts')**
+            - Amount is green (emerald color for credit)
+            - **Balance column shows '₹500' (NOT ₹5,000)**
+            - Type: 'manual adjustment'
+            - Note contains verification text
+            
+            ✅ TEST 9-10: Second Credit (₹200)
+            - Clicked "Adjust wallet" again
+            - Filled amount: 200, reason: "Second credit"
+            - Clicked "Credit ₹200" button
+            - **Balance correctly updated to ₹700 (500 + 200)**
+            - Ledger has 2 rows (most recent first)
+            
+            ✅ TEST 11-12: Debit Test (₹100)
+            - Clicked "Adjust wallet" again
+            - Clicked "− Debit" button
+            - Filled amount: 100, reason: "Test debit"
+            - Clicked "Debit ₹100" button
+            - **Balance correctly updated to ₹600 (700 - 100)**
+            - New row shows '−₹100' (negative, signed rupees)
+            - Amount is red (for debit)
+            - Final ledger has 3 rows with correct running balances
+            
+            **SCREENSHOTS CAPTURED:**
+            1. wallet_500_credit.png - Wallet tab showing ₹500 balance with ledger entry
+            2. wallet_final_state.png - Final state showing ₹600 balance with 3 transactions
+            
+            **CRITICAL FINDINGS:**
+            1. ✓✓✓ Wallet balance shows EXACTLY the rupee amount credited (₹500, NOT ₹5,000)
+            2. ✓✓✓ 'Points' column has been REMOVED from the ledger table
+            3. ✓✓✓ 'Amount' column shows signed rupees (+₹500 in green, −₹100 in red)
+            4. ✓✓✓ 'Balance' column shows ₹ prefixed value (₹500, ₹700, ₹600)
+            5. ✓✓✓ Multiple transactions work correctly (₹500 → ₹700 → ₹600)
+            
+            **CLEANUP:**
+            - Test transactions cleaned up from database
+            - Customer walletBalance reset to 0
+            
+            **SUCCESS RATE: 100% (12/12 tests passed)**
+            
+            NO CRITICAL ISSUES FOUND. The wallet credit 10x bug has been successfully fixed!
+            - Manual wallet adjustments now store points = ±amountInr (1:1 rupees)
+            - UI correctly displays signed rupee amounts instead of points
+            - Balance calculations are accurate across multiple credit/debit operations
+            
+            BUG FIX CONFIRMED: The reported issue where ₹500 was showing as 5000 has been completely resolved.
+
+
+  - agent: "testing"
+    message: |
+      ✅ WALLET CREDIT BUG FIX VERIFICATION COMPLETE (12/12 TESTS PASSED)
+      
+      **CRITICAL SUCCESS:** The exact user-reported bug (₹500 showing as 5000) is now FIXED!
+      
+      **VERIFICATION SUMMARY:**
+      - Customer: Rajesh N (cb51fc79-fd77-4ddb-bf0d-3ce74396188f)
+      - Initial balance: ₹0
+      - Credited ₹500 → Balance shows EXACTLY ₹500 (NOT ₹5,000) ✓✓✓
+      - Credited ₹200 → Balance shows ₹700 ✓✓✓
+      - Debited ₹100 → Balance shows ₹600 ✓✓✓
+      
+      **UI CHANGES VERIFIED:**
+      1. ✓ "Points" column REMOVED from wallet ledger table
+      2. ✓ "Amount" column shows signed rupees (+₹500 green, −₹100 red)
+      3. ✓ "Balance" column shows ₹ prefixed value
+      4. ✓ All calculations accurate (1:1 rupees, not 10x multiplier)
+      
+      **BACKEND FIX VERIFIED:**
+      - Manual wallet adjustments now store points = ±amountInr (1:1 rupees)
+      - No longer dividing by loyalty redeemRate (0.1)
+      - Transaction ledger shows correct signed rupee amounts
+      
+      **SUCCESS RATE: 100% (12/12 tests passed)**
+      
+      NO CRITICAL ISSUES FOUND. Bug fix is production-ready and working perfectly!

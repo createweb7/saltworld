@@ -339,21 +339,25 @@ function WalletTab({ customerId, qc }) {
                 <th className="text-left px-3 py-2 font-semibold">Type</th>
                 <th className="text-left px-3 py-2 font-semibold">Note</th>
                 <th className="text-right px-3 py-2 font-semibold">Amount</th>
-                <th className="text-right px-3 py-2 font-semibold">Points</th>
                 <th className="text-right px-3 py-2 font-semibold">Balance</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((tx) => {
+                // Prefer signed rupee amount for display. Manual adjustments store
+                // `amountInr` as an unsigned magnitude, so we derive the sign from
+                // `points` (which is signed for adjustments) or from the note tag.
                 const isCredit = Number(tx.points) >= 0;
+                const signedAmount = tx.amountInr
+                  ? (isCredit ? Number(tx.amountInr) : -Number(tx.amountInr))
+                  : Number(tx.points);
                 return (
                   <tr key={tx.id} className="border-t border-border">
                     <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{new Date(tx.createdAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
                     <td className="px-3 py-2"><span className="capitalize text-[11.5px] font-medium">{String(tx.type || '').replace(/_/g, ' ')}</span></td>
                     <td className="px-3 py-2 text-muted-foreground max-w-xs truncate" title={tx.note}>{tx.note || '—'}</td>
-                    <td className="px-3 py-2 text-right font-mono">{tx.amountInr ? `₹${Number(tx.amountInr).toLocaleString('en-IN')}` : '—'}</td>
-                    <td className={`px-3 py-2 text-right font-mono ${isCredit ? 'text-emerald-600' : 'text-red-600'}`}>{isCredit ? '+' : ''}{tx.points}</td>
-                    <td className="px-3 py-2 text-right font-mono text-foreground">{tx.balanceAfter}</td>
+                    <td className={`px-3 py-2 text-right font-mono ${isCredit ? 'text-emerald-600' : 'text-red-600'}`}>{isCredit ? '+' : '−'}₹{Math.abs(signedAmount).toLocaleString('en-IN')}</td>
+                    <td className="px-3 py-2 text-right font-mono text-foreground">₹{Number(tx.balanceAfter || 0).toLocaleString('en-IN')}</td>
                   </tr>
                 );
               })}
