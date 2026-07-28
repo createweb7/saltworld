@@ -102,9 +102,14 @@ function BusinessHours() {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['settings', 'business'], queryFn: async () => (await fetch('/api/admin/settings/business')).json() });
   const [form, setForm] = useState(null);
+  // Sync local form with server data whenever it changes (initial load, after
+  // save invalidation, or when navigating back to this tab). Previously the
+  // `if (form) return` guard blocked the update, causing the UI to appear
+  // "not to save" — actually the data saved fine, but the display never
+  // refreshed after subsequent visits.
   useEffect(() => {
-    if (form) return;
-    setForm(data || defaultHours());
+    if (data) setForm(data);
+    else if (!form) setForm(defaultHours());
   }, [data]);
   const [saving, setSaving] = useState(false);
   if (!form) return <div className="text-[12.5px] text-muted-foreground">Loading…</div>;

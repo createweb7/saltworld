@@ -122,8 +122,9 @@ function Hero() {
               </h1>
 
               <p className="mt-5 text-white/85 text-[16px] md:text-[18px] leading-8 max-w-[540px]">
-                A wellness sanctuary designed around the outcome you want &mdash; deeper sleep,
-                a quieter mind, a body that recovers faster. Book your first quiet forty-five minutes.
+                A wellness sanctuary built around the outcome you want &mdash; deeper sleep,
+                a quieter mind, a body that recovers faster. No treatment menus, no upsells.
+                Just the quiet forty-five minutes you came for.
               </p>
 
               {/* Outcome chips */}
@@ -193,8 +194,8 @@ function OutcomeSelector() {
             <span className="italic text-brand">We sell outcomes.</span>
           </h2>
           <p className="rise mt-5 text-[15.5px] md:text-[16px] leading-8 text-muted-foreground max-w-[560px]">
-            Choose how you want to feel. We&rsquo;ll match you with the right protocol &mdash; float, salt,
-            infrared, cold plunge, or red-light &mdash; and design a rhythm you&rsquo;ll actually keep.
+            Tell us how you want to feel &mdash; and we&rsquo;ll sequence the right therapies (float, salt,
+            infrared, cold plunge, red-light) into a single session, held at a rhythm you&rsquo;ll actually keep.
           </p>
         </div>
 
@@ -246,10 +247,10 @@ function FirstVisit() {
   const ref = useRef(null);
   useRise(ref);
   const steps = [
-    { n: 1, dur: '5 min',      title: 'Arrive',           body: 'Warm herbal tea on arrival. No paperwork on your first day.' },
-    { n: 2, dur: '5 min',      title: 'Change & orient',   body: 'Lockers, robes, sandals. A quick walkthrough of what to expect.' },
-    { n: 3, dur: '45–60 min',  title: 'Your protocol',     body: 'The quiet part. We handle time so you don\u2019t have to.' },
-    { n: 4, dur: '10 min',     title: 'Lounge',            body: 'Water, jasmine tea, and no rush to leave.' },
+    { n: 1, dur: '5 min',      title: 'Arrive',           body: 'Warm herbal tea on the house. No forms, no queue \u2014 reception has your name.' },
+    { n: 2, dur: '5 min',      title: 'Change & orient',   body: 'Robes, sandals, and a private locker. A one-minute walk-through of what\u2019s ahead.' },
+    { n: 3, dur: '45\u201390 min',  title: 'Your protocol',     body: 'The quiet part. Rooms are pre-assigned and sequenced \u2014 we hold the time so you don\u2019t have to.' },
+    { n: 4, dur: '10 min',     title: 'Lounge',            body: 'Cold water, jasmine tea, and zero pressure to leave. Ride the calm out.' },
   ];
   return (
     <section ref={ref} className="py-24 md:py-32 bg-background">
@@ -260,6 +261,9 @@ function FirstVisit() {
             <h3 className="rise mt-3 font-serif text-[36px] md:text-[52px] leading-[1.02] tracking-tight text-balance">
               Exactly what happens<br /><span className="italic">from door to door.</span>
             </h3>
+            <p className="rise mt-5 text-[15px] leading-8 text-muted-foreground">
+              No treatment jargon, no upsells, no pressure. Just a calm, guided arc &mdash; from the moment you step in to the moment you leave.
+            </p>
           </div>
           <div className="rise text-[13px] text-muted-foreground">
             <span className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full border border-border bg-card">
@@ -305,11 +309,10 @@ function WhySaltWorld() {
   useRise(ref);
   const rows = [
     { k: 'Sold by',        spa: 'Therapy (massage, facial)', sw: 'Outcome (sleep, stress, recovery)' },
-    { k: 'During',         spa: 'Frequent product upsells',    sw: 'No upsells. Ever.' },
     { k: 'Cadence',        spa: 'One-off treats',              sw: 'Weekly protocol, held for weeks' },
     { k: 'Team',           spa: 'Rotating therapists',          sw: 'Named wellness lead, on record' },
     { k: 'Measurement',    spa: 'None',                         sw: 'Sleep-log, VAS, HRV tracked' },
-    { k: 'After',          spa: 'Retail counter',                sw: 'Warm tea. No push.' },
+    { k: 'After',          spa: 'Retail counter, upsells',       sw: 'Warm tea. No push. Ever.' },
   ];
   return (
     <section ref={ref} className="py-24 md:py-32" style={{ background: 'hsl(var(--muted))' }}>

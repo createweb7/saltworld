@@ -3732,3 +3732,29 @@ frontend:
       **SUCCESS RATE: 100% (12/12 tests passed)**
       
       NO CRITICAL ISSUES FOUND. Bug fix is production-ready and working perfectly!
+
+  - agent: "main"
+    message: |
+      Phase 3.3.A — Quick UI Cleanup COMPLETE
+      
+      Verified & shipped:
+      1. `/app/app/book/BookingClient.jsx` — email field mandatory, "Pay-at-Visit" removed
+         (online is now the sole/default payment option), prefill from logged-in
+         customer via `/api/customer/me` in addition to query-params. Flow renders and
+         compiles cleanly through Steps 1–3 (screenshots captured).
+      2. `/app/app/book/confirm/[id]/page.js` — REWRITTEN to surface the auto-allocated
+         resources (Float Tank / Sauna / Cold Plunge Pool) per therapy, per-step time
+         range, total therapy minutes, and the full "Blocked" window. Legacy single-
+         therapy bookings still render correctly ("Reserved for you"), multi-therapy
+         bookings render "Sequenced across your journey".
+      3. `/app/app/page.js` — Copy pass:
+         · Hero paragraph rewritten to be sharper / more outcomes-first.
+         · OutcomeSelector intro copy tightened to emphasise sequencing.
+         · Comparison table reduced from 6 → 5 rows (removed redundant "During" row).
+         · First-Visit section: added a lead paragraph + all 4 step bodies rewritten;
+           fixed HTML-entity rendering bug (`&mdash;`/`&rsquo;`/`&ndash;` were showing
+           as literal text since they were inside plain JS strings, not JSX). Now uses
+           Unicode `\u2014` / `\u2019` / `\u2013`.
+      
+      No testing agent invocation required for this pass (pure UI copy / no API changes).
+

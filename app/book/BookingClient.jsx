@@ -685,10 +685,12 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
             </div>
           </div>
           <div>
-            <label htmlFor="email" className="block text-[12px] font-medium mb-1.5">Email <span className="text-muted-foreground font-normal">(optional)</span></label>
-            <input id="email" type="email"
+            <label htmlFor="email" className="block text-[12px] font-medium mb-1.5">Email<span className="text-destructive ml-0.5">*</span></label>
+            <input id="email" type="email" required
               value={contact.email || ''} onChange={(e) => setContact({ ...contact, email: e.target.value })}
+              placeholder="you@example.com"
               className="w-full h-11 px-3.5 rounded-xl border border-border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-brand/40" />
+            <div className="mt-1 text-[11px] text-muted-foreground">Your invoice and confirmation will be sent here.</div>
           </div>
           <div>
             <label htmlFor="notes" className="block text-[12px] font-medium mb-1.5">Anything we should know? <span className="text-muted-foreground font-normal">(optional)</span></label>
@@ -699,35 +701,19 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
 
           <div>
             <div className="text-[12px] font-medium mb-2">Payment</div>
-            <div className="space-y-2">
-              <label className={cn('flex items-center gap-3 rounded-xl border p-3.5 cursor-pointer',
-                payment === 'at-visit' ? 'border-brand bg-brand-soft' : 'border-border')}>
-                <input type="radio" name="pay" checked={payment === 'at-visit'} onChange={() => setPayment('at-visit')} className="sr-only" />
-                <span className={cn('h-4 w-4 rounded-full border-2 flex items-center justify-center', payment === 'at-visit' ? 'border-brand' : 'border-border')}>
-                  {payment === 'at-visit' && <span className="h-2 w-2 rounded-full bg-brand" />}
-                </span>
-                <div className="flex-1">
-                  <div className="text-[14px] font-medium">Pay at visit</div>
-                  <div className="text-[12px] text-muted-foreground">Card / UPI at reception. Nothing charged now.</div>
+            <div className="rounded-xl border border-brand bg-brand-soft p-3.5 flex items-start gap-3">
+              <span className="h-4 w-4 rounded-full border-2 border-brand flex items-center justify-center mt-0.5 shrink-0"><span className="h-2 w-2 rounded-full bg-brand" /></span>
+              <div className="flex-1">
+                <div className="text-[14px] font-medium flex items-center gap-2">
+                  Pay online
+                  {!canPayOnline && <span className="text-[10px] uppercase tracking-widest bg-amber-500/15 text-amber-900 dark:text-amber-300 px-1.5 py-0.5 rounded">Setup pending</span>}
                 </div>
-              </label>
-              <label className={cn('flex items-center gap-3 rounded-xl border p-3.5',
-                canPayOnline ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed',
-                payment === 'online' ? 'border-brand bg-brand-soft' : 'border-border')}>
-                <input type="radio" name="pay" disabled={!canPayOnline} checked={payment === 'online'} onChange={() => setPayment('online')} className="sr-only" />
-                <span className={cn('h-4 w-4 rounded-full border-2 flex items-center justify-center', payment === 'online' ? 'border-brand' : 'border-border')}>
-                  {payment === 'online' && <span className="h-2 w-2 rounded-full bg-brand" />}
-                </span>
-                <div className="flex-1">
-                  <div className="text-[14px] font-medium flex items-center gap-2">
-                    Pay online
-                    {!canPayOnline && <span className="text-[10px] uppercase tracking-widest bg-muted px-1.5 py-0.5 rounded">Soon</span>}
-                  </div>
-                  <div className="text-[12px] text-muted-foreground">
-                    {canPayOnline ? 'Cards, UPI, netbanking via Razorpay. Secure by default.' : 'Available once payments are enabled.'}
-                  </div>
+                <div className="text-[12px] text-muted-foreground mt-0.5">
+                  {canPayOnline
+                    ? 'Cards, UPI or netbanking via Razorpay. Secure and encrypted.'
+                    : 'Payments are being configured. Your slot will be held once confirmed — reception will assist with checkout on arrival.'}
                 </div>
-              </label>
+              </div>
             </div>
           </div>
 
@@ -891,7 +877,7 @@ export default function BookingClient({ initialOutcome }) {
   const [slot, setSlot] = useState(null);
   const [contact, setContact] = useState({});
   const [customerId, setCustomerId] = useState(null);
-  const [payment, setPayment] = useState('at-visit');
+  const [payment, setPayment] = useState('online');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [payCfg, setPayCfg] = useState({ configured: false, keyId: null });
@@ -951,6 +937,26 @@ export default function BookingClient({ initialOutcome }) {
     }
     if (cid) setCustomerId(cid);
   }, [searchParams]);
+
+  // Auto-prefill contact from the logged-in customer session (if any). Query-param
+  // values (staff-launched flow) take precedence — we only fill blanks.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/customer/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d?.customer) return;
+        setContact((prev) => ({
+          ...prev,
+          name:  prev.name  || d.customer.name  || '',
+          phone: prev.phone || d.customer.phone || '',
+          email: prev.email || d.customer.email || '',
+        }));
+        setCustomerId((prev) => prev || d.customer.id || null);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   // Auto-select the primary therapy when outcome changes.
   useEffect(() => {
