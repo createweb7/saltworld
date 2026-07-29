@@ -22,7 +22,15 @@ export default function PurchaseButton({ plan }) {
         return;
       }
       if (!res.ok || !j.ok) throw new Error(j.error || 'purchase_failed');
-      toast.success(`${plan.name} activated!`);
+      const sub = j.subscription;
+      if (sub?.status === 'pending_payment') {
+        toast.success(
+          `${plan.name} reserved — please complete \u20B9${Number(plan.price || 0).toLocaleString('en-IN')} payment at reception to activate.`,
+          { duration: 6000 }
+        );
+      } else {
+        toast.success(`${plan.name} activated!`);
+      }
       window.location.assign('/account/memberships');
     } catch (e) {
       toast.error('Could not complete purchase. Please try again or contact reception.');
@@ -34,7 +42,7 @@ export default function PurchaseButton({ plan }) {
       onClick={purchase}
       disabled={loading}
       className="h-12 px-5 rounded-full bg-foreground text-background text-[14px] font-semibold inline-flex items-center gap-2 hover:bg-foreground/90 transition-colors disabled:opacity-60">
-      {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Activating…</> : <>Get this plan <ArrowRight className="h-4 w-4" /></>}
+      {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Reserving\u2026</> : <>Get this plan <ArrowRight className="h-4 w-4" /></>}
     </button>
   );
 }

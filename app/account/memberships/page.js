@@ -29,7 +29,7 @@ export default async function AccountMembershipsPage() {
   const customer = await getCurrentCustomer();
   if (!customer) redirect('/account/login');
   const subs = await loadMemberships(customer.id);
-  const active = subs.filter((s) => s.status === 'active' || s.status === 'frozen');
+  const active = subs.filter((s) => s.status === 'active' || s.status === 'frozen' || s.status === 'pending_payment');
   const past   = subs.filter((s) => !active.includes(s));
 
   return (
@@ -90,14 +90,21 @@ function MembershipCard({ s, muted }) {
           <div className="mt-1 font-serif text-[22px] leading-tight tracking-tight">{s.planName || plan.name}</div>
           <div className="mt-1 text-[12px] text-muted-foreground">
             Started {new Date(s.startAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-            \u00b7 Ends {new Date(s.endAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+            {' · '}Ends {new Date(s.endAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
           </div>
         </div>
         <span className={`inline-flex items-center h-6 px-2.5 rounded-full text-[10.5px] font-semibold uppercase tracking-[0.12em] ${
           s.status === 'active' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
           : s.status === 'frozen' ? 'bg-blue-500/10 text-blue-700 dark:text-blue-400'
-          : 'bg-muted text-muted-foreground'}`}>{s.status}</span>
+          : s.status === 'pending_payment' ? 'bg-amber-500/15 text-amber-800 dark:text-amber-300'
+          : 'bg-muted text-muted-foreground'}`}>{s.status === 'pending_payment' ? 'Payment pending' : s.status}</span>
       </div>
+
+      {s.status === 'pending_payment' && (
+        <div className="mt-4 rounded-md border border-amber-300/60 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-500/5 px-3.5 py-2.5 text-[12.5px] leading-6 text-amber-900 dark:text-amber-200">
+          Reserved but not yet paid. Please complete the payment at reception (or wait for our team to reach out on WhatsApp) &mdash; sessions can only be booked once this plan is marked <span className="font-semibold">Active</span>.
+        </div>
+      )}
 
       <div className="mt-4 pt-4 border-t border-border grid grid-cols-3 gap-3 text-[12px]">
         <div>
@@ -121,7 +128,7 @@ function MembershipCard({ s, muted }) {
 
       {s.usage?.length > 0 && (
         <details className="mt-4 pt-4 border-t border-border">
-          <summary className="text-[11.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground cursor-pointer hover:text-foreground">Usage history \u00b7 {s.usage.length} recent</summary>
+          <summary className="text-[11.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground cursor-pointer hover:text-foreground">Usage history {' · '} {s.usage.length} recent</summary>
           <ul className="mt-3 space-y-1.5 text-[12.5px]">
             {s.usage.map((u) => (
               <li key={u.id} className="flex items-center justify-between font-mono">

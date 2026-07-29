@@ -6,18 +6,15 @@ import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Calendar as CalIcon, Loader2, ArrowLeft } from 'lucide-react';
 import AdminShell, { PageHeader, AdminSection } from '@/components/admin/shell';
 import { cn } from '@/components/ss/utils';
+import { toLocalIsoDay } from '@/lib/date';
 
-const RESOURCES = [
-  { id: 'float_1', label: 'Float Tank 1',   type: 'float_tank' },
-  { id: 'float_2', label: 'Float Tank 2',   type: 'float_tank' },
-  { id: 'salt_1',  label: 'Salt Cave',      type: 'salt_cave'  },
-  { id: 'sauna_1', label: 'Infrared Sauna', type: 'sauna'      },
-  { id: 'plunge_1',label: 'Cold Plunge',    type: 'plunge'     },
-  { id: 'red_1',   label: 'Red-light',      type: 'red_light'  },
-];
+/* ------------------------------------------------------------------ */
+/* Slot grid                                                          */
+/* ------------------------------------------------------------------ */
+
 const START_HOUR = 6;   // 06:00
-const END_HOUR   = 21;  // 21:00
-const SLOT_MIN   = 30;
+const END_HOUR   = 22;  // 22:00
+const SLOT_MIN   = 15;  // 15-min columns — matches the customer booking cadence
 const SLOTS = Array.from(
   { length: ((END_HOUR - START_HOUR) * 60) / SLOT_MIN },
   (_, i) => {
@@ -26,7 +23,30 @@ const SLOTS = Array.from(
   }
 );
 
-function fmtDate(d) { return d.toISOString().slice(0, 10); }
+/** Convert an ISO instant to HH:mm in IST (fixed +05:30 offset). */
+function istHHmm(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d)) return null;
+  const shifted = new Date(d.getTime() + 330 * 60000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}`;
+}
+
+/** Round HH:mm down to the nearest SLOT_MIN (used for column bucketing). */
+function alignToSlot(hhmm) {
+  if (!hhmm) return null;
+  const [h, m] = hhmm.split(':').map(Number);
+  const total = h * 60 + Math.floor(m / SLOT_MIN) * SLOT_MIN;
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/** Duration in slot-columns for an ISO from/to pair. */
+function slotsBetween(fromIso, toIso) {
+  if (!fromIso || !toIso) return 1;
+  const mins = Math.max(SLOT_MIN, Math.round((new Date(toIso) - new Date(fromIso)) / 60000));
+  return Math.max(1, Math.round(mins / SLOT_MIN));
+}
 
 async function fetchCalendar(fromISO, toISO) {
   const res = await fetch(`/api/admin/bookings/calendar?from=${fromISO}&to=${toISO}`);
@@ -34,28 +54,65 @@ async function fetchCalendar(fromISO, toISO) {
   return res.json();
 }
 
+async function fetchResources(branchId) {
+  const q = branchId ? `?branchId=${branchId}` : '';
+  const res = await fetch(`/api/admin/resources${q}`);
+  if (!res.ok) throw new Error('failed');
+  return res.json();
+}
+
+/* ------------------------------------------------------------------ */
+/* Page                                                               */
+/* ------------------------------------------------------------------ */
+
 export default function CalendarClient({ user }) {
   const [date, setDate] = useState(new Date());
   const dayStart = useMemo(() => { const d = new Date(date); d.setHours(0,0,0,0); return d; }, [date]);
   const dayEnd   = useMemo(() => { const d = new Date(date); d.setHours(23,59,59,999); return d; }, [date]);
 
-  const { data = [], isLoading } = useQuery({
-    queryKey: ['calendar', fmtDate(dayStart)],
+  // Bookings for the current day.
+  const { data: bookings = [], isLoading } = useQuery({
+    queryKey: ['calendar', toLocalIsoDay(dayStart)],
     queryFn: () => fetchCalendar(dayStart.toISOString(), dayEnd.toISOString()),
   });
 
-  // Bucket bookings into resource + slot cells
+  // Resources — the row list. Filter to active + branch-scoped is done server-side.
+  const { data: resources = [] } = useQuery({
+    queryKey: ['calendar-resources'],
+    queryFn: () => fetchResources(),
+  });
+
+  // Bucket bookings by resource + slot-column. For journey bookings that traverse
+  // multiple resources we walk `schedule[]` — each step lives on its own row.
   const grid = useMemo(() => {
     const map = {};
-    for (const b of data) {
-      const time = b.slotTime || (b.startAt ? new Date(b.startAt).toTimeString().slice(0, 5) : null);
-      const resId = b.resourceId || guessResource(b);
-      if (!time || !resId) continue;
-      const key = `${resId}__${time}`;
-      (map[key] = map[key] || []).push(b);
+    for (const b of bookings) {
+      const steps = Array.isArray(b.schedule) && b.schedule.length > 0
+        ? b.schedule.map((s) => ({
+            resourceId: s.resourceId,
+            resourceName: s.resourceName,
+            from: s.from,
+            to: s.to,
+            therapyName: s.therapyName || s.therapySlug || b.therapy || b.therapyLabel,
+          }))
+        : [{
+            resourceId: b.resourceId,
+            resourceName: b.resourceName,
+            from: b.startAt || (b.slotDate && b.slotTime ? `${b.slotDate}T${b.slotTime}:00+05:30` : null),
+            to: b.blockedTo || null,
+            therapyName: b.therapyLabel || b.therapy || b.outcomeLabel || b.outcome,
+          }];
+      for (const step of steps) {
+        if (!step.resourceId || !step.from) continue;
+        const hhmm  = istHHmm(step.from);
+        const align = alignToSlot(hhmm);
+        if (!align) continue;
+        const key = `${step.resourceId}__${align}`;
+        (map[key] = map[key] || []).push({ booking: b, step });
+      }
     }
     return map;
-  }, [data]);
+  }, [bookings]);
 
   const shift = (delta) => { const d = new Date(date); d.setDate(d.getDate() + delta); setDate(d); };
   const today = () => setDate(new Date());
@@ -72,7 +129,7 @@ export default function CalendarClient({ user }) {
     >
       <PageHeader
         eyebrow="Operations"
-        title={date.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
+        title={date.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
         actions={
           <div className="flex items-center gap-1">
             <button onClick={() => shift(-1)} className="h-8 w-8 rounded-md border border-border hover:bg-muted inline-flex items-center justify-center"><ChevronLeft className="h-4 w-4" /></button>
@@ -83,22 +140,34 @@ export default function CalendarClient({ user }) {
       />
       <AdminSection className="pt-2">
         {isLoading && <div className="text-center py-16"><Loader2 className="h-4 w-4 mx-auto animate-spin text-muted-foreground" /></div>}
-        {!isLoading && (
+        {!isLoading && resources.length === 0 && (
+          <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
+            <CalIcon className="h-6 w-6 mx-auto text-muted-foreground" />
+            <div className="mt-3 font-medium text-[14px]">No resources yet</div>
+            <div className="mt-1 text-[12.5px] text-muted-foreground">
+              Add resources under <Link href="/admin/services" className="underline">Services</Link> to see the day&rsquo;s schedule.
+            </div>
+          </div>
+        )}
+        {!isLoading && resources.length > 0 && (
           <div className="rounded-lg border border-border bg-card overflow-x-auto">
-            <div className="min-w-[900px] grid" style={{ gridTemplateColumns: `160px repeat(${SLOTS.length}, minmax(56px, 1fr))` }}>
+            <div className="min-w-[1400px] grid" style={{ gridTemplateColumns: `160px repeat(${SLOTS.length}, minmax(44px, 1fr))` }}>
               {/* Header row */}
               <div className="sticky left-0 z-10 bg-card border-r border-b border-border text-[11px] uppercase tracking-[0.14em] text-muted-foreground font-semibold px-3 py-2">Resource</div>
               {SLOTS.map((s) => (
-                <div key={s} className="border-b border-l border-border text-[10.5px] text-muted-foreground text-center py-2 font-mono">{s}</div>
+                <div key={s} className={cn(
+                  'border-b border-l border-border text-[10.5px] text-muted-foreground text-center py-2 font-mono',
+                  s.endsWith(':00') ? 'text-foreground/70 font-semibold' : ''
+                )}>{s}</div>
               ))}
-              {RESOURCES.map((r) => (
+              {resources.map((r) => (
                 <FragmentRow key={r.id} r={r} grid={grid} />
               ))}
             </div>
           </div>
         )}
 
-        <div className="mt-4 flex items-center gap-4 text-[11.5px] text-muted-foreground">
+        <div className="mt-4 flex items-center gap-4 text-[11.5px] text-muted-foreground flex-wrap">
           <LegendDot cls="bg-blue-500/70" label="Confirmed" />
           <LegendDot cls="bg-amber-500/80" label="Checked in" />
           <LegendDot cls="bg-purple-500/80" label="In session" />
@@ -110,24 +179,35 @@ export default function CalendarClient({ user }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Row + status                                                       */
+/* ------------------------------------------------------------------ */
+
 function FragmentRow({ r, grid }) {
   return (
     <>
-      <div className="sticky left-0 z-10 bg-card border-r border-b border-border px-3 py-3 text-[12.5px] font-medium truncate">{r.label}</div>
+      <div className="sticky left-0 z-10 bg-card border-r border-b border-border px-3 py-3 text-[12.5px] font-medium truncate">{r.name}</div>
       {SLOTS.map((s) => {
-        const bookings = grid[`${r.id}__${s}`] || [];
+        const cellKey = `${r.id}__${s}`;
+        const cellItems = grid[cellKey] || [];
         return (
-          <div key={r.id + s} className="border-b border-l border-border h-14 relative">
-            {bookings.map((b) => (
-              <Link key={b.id} href={`/admin/bookings/${b.id}`}
-                className={cn(
-                  'absolute inset-0.5 rounded-md px-1.5 py-1 text-[10.5px] leading-tight overflow-hidden',
-                  statusClasses(b.status)
-                )}>
-                <div className="font-semibold truncate">{b.contact?.name || 'Guest'}</div>
-                <div className="opacity-80 truncate">{b.therapy || b.outcome || '—'}</div>
-              </Link>
-            ))}
+          <div key={cellKey} className="border-b border-l border-border h-14 relative">
+            {cellItems.map(({ booking: b, step }, i) => {
+              const span = slotsBetween(step.from, step.to);
+              // Absolute overlay stretches across `span` columns using inline style.
+              return (
+                <Link key={b.id + '-' + i} href={`/admin/bookings/${b.id}`}
+                  className={cn(
+                    'absolute inset-y-0.5 left-0.5 rounded-md px-1.5 py-1 text-[10.5px] leading-tight overflow-hidden z-10',
+                    statusClasses(b.status)
+                  )}
+                  style={{ width: `calc(${span * 100}% - 4px)` }}
+                >
+                  <div className="font-semibold truncate">{b.contact?.name || 'Guest'}</div>
+                  <div className="opacity-80 truncate">{step.therapyName || '\u2014'}</div>
+                </Link>
+              );
+            })}
           </div>
         );
       })}
@@ -148,15 +228,4 @@ function statusClasses(s) {
 
 function LegendDot({ cls, label }) {
   return <span className="inline-flex items-center gap-1.5"><span className={cn('h-2 w-2 rounded-sm', cls)} /> {label}</span>;
-}
-
-// Fallback: infer resource from therapy name if resourceId missing on the booking.
-function guessResource(b) {
-  const t = (b.therapy || '').toLowerCase();
-  if (t.includes('float')) return 'float_1';
-  if (t.includes('salt'))  return 'salt_1';
-  if (t.includes('sauna')) return 'sauna_1';
-  if (t.includes('cold') || t.includes('plunge')) return 'plunge_1';
-  if (t.includes('red'))   return 'red_1';
-  return 'float_1';
 }

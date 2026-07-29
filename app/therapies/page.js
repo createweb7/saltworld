@@ -90,6 +90,10 @@ export default function TherapiesIndex() {
           {THERAPIES.map((t, idx) => {
             const outcomes = outcomesUsing(t.slug);
             const Icon = t.icon;
+            const primaryOutcome = outcomes[0];
+            const bookHref = primaryOutcome
+              ? `/book?outcome=${primaryOutcome.slug}&therapy=${t.slug}`
+              : `/book?therapy=${t.slug}`;
             return (
               <div key={t.slug} className="grid md:grid-cols-12 gap-8 md:gap-10 items-start">
                 <div className="md:col-span-4">
@@ -105,6 +109,12 @@ export default function TherapiesIndex() {
                   <div className="mt-2 font-serif italic text-[18px] text-muted-foreground">
                     {t.tagline}
                   </div>
+                  <Link
+                    href={bookHref}
+                    className="mt-5 inline-flex items-center gap-1.5 h-10 px-4 rounded-full bg-foreground text-background text-[13px] font-semibold hover:bg-foreground/90 transition-colors"
+                  >
+                    Book {t.label} <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
                 </div>
                 <div className="md:col-span-8">
                   <p className="text-[15.5px] md:text-[16.5px] leading-[1.6] text-foreground/90">

@@ -47,8 +47,9 @@ export default function CustomerDetailClient({ user, id }) {
     if (c.phone) params.set('phone', c.phone);
     if (c.email) params.set('email', c.email);
     params.set('customerId', c.id);
-    // Send staff to the public booking flow with contact pre-filled. Same flow handles
-    // walk-ins, existing customers, membership redemption, and gift-card usage.
+    // Flag the flow as staff-driven so BookingClient re-enables the
+    // "Pay at reception" option (customers-only get pay-online).
+    params.set('staff', '1');
     router.push(`/book?${params.toString()}`);
   };
 

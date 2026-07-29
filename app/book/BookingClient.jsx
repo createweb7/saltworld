@@ -27,7 +27,12 @@ function fmtDate(d) {
   return d.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' });
 }
 function toIsoDay(d) {
-  return d.toISOString().slice(0, 10);
+  // Emit LOCAL calendar date (yyyy-MM-dd) — never touch UTC. Using toISOString()
+  // here previously shifted India-timezone midnights back one day.
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -139,12 +144,15 @@ function parsePrice(str) {
   return Number(String(str || '0').replace(/[^\d]/g, '')) || 0;
 }
 
-function StepTherapy({ outcome, values, onChange, mappingOverride }) {
+function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta = {} }) {
   const o = getOutcome(outcome);
   // Prefer DB override (admin-configurable), fall back to static outcome data.
   const therapies = mappingOverride?.length ? mappingOverride : (o?.protocol?.therapies || []);
   const basePrice = parsePrice(o?.pricing?.single?.price);
   const baseDuration = parseInt(String(o?.protocol?.duration || '45'), 10) || 45;
+
+  // Resolve the true duration for a therapy: static override > DB meta > outcome-level fallback.
+  const durationFor = (t) => t.durationMin || therapyMeta[t.slug]?.durationMin || baseDuration;
 
   const toggle = (slug) => {
     const set = new Set(values);
@@ -159,7 +167,7 @@ function StepTherapy({ outcome, values, onChange, mappingOverride }) {
 
   // Live journey recalc
   const selected = therapies.filter((t) => values.includes(t.slug));
-  const combinedDuration = selected.reduce((sum, t) => sum + (t.durationMin || baseDuration), 0) || baseDuration;
+  const combinedDuration = selected.reduce((sum, t) => sum + durationFor(t), 0) || baseDuration;
   const combinedPrice    = selected.reduce((sum, t) => {
     const role = String(t.role || '').toLowerCase();
     const mult = PRICE_MULTIPLIER[role] ?? 0.5;
@@ -200,7 +208,7 @@ function StepTherapy({ outcome, values, onChange, mappingOverride }) {
                 {t.description && (
                   <div className="mt-1 text-[12.5px] text-muted-foreground line-clamp-1">{t.description}</div>
                 )}
-                <div className="mt-1 text-[13px] text-muted-foreground">{t.durationMin ? `${t.durationMin} min` : (o?.protocol?.duration || '45 min')}</div>
+                <div className="mt-1 text-[13px] text-muted-foreground">{`${durationFor(t)} min`}</div>
               </div>
               {/* Checkbox instead of radio — enables multi-select */}
               <div className={cn(
@@ -629,7 +637,7 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange }) 
 /* Step 4 — Contact & confirm                                         */
 /* ------------------------------------------------------------------ */
 
-function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, customerId, branchId }) {
+function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, customerId, branchId, isStaff = false }) {
   const o = getOutcome(outcome);
   const th = o?.protocol?.therapies?.find((x) => x.slug === therapy);
   const isMulti = therapies.length > 1 && slot?.plan?.length > 1;
@@ -701,19 +709,50 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
 
           <div>
             <div className="text-[12px] font-medium mb-2">Payment</div>
-            <div className="rounded-xl border border-brand bg-brand-soft p-3.5 flex items-start gap-3">
-              <span className="h-4 w-4 rounded-full border-2 border-brand flex items-center justify-center mt-0.5 shrink-0"><span className="h-2 w-2 rounded-full bg-brand" /></span>
-              <div className="flex-1">
-                <div className="text-[14px] font-medium flex items-center gap-2">
-                  Pay online
-                  {!canPayOnline && <span className="text-[10px] uppercase tracking-widest bg-amber-500/15 text-amber-900 dark:text-amber-300 px-1.5 py-0.5 rounded">Setup pending</span>}
+            <div className="space-y-2">
+              <label className={cn(
+                'rounded-xl border p-3.5 flex items-start gap-3 cursor-pointer transition-colors',
+                payment === 'online' ? 'border-brand bg-brand-soft' : 'border-border hover:bg-muted/40'
+              )}>
+                <input type="radio" name="payment" value="online" checked={payment === 'online'} onChange={() => setPayment('online')} className="sr-only" />
+                <span className={cn('h-4 w-4 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0',
+                  payment === 'online' ? 'border-brand' : 'border-border')}>
+                  {payment === 'online' && <span className="h-2 w-2 rounded-full bg-brand" />}
+                </span>
+                <div className="flex-1">
+                  <div className="text-[14px] font-medium flex items-center gap-2">
+                    Pay online
+                    {!canPayOnline && <span className="text-[10px] uppercase tracking-widest bg-amber-500/15 text-amber-900 dark:text-amber-300 px-1.5 py-0.5 rounded">Setup pending</span>}
+                  </div>
+                  <div className="text-[12px] text-muted-foreground mt-0.5">
+                    {canPayOnline
+                      ? 'Cards, UPI or netbanking via Razorpay. Secure and encrypted.'
+                      : 'Payments are being configured. Your slot will be held once confirmed \u2014 reception will assist with checkout on arrival.'}
+                  </div>
                 </div>
-                <div className="text-[12px] text-muted-foreground mt-0.5">
-                  {canPayOnline
-                    ? 'Cards, UPI or netbanking via Razorpay. Secure and encrypted.'
-                    : 'Payments are being configured. Your slot will be held once confirmed — reception will assist with checkout on arrival.'}
-                </div>
-              </div>
+              </label>
+
+              {isStaff && (
+                <label className={cn(
+                  'rounded-xl border p-3.5 flex items-start gap-3 cursor-pointer transition-colors',
+                  payment === 'at-visit' ? 'border-brand bg-brand-soft' : 'border-border hover:bg-muted/40'
+                )}>
+                  <input type="radio" name="payment" value="at-visit" checked={payment === 'at-visit'} onChange={() => setPayment('at-visit')} className="sr-only" />
+                  <span className={cn('h-4 w-4 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0',
+                    payment === 'at-visit' ? 'border-brand' : 'border-border')}>
+                    {payment === 'at-visit' && <span className="h-2 w-2 rounded-full bg-brand" />}
+                  </span>
+                  <div className="flex-1">
+                    <div className="text-[14px] font-medium flex items-center gap-2">
+                      Pay at reception
+                      <span className="text-[10px] uppercase tracking-widest bg-brand/10 text-brand px-1.5 py-0.5 rounded">Staff</span>
+                    </div>
+                    <div className="text-[12px] text-muted-foreground mt-0.5">
+                      Record the payment offline (card / UPI / cash). Reception will collect on arrival or add it against the booking manually.
+                    </div>
+                  </div>
+                </label>
+              )}
             </div>
           </div>
 
@@ -767,6 +806,7 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
               therapies={therapies}
               customerId={customerId}
               branchId={branchId}
+              phone={contact?.phone}
               value={coupon}
               onChange={setCoupon}
             />
@@ -809,7 +849,7 @@ function Row({ label, value }) {
  *  Applies if the server says ok; sets a friendly error otherwise. On apply
  *  the parent stores `{ code, discountInr, applied:true }`; on remove, null.
  */
-function CouponInput({ subtotalInr, therapies, customerId, branchId, value, onChange }) {
+function CouponInput({ subtotalInr, therapies, customerId, branchId, phone, value, onChange }) {
   const [input, setInput] = useState(value?.code || '');
   const [busy, setBusy]   = useState(false);
   const [err, setErr]     = useState(null);
@@ -819,7 +859,7 @@ function CouponInput({ subtotalInr, therapies, customerId, branchId, value, onCh
     try {
       const res = await fetch('/api/coupons/validate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: input, subtotalInr, therapies, branchId, customerId }),
+        body: JSON.stringify({ code: input, subtotalInr, therapies, branchId, customerId, phone }),
       });
       const j = await res.json().catch(() => ({}));
       if (!j.ok) { setErr(j.message || 'Coupon could not be applied.'); onChange(null); return; }
@@ -878,6 +918,12 @@ export default function BookingClient({ initialOutcome }) {
   const [contact, setContact] = useState({});
   const [customerId, setCustomerId] = useState(null);
   const [payment, setPayment] = useState('online');
+  // Staff mode — enabled via `?staff=1` on the URL (set by admin's "New booking"
+  // launcher). Only staff see the "Pay at reception" option and can skip Razorpay.
+  const isStaff = searchParams.get('staff') === '1';
+  // Once we detect staff mode, default to "at-visit" so admins don't have to
+  // fight the customer-facing Razorpay flow.
+  useEffect(() => { if (isStaff) setPayment('at-visit'); }, [isStaff]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [payCfg, setPayCfg] = useState({ configured: false, keyId: null });
@@ -961,12 +1007,18 @@ export default function BookingClient({ initialOutcome }) {
   // Auto-select the primary therapy when outcome changes.
   useEffect(() => {
     if (outcome && therapies.length === 0) {
+      // Honour ?therapy=slug if it's compatible with the outcome.
+      const wanted = searchParams.get('therapy');
       const o = getOutcome(outcome);
-      const primary = o?.protocol?.therapies?.find((x) => String(x.role || '').toLowerCase() === 'primary')
-                    || o?.protocol?.therapies?.[0];
+      const list = o?.protocol?.therapies || [];
+      if (wanted && list.some((x) => x.slug === wanted)) {
+        setTherapies([wanted]);
+        return;
+      }
+      const primary = list.find((x) => String(x.role || '').toLowerCase() === 'primary') || list[0];
       if (primary?.slug) setTherapies([primary.slug]);
     }
-  }, [outcome, therapies.length]);
+  }, [outcome, therapies.length, searchParams]);
 
   // Fetch admin-configured outcome→therapy mapping if any (falls back silently).
   useEffect(() => {
@@ -1125,7 +1177,7 @@ export default function BookingClient({ initialOutcome }) {
 
       <main className="max-w-[1200px] mx-auto px-4 md:px-8 pt-10 md:pt-14 pb-28 md:pb-16">
         {stepIdx === 0 && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); }} />}
-        {stepIdx === 1 && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} />}
+        {stepIdx === 1 && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} therapyMeta={therapyMeta} />}
         {stepIdx === 2 && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode} setSessionMode={setSessionMode} />}
         {stepIdx === 3 && (
           <StepContact
@@ -1140,6 +1192,7 @@ export default function BookingClient({ initialOutcome }) {
             subtotalInr={totalRupees}
             customerId={customerId}
             branchId={null}
+            isStaff={isStaff}
             onPickSuggestion={(s) => {
               setSlot({
                 date: s.date,

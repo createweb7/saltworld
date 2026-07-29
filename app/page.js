@@ -311,7 +311,6 @@ function WhySaltWorld() {
     { k: 'Sold by',        spa: 'Therapy (massage, facial)', sw: 'Outcome (sleep, stress, recovery)' },
     { k: 'Cadence',        spa: 'One-off treats',              sw: 'Weekly protocol, held for weeks' },
     { k: 'Team',           spa: 'Rotating therapists',          sw: 'Named wellness lead, on record' },
-    { k: 'Measurement',    spa: 'None',                         sw: 'Sleep-log, VAS, HRV tracked' },
     { k: 'After',          spa: 'Retail counter, upsells',       sw: 'Warm tea. No push. Ever.' },
   ];
   return (
@@ -324,7 +323,7 @@ function WhySaltWorld() {
           </h3>
           <p className="rise mt-5 text-[15.5px] leading-8 text-muted-foreground max-w-[560px]">
             Salt World is closer to a clinic than a spa &mdash; and closer to a sanctuary than a clinic.
-            Six honest ways we&rsquo;re built differently.
+            Four honest ways we&rsquo;re built differently.
           </p>
         </div>
 

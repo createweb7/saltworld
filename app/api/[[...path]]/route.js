@@ -134,11 +134,15 @@ async function handle(req, method, segs) {
     const { getByCode, validateCoupon } = await import('@/lib/coupons');
     const coupon = await getByCode(body.code || '');
     if (!coupon) return NextResponse.json({ ok: false, error: 'not_found', message: 'Coupon code is invalid.' }, { status: 200 });
-    // customer bookings count (only if a customerId is provided)
+    // Count non-cancelled prior bookings by customerId OR phone — matches both
+    // logged-in customers and guests who reuse a phone number across sessions.
     let customerBookingsCount = 0;
-    if (body.customerId) {
+    const or = [];
+    if (body.customerId) or.push({ customerId: body.customerId });
+    if (body.phone) or.push({ 'contact.phone': String(body.phone).trim() });
+    if (or.length > 0) {
       customerBookingsCount = await db.collection('bookings').countDocuments({
-        customerId: body.customerId, status: { $nin: ['cancelled'] },
+        $or: or, status: { $nin: ['cancelled'] },
       });
     }
     const result = await validateCoupon(coupon, {
@@ -450,6 +454,13 @@ async function handle(req, method, segs) {
         startIso = `${body.slotDate}T${body.slotTime}:00+05:30`;
       }
       if (therapySlugs.length > 0 && startIso) {
+        // Reject bookings whose slot has already passed. Prevents front-end
+        // bypasses (stale state, direct API hits, etc.) from creating
+        // past-date bookings.
+        const startMs = new Date(startIso).getTime();
+        if (!Number.isFinite(startMs) || startMs < Date.now()) {
+          return NextResponse.json({ error: 'slot_in_past', reason: 'past_time' }, { status: 400 });
+        }
         try {
           const { allocateJourney, suggestNextAvailableSlots } = await import('@/lib/scheduling');
           const r = await allocateJourney({ therapySlugs, branchId, startIso, sessionMode });
@@ -516,8 +527,12 @@ async function handle(req, method, segs) {
           const { getByCode, validateCoupon } = await import('@/lib/coupons');
           const coupon = await getByCode(inputCouponCode);
           if (coupon) {
-            const customerBookingsCount = doc.customerId
-              ? await db.collection('bookings').countDocuments({ customerId: doc.customerId, status: { $nin: ['cancelled'] } })
+            // Count prior bookings by customerId OR phone (handles guest checkout).
+            const or = [];
+            if (doc.customerId) or.push({ customerId: doc.customerId });
+            if (doc.contact?.phone) or.push({ 'contact.phone': String(doc.contact.phone).trim() });
+            const customerBookingsCount = or.length > 0
+              ? await db.collection('bookings').countDocuments({ $or: or, status: { $nin: ['cancelled'] } })
               : 0;
             const r = await validateCoupon(coupon, {
               subtotalInr: Number(doc.total) || 0,
