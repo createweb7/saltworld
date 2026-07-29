@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/components/ss/utils';
 import { Wordmark } from '@/components/site/shell';
-import { OUTCOMES, getOutcome } from '@/lib/outcomes';
+import { OUTCOMES, getOutcome, primaryOutcomeForTherapy } from '@/lib/outcomes';
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                          */
@@ -18,6 +18,13 @@ import { OUTCOMES, getOutcome } from '@/lib/outcomes';
 
 const STEPS = [
   { id: 'outcome',  label: 'Outcome' },
+  { id: 'therapy',  label: 'Therapy' },
+  { id: 'slot',     label: 'Date & time' },
+  { id: 'contact',  label: 'Confirm' },
+];
+
+// STEPS shown when the customer skips the outcome route (direct-therapy booking).
+const STEPS_DIRECT = [
   { id: 'therapy',  label: 'Therapy' },
   { id: 'slot',     label: 'Date & time' },
   { id: 'contact',  label: 'Confirm' },
@@ -39,8 +46,8 @@ function toIsoDay(d) {
 /* Header  — progress                                                 */
 /* ------------------------------------------------------------------ */
 
-function BookingHeader({ stepIdx, onBack, summary }) {
-  const progress = ((stepIdx + 1) / STEPS.length) * 100;
+function BookingHeader({ stepIdx, onBack, summary, steps = STEPS }) {
+  const progress = ((stepIdx + 1) / steps.length) * 100;
   return (
     <header className="sticky top-0 z-40 bg-background/85 backdrop-blur-xl border-b border-border">
       <div className="max-w-[1200px] mx-auto px-4 md:px-8 h-14 flex items-center justify-between gap-3">
@@ -59,10 +66,10 @@ function BookingHeader({ stepIdx, onBack, summary }) {
           <div className="hidden md:block"><Wordmark /></div>
         </div>
         <div className="flex-1 md:hidden text-center text-[11px] uppercase tracking-[0.16em] font-semibold text-muted-foreground">
-          {STEPS[stepIdx].label} · {stepIdx + 1}/{STEPS.length}
+          {steps[stepIdx].label} · {stepIdx + 1}/{steps.length}
         </div>
         <div className="hidden md:flex items-center gap-3 text-[12px]">
-          {STEPS.map((s, i) => (
+          {steps.map((s, i) => (
             <div key={s.id} className={cn(
               'flex items-center gap-1.5',
               i === stepIdx ? 'text-foreground font-medium' : i < stepIdx ? 'text-brand' : 'text-muted-foreground'
@@ -74,7 +81,7 @@ function BookingHeader({ stepIdx, onBack, summary }) {
                 {i < stepIdx ? <Check className="h-2.5 w-2.5" /> : i + 1}
               </div>
               <span>{s.label}</span>
-              {i < STEPS.length - 1 && <span className="opacity-30 mx-1">—</span>}
+              {i < steps.length - 1 && <span className="opacity-30 mx-1">—</span>}
             </div>
           ))}
         </div>
@@ -144,7 +151,7 @@ function parsePrice(str) {
   return Number(String(str || '0').replace(/[^\d]/g, '')) || 0;
 }
 
-function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta = {} }) {
+function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta = {}, isDirectMode = false }) {
   const o = getOutcome(outcome);
   // Prefer DB override (admin-configurable), fall back to static outcome data.
   const therapies = mappingOverride?.length ? mappingOverride : (o?.protocol?.therapies || []);
@@ -176,6 +183,83 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
   const journeyLabel = selected.length === 1
     ? selected[0].label
     : `${selected.length}-therapy ${o?.title?.toLowerCase() || 'wellness'} journey`;
+
+  // ------------------------------------------------------------------
+  // Direct-therapy mode UI (customer arrived via /therapies "Book" CTA).
+  // Show a single hero card for the pre-selected therapy + optional
+  // add-ons underneath. No outcome framing.
+  // ------------------------------------------------------------------
+  if (isDirectMode) {
+    const primary = selected[0] || therapies[0];
+    const extras  = therapies.filter((t) => t.slug !== primary?.slug);
+    return (
+      <div>
+        <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-semibold">Step 1 of 3 · Direct therapy</div>
+        <h1 className="mt-2 font-serif text-[36px] md:text-[52px] leading-[1.02] tracking-tight text-balance">
+          {primary?.label}, <br className="hidden md:block" /><span className="italic">reserved for you.</span>
+        </h1>
+        <p className="mt-3 text-[15px] leading-7 text-muted-foreground max-w-[600px]">
+          You picked a therapy directly &mdash; skip the outcome route. We&rsquo;ll hold a room, plan your visit, and let you add complementary sessions if you want.
+        </p>
+
+        {primary && (
+          <div className="mt-10 rounded-2xl border border-brand bg-brand-soft p-6 md:p-7">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div>
+                <div className="text-[10.5px] uppercase tracking-[0.16em] text-brand font-semibold">Your therapy</div>
+                <div className="mt-1.5 font-serif text-[28px] md:text-[32px] leading-tight text-foreground">{primary.label}</div>
+                <div className="mt-1 text-[13px] text-muted-foreground">{durationFor(primary)} min &middot; single session</div>
+              </div>
+              <Link href="/therapies" className="text-[12.5px] font-medium text-brand hover:underline">
+                Change therapy &rarr;
+              </Link>
+            </div>
+          </div>
+        )}
+
+        {extras.length > 0 && (
+          <div className="mt-10">
+            <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground font-semibold">Add a complementary therapy (optional)</div>
+            <div className="mt-3 space-y-3">
+              {extras.map((t) => {
+                const isSel = values.includes(t.slug);
+                return (
+                  <button key={t.slug} onClick={() => toggle(t.slug)}
+                    type="button"
+                    className={cn(
+                      'w-full text-left rounded-2xl border p-4 md:p-5 flex items-center gap-4 transition-all',
+                      isSel ? 'border-brand bg-brand-soft' : 'border-border bg-card hover:border-foreground/40',
+                    )}>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-serif text-[19px] md:text-[22px] leading-tight text-foreground">{t.label}</div>
+                      <div className="mt-1 text-[12.5px] text-muted-foreground">{durationFor(t)} min &middot; {t.role || 'complementary'}</div>
+                    </div>
+                    <div className={cn(
+                      'h-5 w-5 rounded-[6px] border-2 flex items-center justify-center shrink-0',
+                      isSel ? 'border-brand bg-brand' : 'border-border',
+                    )}>
+                      {isSel && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Same journey summary bar as outcome flow */}
+        <div className="mt-6 rounded-2xl border border-border bg-card p-5">
+          <div className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground mb-2">Your session</div>
+          <div className="font-serif text-[19px] leading-tight tracking-tight text-balance">{journeyLabel}</div>
+          <div className="mt-3 flex items-center gap-x-6 gap-y-1.5 flex-wrap text-[13px]">
+            <div className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-muted-foreground" /><span><span className="font-semibold">{combinedDuration}</span> min total</span></div>
+            <div className="inline-flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-muted-foreground" /><span><span className="font-semibold">{selected.length}</span> therapy{selected.length === 1 ? '' : ' combo'}</span></div>
+            <div className="ml-auto font-mono text-[15px] font-semibold">&#x20B9;{combinedPrice.toLocaleString('en-IN')}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -637,13 +721,13 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange }) 
 /* Step 4 — Contact & confirm                                         */
 /* ------------------------------------------------------------------ */
 
-function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, customerId, branchId, isStaff = false }) {
+function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, customerId, branchId, isStaff = false, isDirectMode = false }) {
   const o = getOutcome(outcome);
   const th = o?.protocol?.therapies?.find((x) => x.slug === therapy);
   const isMulti = therapies.length > 1 && slot?.plan?.length > 1;
   return (
     <div>
-      <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-semibold">Step 4 of 4</div>
+      <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-semibold">{isDirectMode ? 'Step 3 of 3' : 'Step 4 of 4'}</div>
       <h1 className="mt-2 font-serif text-[36px] md:text-[52px] leading-[1.02] tracking-tight text-balance">
         A few details, <span className="italic">then you&rsquo;re booked.</span>
       </h1>
@@ -793,11 +877,11 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
             </>
           ) : (
             <div className="mt-3 space-y-3 text-[13.5px]">
-              <Row label="Outcome" value={o?.title} />
-              <Row label="Therapy" value={th?.label} />
+              {!isDirectMode && <Row label="Outcome" value={o?.title} />}
+              <Row label="Therapy" value={th?.label || (therapies[0] && therapyMeta[therapies[0]]?.name) || '—'} />
               <Row label="Date"    value={slot ? new Date(slot.date + 'T00:00').toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long' }) : '—'} />
               <Row label="Time"    value={slot?.time || '—'} />
-              <Row label="Duration" value={o?.protocol?.duration || '—'} />
+              <Row label="Duration" value={o?.protocol?.duration || (therapies[0] && therapyMeta[therapies[0]]?.durationMin ? `${therapyMeta[therapies[0]].durationMin} min` : '—')} />
             </div>
           )}
           <div className="mt-5 pt-4 border-t border-border">
@@ -909,11 +993,30 @@ function CouponInput({ subtotalInr, therapies, customerId, branchId, phone, valu
 export default function BookingClient({ initialOutcome }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [stepIdx, setStepIdx] = useState(initialOutcome ? 1 : 0);
-  const [outcome, setOutcome] = useState(initialOutcome);
-  // therapies is now an ARRAY of slugs (multi-select). Legacy single-value `therapy`
-  // is derived as therapies[0] for compatibility with backend + confirmation flow.
-  const [therapies, setTherapies] = useState([]);
+  // -----------------------------------------------------------------
+  // Direct-therapy mode: `/book?therapy=<slug>` without any outcome.
+  // Skips the Outcome step entirely (customer picks a therapy first, then
+  // date/time, then contact). Pricing still borrows the primary outcome's
+  // single-session rate silently — no separate therapy-price table exists yet.
+  // -----------------------------------------------------------------
+  const rawTherapyParam    = searchParams.get('therapy');
+  const rawOutcomeParam    = searchParams.get('outcome');
+  const isDirectTherapyMode = !!rawTherapyParam && !rawOutcomeParam && !initialOutcome;
+  const primaryOutcome      = isDirectTherapyMode ? primaryOutcomeForTherapy(rawTherapyParam) : null;
+
+  const initialResolvedOutcome = initialOutcome
+    || (isDirectTherapyMode ? primaryOutcome?.slug : null);
+  const initialTherapies       = isDirectTherapyMode && rawTherapyParam ? [rawTherapyParam] : [];
+
+  // Direct mode → start at step 0 of a 3-step wizard (Therapy).
+  // Normal mode: start at step 1 (Therapy) if outcome came in via SSR, else step 0.
+  const [stepIdx, setStepIdx] = useState(
+    isDirectTherapyMode ? 0 : (initialResolvedOutcome ? 1 : 0),
+  );
+  const [outcome, setOutcome]     = useState(initialResolvedOutcome);
+  const [therapies, setTherapies] = useState(initialTherapies);
+  const steps = isDirectTherapyMode ? STEPS_DIRECT : STEPS;
+  const stepId = steps[stepIdx]?.id;
   const [slot, setSlot] = useState(null);
   const [contact, setContact] = useState({});
   const [customerId, setCustomerId] = useState(null);
@@ -1050,12 +1153,12 @@ export default function BookingClient({ initialOutcome }) {
   }, []);
 
   const canNext =
-    (stepIdx === 0 && !!outcome) ||
-    (stepIdx === 1 && therapies.length > 0) ||
-    (stepIdx === 2 && !!slot?.date && !!slot?.time) ||
-    stepIdx === 3;
+    (stepId === 'outcome' && !!outcome) ||
+    (stepId === 'therapy' && therapies.length > 0) ||
+    (stepId === 'slot'    && !!slot?.date && !!slot?.time) ||
+    stepId === 'contact';
 
-  const next = () => setStepIdx((i) => Math.min(i + 1, STEPS.length - 1));
+  const next = () => setStepIdx((i) => Math.min(i + 1, steps.length - 1));
   const back = () => setStepIdx((i) => Math.max(i - 1, 0));
 
   const openRazorpay = ({ order, keyId, bookingId, bookingRef, name, contact }) => new Promise((resolve, reject) => {
@@ -1173,13 +1276,13 @@ export default function BookingClient({ initialOutcome }) {
       {payCfg.configured && (
         <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="lazyOnload" />
       )}
-      <BookingHeader stepIdx={stepIdx} onBack={back} />
+      <BookingHeader stepIdx={stepIdx} onBack={back} steps={steps} />
 
       <main className="max-w-[1200px] mx-auto px-4 md:px-8 pt-10 md:pt-14 pb-28 md:pb-16">
-        {stepIdx === 0 && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); }} />}
-        {stepIdx === 1 && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} therapyMeta={therapyMeta} />}
-        {stepIdx === 2 && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode} setSessionMode={setSessionMode} />}
-        {stepIdx === 3 && (
+        {stepId === 'outcome' && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); }} />}
+        {stepId === 'therapy' && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} therapyMeta={therapyMeta} isDirectMode={isDirectTherapyMode} />}
+        {stepId === 'slot'    && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode} setSessionMode={setSessionMode} />}
+        {stepId === 'contact' && (
           <StepContact
             outcome={outcome} therapy={therapy} slot={slot}
             therapies={therapies} therapyMeta={therapyMeta}
@@ -1193,6 +1296,7 @@ export default function BookingClient({ initialOutcome }) {
             customerId={customerId}
             branchId={null}
             isStaff={isStaff}
+            isDirectMode={isDirectTherapyMode}
             onPickSuggestion={(s) => {
               setSlot({
                 date: s.date,
@@ -1209,16 +1313,16 @@ export default function BookingClient({ initialOutcome }) {
         )}
       </main>
 
-      {/* Sticky footer with primary action (steps 1–3 only; step 4 has its own submit) */}
-      {stepIdx < 3 && (
+      {/* Sticky footer with primary action — hidden on the final Confirm step */}
+      {stepId !== 'contact' && (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/90 backdrop-blur-xl">
           <div className="max-w-[1200px] mx-auto px-4 md:px-8 h-16 flex items-center justify-between gap-3">
             <div className="hidden md:block text-[12.5px] text-muted-foreground">
-              {stepIdx === 0 && (outcome ? `→ ${getOutcome(outcome)?.title}` : 'Choose the outcome you want')}
-              {stepIdx === 1 && (therapies.length > 0
+              {stepId === 'outcome' && (outcome ? `→ ${getOutcome(outcome)?.title}` : 'Choose the outcome you want')}
+              {stepId === 'therapy' && (therapies.length > 0
                 ? `→ ${therapies.length} ${therapies.length === 1 ? 'therapy' : 'therapies'} selected`
                 : 'Choose one or more therapies')}
-              {stepIdx === 2 && (slot ? `→ ${new Date(slot.date + 'T00:00').toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })} at ${slot.time}` : 'Pick a date and time')}
+              {stepId === 'slot' && (slot ? `→ ${new Date(slot.date + 'T00:00').toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })} at ${slot.time}` : 'Pick a date and time')}
             </div>
             <button onClick={next} disabled={!canNext}
               className="ml-auto inline-flex items-center gap-2 h-11 px-6 rounded-full bg-foreground text-background text-[14px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-foreground/90 transition-colors">

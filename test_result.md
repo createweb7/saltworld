@@ -3850,6 +3850,32 @@ frontend:
       **GROUP 2: Coupon first-time validation by phone (Issue #2) — CRITICAL (2/3 PASSED, 1 CRITICAL BUG)**
       ✅ 2A: Validate DEEPTHI200 with NEW phone (no bookings) → ok=true, discountInr=100
       ❌ 2B: **CRITICAL BUG**: Create booking with phone 9965897280, then validate DEEPTHI200 → ok=true (SHOULD BE ok=false, error='first_time_only')
+
+  - agent: "main"
+    message: |
+      Direct-therapy booking flow SHIPPED
+      
+      New capability: `/book?therapy=<slug>` (with no `outcome`) enters a 3-step
+      wizard (Therapy → Date & time → Confirm) instead of the 4-step
+      outcome-first wizard. Same order, just skips the outcome selection.
+      
+      Files touched:
+      - /app/lib/outcomes.js — added `outcomesUsing()` and `primaryOutcomeForTherapy()` helpers so the direct flow can borrow a sensible price/label without forcing an outcome pick.
+      - /app/app/book/BookingClient.jsx
+        · Added `STEPS_DIRECT` (3 items) alongside existing `STEPS` (4 items).
+        · Header switched from module-const `STEPS` to a `steps` prop so it renders 3 or 4 pills correctly.
+        · All step-branching converted from `stepIdx === N` to `stepId === 'outcome' | 'therapy' | 'slot' | 'contact'`.
+        · New `isDirectMode` prop passed to StepTherapy — renders a compact "Your therapy" hero card + optional complementary-therapy add-ons + summary.
+        · StepContact hides the "Outcome" sidebar row in direct mode.
+        · Step banner reads "Step 1 of 3 · Direct therapy" in the new mode.
+      - /app/app/therapies/page.js — "Book <therapy>" CTAs now deep-link to `/book?therapy=<slug>` (no outcome param) so they enter the direct flow.
+      - /app/app/page.js — under OutcomeSelector heading: "Already know the therapy you want? Book by therapy instead →" link to `/therapies`.
+      
+      Verified via screenshots:
+      · Direct-therapy Step 1: "Float therapy, reserved for you" hero + "Change therapy" link + Salt-therapy add-on + ₹1,499 summary.
+      · Step 3 sidebar hides outcome row, keeps Therapy / Date / Time / Duration.
+      · Homepage OutcomeSelector shows the new "Book by therapy instead" link.
+
           - The first-time coupon validation by phone is NOT working correctly
           - After creating a booking with a phone number, the same phone can still use the first-time-only coupon
           - This is the exact bug reported by the client in Issue #2

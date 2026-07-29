@@ -197,6 +197,12 @@ function OutcomeSelector() {
             Tell us how you want to feel &mdash; and we&rsquo;ll sequence the right therapies (float, salt,
             infrared, cold plunge, red-light) into a single session, held at a rhythm you&rsquo;ll actually keep.
           </p>
+          <div className="rise mt-6 text-[13px] text-muted-foreground">
+            Already know the therapy you want?{' '}
+            <Link href="/therapies" className="font-semibold text-foreground underline underline-offset-[3px] decoration-brand/40 hover:decoration-brand transition-colors">
+              Book by therapy instead <ArrowRight className="inline h-3 w-3 align-middle" />
+            </Link>
+          </div>
         </div>
 
         <div className="mt-14 grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">

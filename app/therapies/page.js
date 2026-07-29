@@ -90,10 +90,8 @@ export default function TherapiesIndex() {
           {THERAPIES.map((t, idx) => {
             const outcomes = outcomesUsing(t.slug);
             const Icon = t.icon;
-            const primaryOutcome = outcomes[0];
-            const bookHref = primaryOutcome
-              ? `/book?outcome=${primaryOutcome.slug}&therapy=${t.slug}`
-              : `/book?therapy=${t.slug}`;
+            // Deep-link straight into the direct-therapy booking flow (no outcome).
+            const bookHref = `/book?therapy=${t.slug}`;
             return (
               <div key={t.slug} className="grid md:grid-cols-12 gap-8 md:gap-10 items-start">
                 <div className="md:col-span-4">
