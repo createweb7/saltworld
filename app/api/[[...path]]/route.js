@@ -134,12 +134,27 @@ async function handle(req, method, segs) {
     const { getByCode, validateCoupon } = await import('@/lib/coupons');
     const coupon = await getByCode(body.code || '');
     if (!coupon) return NextResponse.json({ ok: false, error: 'not_found', message: 'Coupon code is invalid.' }, { status: 200 });
-    // Count non-cancelled prior bookings by customerId OR phone — matches both
-    // logged-in customers and guests who reuse a phone number across sessions.
+    // Resolve every phone the caller might be identified by — direct input,
+    // linked customer record, and normalise formatting (strip +91, spaces).
+    const phones = new Set();
+    const addPhone = (p) => {
+      if (!p) return;
+      const raw = String(p).trim();
+      if (raw) phones.add(raw);
+      const digits = raw.replace(/\D/g, '');
+      if (digits) phones.add(digits);
+      if (digits.length > 10) phones.add(digits.slice(-10));
+    };
+    addPhone(body.phone);
+    if (body.customerId) {
+      const cust = await db.collection('customers').findOne({ id: body.customerId }, { projection: { phone: 1 } });
+      if (cust?.phone) addPhone(cust.phone);
+    }
+    // Count non-cancelled prior bookings by customerId OR any known phone.
     let customerBookingsCount = 0;
     const or = [];
     if (body.customerId) or.push({ customerId: body.customerId });
-    if (body.phone) or.push({ 'contact.phone': String(body.phone).trim() });
+    if (phones.size > 0) or.push({ 'contact.phone': { $in: [...phones] } });
     if (or.length > 0) {
       customerBookingsCount = await db.collection('bookings').countDocuments({
         $or: or, status: { $nin: ['cancelled'] },
@@ -527,10 +542,24 @@ async function handle(req, method, segs) {
           const { getByCode, validateCoupon } = await import('@/lib/coupons');
           const coupon = await getByCode(inputCouponCode);
           if (coupon) {
-            // Count prior bookings by customerId OR phone (handles guest checkout).
+            // Same normalized customerId-OR-phone check as /api/coupons/validate.
+            const phones = new Set();
+            const addPhone = (p) => {
+              if (!p) return;
+              const raw = String(p).trim();
+              if (raw) phones.add(raw);
+              const digits = raw.replace(/\D/g, '');
+              if (digits) phones.add(digits);
+              if (digits.length > 10) phones.add(digits.slice(-10));
+            };
+            addPhone(doc.contact?.phone);
+            if (doc.customerId) {
+              const cust = await db.collection('customers').findOne({ id: doc.customerId }, { projection: { phone: 1 } });
+              if (cust?.phone) addPhone(cust.phone);
+            }
             const or = [];
             if (doc.customerId) or.push({ customerId: doc.customerId });
-            if (doc.contact?.phone) or.push({ 'contact.phone': String(doc.contact.phone).trim() });
+            if (phones.size > 0) or.push({ 'contact.phone': { $in: [...phones] } });
             const customerBookingsCount = or.length > 0
               ? await db.collection('bookings').countDocuments({ $or: or, status: { $nin: ['cancelled'] } })
               : 0;

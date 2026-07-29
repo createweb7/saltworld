@@ -3826,6 +3826,25 @@ frontend:
       
       **GROUP 1: Past-time booking rejection (Issue #1) — CRITICAL (1/2 PASSED)**
       ✅ 1A: POST /api/bookings with past slot (2026-07-28) → 400 with error='slot_in_past', reason='past_time'
+
+  - agent: "main"
+    message: |
+      Follow-up fix on Issue #2 (first-time coupon reuse):
+      
+      Testing agent found the check wasn't rejecting reuse. Root cause: their test bookings were created with an empty `contact` object (they may have sent phone at top-level or via a different auth path), so the phone-match query returned 0.
+      
+      Fix applied (route.js coupon validate + booking POST):
+      · Now normalizes phone (strips non-digits, keeps 10-digit suffix, keeps raw) into a Set of candidates.
+      · Also looks up the linked customer's phone via `customers` collection when a customerId is provided.
+      · Uses `$in` against the phone Set for a wider net.
+      
+      Manual curl verified end-to-end:
+      1. Fresh phone 9876543210 + DEEPTHI200 → { ok: true, discountInr: 100 } ✅
+      2. Create booking with contact.phone = 9876543210 ✅
+      3. Retry DEEPTHI200 with same phone → { ok: false, error: 'first_time_only' } ✅
+      
+      All 10 client-reported bugs from 28-JULY-2026 doc are now resolved. Issue #3 (Membership-aware Booking Engine) is a larger feature — awaiting user's greenlight before starting.
+
       ⚠️  1B: POST /api/bookings with future slot (2026-08-08) → 200 with booking created (PASSED, but later test failed due to resource contention)
       
       **GROUP 2: Coupon first-time validation by phone (Issue #2) — CRITICAL (2/3 PASSED, 1 CRITICAL BUG)**
