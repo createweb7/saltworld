@@ -94,14 +94,25 @@ export default async function ConfirmPage({ params }) {
             <Field label="Date"      value={dateFmt} />
             <Field label="Time"      value={b.slotTime} />
             <Field label="Guest"     value={b.contact?.name} />
-            <Field label="Payment"   value={b.payment === 'at-visit' ? 'At visit (card / UPI)' : 'Online'} />
+            <Field label="Payment"   value={
+              b.payment === 'at-visit'   ? 'At visit (card / UPI)' :
+              b.payment === 'membership' ? `Membership: ${b.membershipApplied?.planName || 'Active plan'}` :
+              'Online'
+            } />
           </div>
           <div className="mt-8 pt-6 border-t border-border flex items-baseline justify-between">
             <span className="text-[12.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold">Total (est.)</span>
             <span className="font-serif text-[32px] tracking-tight">
-              {b.total ? `\u20B9${Number(b.total).toLocaleString('en-IN')}` : (b.priceLine || '\u2014')}
+              {b.membershipApplied
+                ? <span className="text-brand">FREE</span>
+                : b.total ? `\u20B9${Number(b.total).toLocaleString('en-IN')}` : (b.priceLine || '\u2014')}
             </span>
           </div>
+          {b.membershipApplied && (
+            <div className="mt-3 rounded-lg border border-brand/40 bg-brand/5 px-3.5 py-2.5 text-[12.5px] text-brand">
+              {b.membershipApplied.sessionsConsumed || 1} session{(b.membershipApplied.sessionsConsumed || 1) === 1 ? '' : 's'} deducted from &ldquo;{b.membershipApplied.planName}&rdquo;.
+            </div>
+          )}
         </div>
 
         {/* Your itinerary — surfaces the auto-allocated room/resource for each therapy. */}

@@ -721,7 +721,7 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange }) 
 /* Step 4 — Contact & confirm                                         */
 /* ------------------------------------------------------------------ */
 
-function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, customerId, branchId, isStaff = false, isDirectMode = false }) {
+function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, customerId, branchId, isStaff = false, isDirectMode = false, eligibleMemberships = [], selectedMembershipId = null, onSelectMembership = () => {} }) {
   const o = getOutcome(outcome);
   const th = o?.protocol?.therapies?.find((x) => x.slug === therapy);
   const isMulti = therapies.length > 1 && slot?.plan?.length > 1;
@@ -791,23 +791,102 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
               className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-background text-[14px] leading-6 focus:outline-none focus:ring-2 focus:ring-brand/40" />
           </div>
 
-          <div>
-            <div className="text-[12px] font-medium mb-2">Payment</div>
-            <div className="space-y-2">
-              <label className={cn(
-                'rounded-xl border p-3.5 flex items-start gap-3 cursor-pointer transition-colors',
-                payment === 'online' ? 'border-brand bg-brand-soft' : 'border-border hover:bg-muted/40'
-              )}>
-                <input type="radio" name="payment" value="online" checked={payment === 'online'} onChange={() => setPayment('online')} className="sr-only" />
-                <span className={cn('h-4 w-4 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0',
-                  payment === 'online' ? 'border-brand' : 'border-border')}>
-                  {payment === 'online' && <span className="h-2 w-2 rounded-full bg-brand" />}
-                </span>
-                <div className="flex-1">
-                  <div className="text-[14px] font-medium flex items-center gap-2">
-                    Pay online
-                    {!canPayOnline && <span className="text-[10px] uppercase tracking-widest bg-amber-500/15 text-amber-900 dark:text-amber-300 px-1.5 py-0.5 rounded">Setup pending</span>}
+          {/* Membership-aware — surface active subscriptions that cover this journey. */}
+          {eligibleMemberships.length > 0 && (
+            <div>
+              <div className="text-[12px] font-medium mb-2 inline-flex items-center gap-2">
+                Use my membership
+                <span className="text-[10px] uppercase tracking-widest bg-brand/10 text-brand px-1.5 py-0.5 rounded">Saves you paying</span>
+              </div>
+              <div className="space-y-2">
+                {eligibleMemberships.map((entry) => {
+                  const sub = entry.subscription || {};
+                  const plan = sub.planSnapshot || {};
+                  const isSel = selectedMembershipId === sub.id;
+                  const willConsume = entry.willConsume || 1;
+                  return (
+                    <label key={sub.id} className={cn(
+                      'rounded-xl border p-3.5 flex items-start gap-3 cursor-pointer transition-colors',
+                      isSel ? 'border-brand bg-brand-soft' : 'border-border hover:bg-muted/40',
+                    )}>
+                      <input
+                        type="radio"
+                        name="membership"
+                        checked={isSel}
+                        onChange={() => onSelectMembership(sub.id)}
+                        className="sr-only"
+                      />
+                      <span className={cn('h-4 w-4 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0',
+                        isSel ? 'border-brand' : 'border-border')}>
+                        {isSel && <span className="h-2 w-2 rounded-full bg-brand" />}
+                      </span>
+                      <div className="flex-1">
+                        <div className="text-[14px] font-medium">{sub.planName || plan.name || 'Membership'}</div>
+                        <div className="text-[11.5px] text-muted-foreground mt-0.5">
+                          {plan.type === 'sessions' ? (
+                            <>{sub.sessionsRemaining || 0} sessions remaining &middot; will use {willConsume}</>
+                          ) : plan.type === 'unlimited' ? (
+                            <>Unlimited access &middot; valid till {new Date(sub.endAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</>
+                          ) : (
+                            <>Active till {new Date(sub.endAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-[11px] font-semibold text-brand shrink-0">FREE</div>
+                    </label>
+                  );
+                })}
+                {/* Explicit opt-out card */}
+                <label className={cn(
+                  'rounded-xl border p-3.5 flex items-start gap-3 cursor-pointer transition-colors',
+                  !selectedMembershipId ? 'border-brand bg-brand-soft' : 'border-border hover:bg-muted/40',
+                )}>
+                  <input
+                    type="radio"
+                    name="membership"
+                    checked={!selectedMembershipId}
+                    onChange={() => onSelectMembership(null)}
+                    className="sr-only"
+                  />
+                  <span className={cn('h-4 w-4 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0',
+                    !selectedMembershipId ? 'border-brand' : 'border-border')}>
+                    {!selectedMembershipId && <span className="h-2 w-2 rounded-full bg-brand" />}
+                  </span>
+                  <div className="flex-1">
+                    <div className="text-[14px] font-medium">Pay normally</div>
+                    <div className="text-[11.5px] text-muted-foreground mt-0.5">Keep sessions on your membership for another day.</div>
                   </div>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {/* Hide the payment card entirely when a membership is applied — it's a wash. */}
+          {selectedMembershipId ? (
+            <div className="rounded-xl border border-brand bg-brand-soft p-4">
+              <div className="text-[13px] font-medium">Covered by your membership</div>
+              <div className="text-[11.5px] text-muted-foreground mt-1">
+                One session will be deducted per therapy on confirmation. No card required.
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="text-[12px] font-medium mb-2">Payment</div>
+              <div className="space-y-2">
+                <label className={cn(
+                  'rounded-xl border p-3.5 flex items-start gap-3 cursor-pointer transition-colors',
+                  payment === 'online' ? 'border-brand bg-brand-soft' : 'border-border hover:bg-muted/40'
+                )}>
+                  <input type="radio" name="payment" value="online" checked={payment === 'online'} onChange={() => setPayment('online')} className="sr-only" />
+                  <span className={cn('h-4 w-4 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0',
+                    payment === 'online' ? 'border-brand' : 'border-border')}>
+                    {payment === 'online' && <span className="h-2 w-2 rounded-full bg-brand" />}
+                  </span>
+                  <div className="flex-1">
+                    <div className="text-[14px] font-medium flex items-center gap-2">
+                      Pay online
+                      {!canPayOnline && <span className="text-[10px] uppercase tracking-widest bg-amber-500/15 text-amber-900 dark:text-amber-300 px-1.5 py-0.5 rounded">Setup pending</span>}
+                    </div>
                   <div className="text-[12px] text-muted-foreground mt-0.5">
                     {canPayOnline
                       ? 'Cards, UPI or netbanking via Razorpay. Secure and encrypted.'
@@ -839,12 +918,17 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
               )}
             </div>
           </div>
+          )}
 
           {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 text-destructive text-[13px] px-3 py-2">{error}</div>}
 
           <button type="submit" disabled={submitting}
             className="w-full inline-flex items-center justify-center gap-2 h-12 rounded-full bg-foreground text-background text-[14.5px] font-semibold hover:bg-foreground/90 disabled:opacity-60 transition-colors">
-            {submitting ? <><Loader2 className="h-4 w-4 animate-spin" /> {payment === 'online' ? 'Opening secure checkout…' : 'Confirming…'}</> : <>{payment === 'online' ? 'Pay & confirm booking' : 'Confirm booking'} <ArrowRight className="h-4 w-4" /></>}
+            {submitting ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> {selectedMembershipId ? 'Confirming\u2026' : payment === 'online' ? 'Opening secure checkout\u2026' : 'Confirming\u2026'}</>
+            ) : (
+              <>{selectedMembershipId ? 'Use membership & confirm' : payment === 'online' ? 'Pay & confirm booking' : 'Confirm booking'} <ArrowRight className="h-4 w-4" /></>
+            )}
           </button>
           <div className="text-[11.5px] text-muted-foreground text-center">
             By confirming, you agree to our <Link href="/legal/terms" className="underline underline-offset-2">terms</Link> &amp; <Link href="/legal/refunds" className="underline underline-offset-2">refund policy</Link>.
@@ -898,15 +982,23 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
           <div className="mt-4 pt-3 border-t border-border/60 flex items-baseline justify-between">
             <span className="text-[12.5px] text-muted-foreground">Total (est.)</span>
             <span className="font-serif text-[28px] tracking-tight">
-              {coupon?.applied
-                ? <>₹{Math.max(0, (Number(subtotalInr) || 0) - (Number(coupon.discountInr) || 0)).toLocaleString('en-IN')}</>
-                : (o?.pricing?.single?.price || `₹${Number(subtotalInr || 0).toLocaleString('en-IN')}`)}
+              {selectedMembershipId
+                ? <span className="text-brand">FREE</span>
+                : coupon?.applied
+                  ? <>&#x20B9;{Math.max(0, (Number(subtotalInr) || 0) - (Number(coupon.discountInr) || 0)).toLocaleString('en-IN')}</>
+                  : (o?.pricing?.single?.price || `\u20B9${Number(subtotalInr || 0).toLocaleString('en-IN')}`)}
             </span>
           </div>
-          {coupon?.applied && (
+          {selectedMembershipId && (
+            <div className="mt-1 flex items-baseline justify-between text-[11.5px] text-brand">
+              <span>Covered by your membership</span>
+              <span className="font-mono">1 session/therapy</span>
+            </div>
+          )}
+          {!selectedMembershipId && coupon?.applied && (
             <div className="mt-1 flex items-baseline justify-between text-[11.5px] text-emerald-700 dark:text-emerald-400">
               <span>You saved with {coupon.code}</span>
-              <span className="font-mono">– ₹{Number(coupon.discountInr).toLocaleString('en-IN')}</span>
+              <span className="font-mono">&ndash; &#x20B9;{Number(coupon.discountInr).toLocaleString('en-IN')}</span>
             </div>
           )}
           <div className="mt-4 flex items-start gap-2 text-[11.5px] text-muted-foreground">
@@ -1036,6 +1128,11 @@ export default function BookingClient({ initialOutcome }) {
   const [coupon, setCoupon] = useState(null);              // { code, discountInr, applied } | null
   // Suggestions surfaced when the confirm step receives a 409 slot_unavailable
   const [slotConflict, setSlotConflict] = useState(null); // { reason, suggestions:[{...}] }
+  // Membership-aware booking — eligible active subs for the current therapies.
+  // Fetched once we know both `therapies` and the logged-in customer. The
+  // customer explicitly picks one via the "Use my membership" toggle in Step 3.
+  const [eligibleMemberships, setEligibleMemberships] = useState([]); // [{ subscription, willConsume, perTherapy }]
+  const [selectedMembershipId, setSelectedMembershipId] = useState(null);
   const therapy = therapies[0] || null; // convenience alias
 
   // Compute subtotal at component scope so both StepContact (for coupon preview)
@@ -1106,6 +1203,35 @@ export default function BookingClient({ initialOutcome }) {
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
+
+  // Membership eligibility — refetch whenever the customer id or the therapy
+  // selection changes. Sends the therapy slugs so the server can filter to
+  // subscriptions that actually cover the whole journey.
+  useEffect(() => {
+    if (!customerId || therapies.length === 0) {
+      setEligibleMemberships([]);
+      setSelectedMembershipId(null);
+      return;
+    }
+    let cancelled = false;
+    const qs = new URLSearchParams();
+    qs.set('therapies', therapies.join(','));
+    if (slot?.startIso) qs.set('atIso', slot.startIso);
+    fetch(`/api/customer/subscriptions/eligible?${qs.toString()}`)
+      .then((r) => (r.ok ? r.json() : { eligible: [] }))
+      .then((d) => {
+        if (cancelled) return;
+        const list = Array.isArray(d?.eligible) ? d.eligible : [];
+        setEligibleMemberships(list);
+        // If the user had already ticked one and it no longer qualifies, clear.
+        setSelectedMembershipId((prev) => {
+          if (!prev) return prev;
+          return list.some((x) => x.subscription?.id === prev) ? prev : null;
+        });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [customerId, therapies, slot?.startIso]);
 
   // Auto-select the primary therapy when outcome changes.
   useEffect(() => {
@@ -1213,6 +1339,7 @@ export default function BookingClient({ initialOutcome }) {
       const merged = (outcomeMap?.therapies?.length ? outcomeMap.therapies : staticTherapies);
       const selected = merged.filter((t) => therapies.includes(t.slug));
       const primary = selected.find((t) => String(t.role || '').toLowerCase() === 'primary') || selected[0];
+      const usingMembership = !!selectedMembershipId;
 
       const r = await fetch('/api/bookings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1226,11 +1353,14 @@ export default function BookingClient({ initialOutcome }) {
           startAt: slot.startIso || null,
           plan: slot.plan || null,
           duration: o?.protocol?.duration,
-          contact, payment,
+          contact,
+          // When paying with membership, override payment mode server-side too.
+          payment: usingMembership ? 'membership' : payment,
           customerId,
           priceLine: o?.pricing?.single?.price + ' ' + (o?.pricing?.single?.period || ''),
           total: totalRupees,
-          couponCode: coupon?.applied ? coupon.code : null,
+          couponCode: (!usingMembership && coupon?.applied) ? coupon.code : null,
+          membershipSubscriptionId: usingMembership ? selectedMembershipId : null,
         }),
       });
       if (r.status === 409) {
@@ -1243,12 +1373,26 @@ export default function BookingClient({ initialOutcome }) {
         setSubmitting(false);
         return;
       }
-      if (!r.ok) throw new Error('Failed to create booking');
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        if (j?.error === 'membership_not_eligible') {
+          setError(`This membership doesn't cover ${j.therapySlug || 'the selected therapy'} (${j.reason || 'not_eligible'}). Uncheck "Use my membership" or pick a different plan.`);
+        } else if (j?.error === 'membership_insufficient_sessions') {
+          setError(`Not enough sessions on this membership (have ${j.have}, need ${j.need}). Uncheck "Use my membership" to continue.`);
+        } else if (j?.error === 'slot_in_past') {
+          setError('This slot is in the past. Please pick a future time.');
+        } else {
+          throw new Error(j?.error || 'Failed to create booking');
+        }
+        setSubmitting(false);
+        return;
+      }
       const doc = await r.json();
       setSlotConflict(null);
 
       // If online payment requested and Razorpay is configured, open Checkout.
-      if (payment === 'online' && payCfg.configured && totalRupees > 0) {
+      // Skip entirely when the booking was covered by a membership.
+      if (!usingMembership && payment === 'online' && payCfg.configured && totalRupees > 0) {
         const co = await fetch('/api/payments/create-order', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ bookingId: doc.id, amountPaise: Math.round(totalRupees * 100), notes: { ref: doc.ref } }),
@@ -1297,6 +1441,9 @@ export default function BookingClient({ initialOutcome }) {
             branchId={null}
             isStaff={isStaff}
             isDirectMode={isDirectTherapyMode}
+            eligibleMemberships={eligibleMemberships}
+            selectedMembershipId={selectedMembershipId}
+            onSelectMembership={setSelectedMembershipId}
             onPickSuggestion={(s) => {
               setSlot({
                 date: s.date,

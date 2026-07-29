@@ -215,6 +215,52 @@ async function handle(req, method, segs) {
       const subs = await db.collection('memberSubscriptions').find({ customerId: customer.id }).sort({ startAt: -1 }).toArray();
       return NextResponse.json(subs.map(({ _id, ...r }) => r));
     }
+    // Membership-aware booking: return subscriptions that cover the requested
+    // therapies + branch, still active, with remaining sessions. Used by the
+    // booking flow to render the "Use my membership" toggle.
+    if (segs.length === 3 && segs[2] === 'eligible' && method === 'GET') {
+      const u = new URL(req.url);
+      const therapies = (u.searchParams.get('therapies') || '')
+        .split(',').map((s) => s.trim()).filter(Boolean);
+      const branchId  = u.searchParams.get('branchId') || null;
+      const atIso     = u.searchParams.get('atIso') || null;
+
+      const { validateForBooking } = await import('@/lib/memberships');
+      const active = await db.collection('memberSubscriptions').find({
+        customerId: customer.id, status: 'active',
+      }).sort({ endAt: 1 }).toArray();
+
+      const results = [];
+      for (const sub of active) {
+        // A sub is "eligible" only if it covers EVERY selected therapy AND
+        // has enough sessions (or is unlimited/wallet).
+        const perTherapy = [];
+        let allOk = true;
+        for (const t of therapies) {
+          const r = await validateForBooking({
+            subscription: sub, therapySlug: t, branchId, atIso,
+          });
+          perTherapy.push({ therapySlug: t, ...r });
+          if (!r.ok) allOk = false;
+        }
+        // For 'sessions' plans, ensure we actually have >= therapies.length remaining.
+        const plan = sub.planSnapshot || {};
+        const willConsume = therapies.length || 1;
+        if (plan.type === 'sessions' && (sub.sessionsRemaining || 0) < willConsume) {
+          allOk = false;
+          perTherapy.push({ therapySlug: '*', ok: false, reason: 'insufficient_sessions_for_journey' });
+        }
+        if (allOk) {
+          const { _id, ...rest } = sub;
+          results.push({
+            subscription: rest,
+            perTherapy,
+            willConsume,
+          });
+        }
+      }
+      return NextResponse.json({ therapies, eligible: results });
+    }
     const sid = segs[2];
     if (sid && segs[3] === 'usage' && method === 'GET') {
       const rows = await db.collection('membership_usage').find({ subscriptionId: sid, customerId: customer.id }).sort({ consumedAt: -1 }).limit(50).toArray();
@@ -581,47 +627,74 @@ async function handle(req, method, segs) {
         } catch (e) { console.error('coupon apply failed', e); }
       }
 
-      // Membership auto-consume — if a signed-in customer has an eligible active
-      // subscription for the primary therapy, apply it and zero out the total.
-      // Customer can opt out by explicitly setting body.skipMembership=true.
+      // Membership — explicit opt-in via body.membershipSubscriptionId.
+      // The frontend surfaces a "Use my membership" toggle in Step 3; when
+      // enabled it sends the subscription id here. We re-validate coverage
+      // + sessions + branch server-side (never trust the client), then
+      // consume `therapies.length` sessions in one shot.
       let membershipApplied = null;
-      if (doc.customerId && !body.skipMembership && therapySlugs.length > 0) {
+      const membershipSubscriptionId = body.membershipSubscriptionId
+        ? String(body.membershipSubscriptionId).trim()
+        : null;
+      if (membershipSubscriptionId && doc.customerId && therapySlugs.length > 0) {
         try {
-          const { findEligibleSubscription, consumeForBooking } = await import('@/lib/memberships');
-          const sub = await findEligibleSubscription({
-            customerId: doc.customerId,
-            therapySlug: therapySlugs[0],
-            branchId,
-            atIso: startIso,
+          const { validateForBooking } = await import('@/lib/memberships');
+          const sub = await db.collection('memberSubscriptions').findOne({
+            id: membershipSubscriptionId, customerId: doc.customerId,
           });
-          if (sub) {
-            membershipApplied = {
-              subscriptionId: sub.id,
-              planName: sub.planName || sub.planSnapshot?.name,
-              type: sub.planSnapshot?.type,
-            };
-            doc.membershipSubscriptionId = sub.id;
-            doc.membershipApplied = membershipApplied;
-            doc.total = 0;         // covered by membership
-            doc.payment = 'membership';
-            doc.priceLine = `Covered by "${membershipApplied.planName}"`;
-            // Fire consumption right after insertOne so we have bookingId.
+          if (!sub) return NextResponse.json({ error: 'membership_not_found' }, { status: 400 });
+
+          // 1. Validate each therapy in the journey against the sub.
+          for (const t of therapySlugs) {
+            const check = await validateForBooking({ subscription: sub, therapySlug: t, branchId, atIso: startIso });
+            if (!check.ok) {
+              return NextResponse.json({
+                error: 'membership_not_eligible', reason: check.reason, therapySlug: t,
+              }, { status: 400 });
+            }
           }
-        } catch (e) { console.error('membership auto-apply failed', e); }
+          // 2. For 'sessions' plans, ensure enough sessions remain for the whole journey.
+          const plan = sub.planSnapshot || {};
+          const needed = therapySlugs.length; // 1 session per therapy
+          if (plan.type === 'sessions' && (sub.sessionsRemaining || 0) < needed) {
+            return NextResponse.json({
+              error: 'membership_insufficient_sessions',
+              have: sub.sessionsRemaining || 0, need: needed,
+            }, { status: 400 });
+          }
+          membershipApplied = {
+            subscriptionId: sub.id,
+            planName: sub.planName || plan.name,
+            type: plan.type,
+            sessionsConsumed: needed,
+          };
+          doc.membershipSubscriptionId = sub.id;
+          doc.membershipApplied = membershipApplied;
+          doc.total = 0;
+          doc.payment = 'membership';
+          doc.priceLine = `Covered by "${membershipApplied.planName}"`;
+        } catch (e) {
+          console.error('membership explicit-apply failed', e);
+          return NextResponse.json({ error: 'membership_apply_error' }, { status: 500 });
+        }
       }
 
       await bookings.insertOne(doc);
 
-      // If membership auto-applied, log the consumption now that we have booking id.
+      // If membership was applied, consume one session per therapy in the journey.
+      // We do this AFTER the booking insert so consumption is only recorded
+      // once we actually own the slot (allocateJourney succeeded above).
       if (membershipApplied) {
         try {
           const { consumeForBooking } = await import('@/lib/memberships');
-          const subDoc = await db.collection('memberSubscriptions').findOne({ id: membershipApplied.subscriptionId });
-          if (subDoc) {
+          // Re-fetch AFTER each consume so sessionsRemaining reflects prior calls.
+          for (const t of therapySlugs) {
+            const subDoc = await db.collection('memberSubscriptions').findOne({ id: membershipApplied.subscriptionId });
+            if (!subDoc) break;
             await consumeForBooking({
               subscription: subDoc,
               bookingId: doc.id,
-              therapySlug: therapySlugs[0],
+              therapySlug: t,
               branchId,
               atIso: startIso || new Date().toISOString(),
             });

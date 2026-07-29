@@ -3892,6 +3892,62 @@ frontend:
       **GROUP 5: Scheduling slots past-time filter (Issue #1) (1/1 PASSED)**
       ✅ 5: GET /api/scheduling/therapy-slots?therapy=salt-therapy&date=2026-07-29 (IST 15:13) → 18 slots returned, all >= now+15min
       
+
+  - agent: "main"
+    message: |
+      Membership-aware Booking Engine SHIPPED
+      
+      NEW ENDPOINT:
+      - GET /api/customer/subscriptions/eligible?therapies=<csv>[&branchId=&atIso=]
+        · Signed-in customer only. Returns subs that cover EVERY selected therapy,
+          are active, within branch scope, and (for `sessions` plans) have
+          enough remaining sessions for the entire journey.
+        · Response shape: { therapies:[], eligible:[{ subscription, perTherapy:[{therapySlug, ok, reason?}], willConsume }] }.
+      
+      UPDATED /api/bookings POST:
+      - Removed the old silent auto-apply behaviour (which used to consume for
+        therapies[0] only — could surprise customers).
+      - Now consumes ONLY when `body.membershipSubscriptionId` is explicitly passed.
+      - Re-validates coverage + sessions server-side (never trusts client).
+      - Consumes ONE session per therapy in the journey (multi-therapy support).
+      - New error codes: 400 membership_not_eligible + reason + therapySlug,
+                         400 membership_insufficient_sessions + have/need.
+      - Sets payment='membership', total=0, priceLine="Covered by <plan>".
+      
+      FRONTEND /app/app/book/BookingClient.jsx:
+      - New state: eligibleMemberships (fetched when customerId + therapies known),
+        selectedMembershipId (customer's explicit choice).
+      - New useEffect refetches eligibility whenever customer / therapies / slot change.
+      - StepContact renders a "Use my membership" section ABOVE the Payment card:
+          · Radio card per eligible sub (plan name, sessions remaining, will use N, FREE badge).
+          · Explicit "Pay normally" opt-out card.
+      - When any membership is selected, the Payment card is hidden and replaced
+        with a "Covered by your membership" panel; submit button reads "Use
+        membership & confirm"; sidebar Total shows FREE.
+      - `submit()` sends `membershipSubscriptionId` + `payment: 'membership'`,
+        skips Razorpay init when membership is applied, and surfaces the new
+        `membership_not_eligible` / `membership_insufficient_sessions` errors.
+      
+      CONFIRMATION PAGE /app/app/book/confirm/[id]/page.js:
+      - Payment row now reads "Membership: <plan name>" when covered.
+      - Total shows FREE (brand color) instead of price.
+      - Adds a callout: "N sessions deducted from '<plan>'".
+      
+      END-TO-END VERIFICATION (via curl + screenshots):
+      1. GET /api/customer/subscriptions/eligible?therapies=float-therapy for Rajesh
+         → returns Float · 4-Session Pack with 4 sessions remaining, willConsume=1. ✅
+      2. GET .../eligible?therapies=salt-therapy (not covered) → eligible=[]. ✅
+      3. POST /api/bookings with membershipSubscriptionId → returns booking,
+         sub sessionsRemaining goes 4 → 3, payment='membership', total=0,
+         membershipApplied stamped, priceLine="Covered by 'Float · 4-Session Pack'". ✅
+      4. POST /api/bookings for salt-therapy with float-only sub → 400
+         membership_not_eligible / therapy_not_covered. ✅
+      5. POST /api/bookings without membershipSubscriptionId → normal flow,
+         payment='online', total=1499, no membership consumed. ✅
+      Screenshots captured: mem_step3 (before selection), mem_selected (after
+         clicking Float · 4-Session Pack — sidebar shows FREE, button reads
+         "Use membership & confirm").
+
       **GROUP 6: Admin calendar API (Issue #9) (2/2 PASSED)**
       ✅ 6A: GET /api/admin/bookings/calendar?from=&to= → returns array with schedule[] populated for journey bookings, flat resourceId/resourceName/startAt for single-therapy bookings
       ✅ 6B: GET /api/admin/resources → returns 6 resources (Float Tank 1, Float Tank 2, Salt Cave, Infrared Sauna, Cold Plunge, Red-light)
