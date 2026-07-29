@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeft, Check, Clock, Infinity as InfinityIcon, Sparkles } from 'lucide-react';
+import { ArrowLeft, Check, Clock, Infinity as InfinityIcon, Sparkles, UserPlus, ShieldCheck } from 'lucide-react';
 import { TopNav, SiteFooter } from '@/components/site/shell';
 import { getDb } from '@/lib/mongo';
+import { getCurrentCustomer } from '@/lib/customer-auth';
 import PurchaseButton from './PurchaseButton';
 
 export async function generateMetadata({ params }) {
@@ -20,7 +21,15 @@ export default async function PlanDetailPage({ params }) {
   if (!doc) notFound();
   const { _id, ...p } = doc;
 
-  const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
+  // Enforce: only signed-in customers can purchase. When missing profile
+  // info (name/email needed for invoice), prompt them to complete it first.
+  const customer = await getCurrentCustomer();
+  const isSignedIn = !!customer;
+  const hasCompleteProfile = isSignedIn && Boolean(customer?.name?.trim()) && Boolean(customer?.email?.trim());
+  const redirectHref = `/account/login?redirect=${encodeURIComponent(`/memberships/${p.slug || p.id}`)}`;
+  const profileHref  = `/account?redirect=${encodeURIComponent(`/memberships/${p.slug || p.id}`)}`;
+
+  const inr = (n) => `\u20B9${Number(n || 0).toLocaleString('en-IN')}`;
 
   return (
     <div className="min-h-screen bg-background">
@@ -78,11 +87,44 @@ export default async function PlanDetailPage({ params }) {
             <div className="mt-1 font-serif text-[36px] leading-none tracking-tight">{inr(p.price)}</div>
             <div className="text-[11.5px] text-muted-foreground mt-1">Includes {p.gstPercent}% GST</div>
             <div className="mt-5">
-              <PurchaseButton plan={{ id: p.id, name: p.name }} />
+              {!isSignedIn && (
+                <>
+                  <Link
+                    href={redirectHref}
+                    className="w-full h-12 px-5 rounded-full bg-foreground text-background text-[14px] font-semibold inline-flex items-center justify-center gap-2 hover:bg-foreground/90 transition-colors"
+                  >
+                    <UserPlus className="h-4 w-4" /> Sign in to purchase
+                  </Link>
+                  <div className="mt-3 flex items-start gap-2 text-[11.5px] text-muted-foreground leading-[1.55]">
+                    <ShieldCheck className="h-3.5 w-3.5 mt-0.5 shrink-0 text-brand" />
+                    <span>Memberships are tied to a registered customer account so we can hold sessions on your record and issue invoices.</span>
+                  </div>
+                </>
+              )}
+
+              {isSignedIn && !hasCompleteProfile && (
+                <>
+                  <Link
+                    href={profileHref}
+                    className="w-full h-12 px-5 rounded-full bg-foreground text-background text-[14px] font-semibold inline-flex items-center justify-center gap-2 hover:bg-foreground/90 transition-colors"
+                  >
+                    Complete your profile to buy
+                  </Link>
+                  <div className="mt-3 text-[11.5px] text-muted-foreground leading-[1.55] text-center">
+                    We need your name and email on file before activating a membership (invoice + confirmation).
+                  </div>
+                </>
+              )}
+
+              {isSignedIn && hasCompleteProfile && (
+                <PurchaseButton plan={{ id: p.id, name: p.name, price: p.price }} />
+              )}
             </div>
-            <div className="mt-3 text-[11.5px] text-muted-foreground leading-[1.55] text-center">
-              Prefer to pay at reception? Just call us — we can activate this offline.
-            </div>
+            {isSignedIn && hasCompleteProfile && (
+              <div className="mt-3 text-[11.5px] text-muted-foreground leading-[1.55] text-center">
+                Prefer to pay at reception? Just call us &mdash; we can activate this offline.
+              </div>
+            )}
           </aside>
         </div>
       </section>

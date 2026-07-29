@@ -190,6 +190,16 @@ async function handle(req, method, segs) {
       const { getCurrentCustomer } = await import('@/lib/customer-auth');
       const customer = await getCurrentCustomer();
       if (!customer) return NextResponse.json({ error: 'not_signed_in' }, { status: 401 });
+      // Memberships tie to an invoice-worthy customer record — require name +
+      // email on file before we activate anything. The customer detail page
+      // shows a "Complete your profile" CTA when this check would fail.
+      const hasProfile = Boolean(customer?.name?.trim()) && Boolean(customer?.email?.trim());
+      if (!hasProfile) {
+        return NextResponse.json({
+          error: 'profile_incomplete',
+          message: 'Please add your name and email to your profile before purchasing a membership.',
+        }, { status: 422 });
+      }
       const body = await req.json().catch(() => ({}));
       if (!body.planId) return NextResponse.json({ error: 'plan_required' }, { status: 400 });
       try {

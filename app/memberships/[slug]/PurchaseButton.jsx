@@ -21,6 +21,14 @@ export default function PurchaseButton({ plan }) {
         window.location.assign('/account/login?redirect=' + encodeURIComponent(window.location.pathname));
         return;
       }
+      if (res.status === 422 && j?.error === 'profile_incomplete') {
+        toast.error(j.message || 'Please complete your profile before purchasing.');
+        // Push the customer to their account to fill in name/email, then bounce back.
+        setTimeout(() => {
+          window.location.assign('/account?redirect=' + encodeURIComponent(window.location.pathname));
+        }, 1500);
+        return;
+      }
       if (!res.ok || !j.ok) throw new Error(j.error || 'purchase_failed');
       const sub = j.subscription;
       if (sub?.status === 'pending_payment') {

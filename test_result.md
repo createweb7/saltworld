@@ -3945,6 +3945,39 @@ frontend:
       5. POST /api/bookings without membershipSubscriptionId → normal flow,
          payment='online', total=1499, no membership consumed. ✅
       Screenshots captured: mem_step3 (before selection), mem_selected (after
+
+  - agent: "main"
+    message: |
+      Membership purchase now GATED to registered customers.
+      
+      Rules (both UI + API enforced):
+      1. Must be signed in.
+      2. Must have BOTH name AND email on the customer record (needed for
+         invoice + confirmation).
+      
+      Files touched:
+      - /app/app/api/[[...path]]/route.js
+        · POST /api/memberships/purchase — added a profile-complete check.
+          Returns 401 not_signed_in when logged out, 422 profile_incomplete
+          when name or email is missing. On success, unchanged.
+      - /app/app/memberships/[slug]/page.js
+        · Server component now calls getCurrentCustomer() and branches:
+          - Not signed in: renders "Sign in to purchase" link with a shield
+            note explaining why (invoicing + record-keeping).
+          - Signed in but no name/email: renders "Complete your profile to
+            buy" link to /account?redirect=<current>.
+          - Fully registered: renders the original PurchaseButton unchanged.
+      - /app/app/memberships/[slug]/PurchaseButton.jsx
+        · New 422 handler — toasts the server message and bounces the user
+          to /account with a redirect back to the plan.
+      
+      Screenshots verified:
+      - mem_anon.png — "Sign in to purchase" + shield rationale ✅
+      - mem_incomplete.png — "Complete your profile to buy" + explanation ✅
+      - mem_complete.png — "Get this plan" (unchanged) ✅
+      
+      Existing membership-aware booking + all prior work UNCHANGED.
+
          clicking Float · 4-Session Pack — sidebar shows FREE, button reads
          "Use membership & confirm").
 
