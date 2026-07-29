@@ -571,6 +571,7 @@ async function handle(req, method, segs) {
         guests:     body.guests     || 1,
         contact:    body.contact    || {},
         customerId: body.customerId || null,
+        bookedForOther: !!body.bookedForOther,
         branchId,
         // Primary (first therapy) — surfaced for calendar row rendering
         resourceId,

@@ -3981,6 +3981,55 @@ frontend:
          clicking Float · 4-Session Pack — sidebar shows FREE, button reads
          "Use membership & confirm").
 
+  - agent: "main"
+    message: |
+      Book-for-self vs Book-for-someone-else toggle SHIPPED
+      
+      Behaviour:
+      - Toggle renders on Step 3 (Confirm) only when we have "self" data
+        available — signed-in customer or query-param prefill. Anonymous
+        walk-ins don't see the toggle (nothing to switch to).
+      - Defaults to "Book for myself" and hydrates name/phone/email from
+        the customer record. Never clobbers what the user already typed.
+      - "Book for someone else" clears the form for fresh guest input and
+        swaps helper labels ("Guest's full name", "Guest's phone", etc.
+        + "Booking confirmation will be sent to the guest.").
+      - Switching back to "Myself" restores the customer's own data instantly.
+        The Other-side entries are cached in a separate state so flipping
+        back to "someone else" also preserves what was typed there.
+      - `bookedForOther: true` is stamped on the POST body → persisted on
+        the booking doc. customerId still points at the booker (paying
+        account) so membership consumption + coupon first-time rules keep
+        applying against the right person.
+      - Confirmation page shows a "This session was booked for <guest>"
+        callout when bookedForOther is true.
+      
+      Files touched:
+      - /app/app/book/BookingClient.jsx
+        · New state: bookingFor, selfContact, otherContact.
+        · New useEffect populates selfContact from /api/customer/me and only
+          hydrates contact when the field is empty.
+        · New switchBookingFor(mode) toggler with round-trip caching.
+        · StepContact renders the toggle + contextual labels/helper text.
+        · submit() sends bookedForOther in the POST body.
+      - /app/app/api/[[...path]]/route.js — bookings POST persists
+        `bookedForOther: !!body.bookedForOther`.
+      - /app/app/book/confirm/[id]/page.js — renders the "booked for guest"
+        callout under the fields block when set.
+      
+      Screenshots (all captured, all clean):
+      - tog_self.png: Book-for-myself selected, form prefilled with
+        Rajesh N / 919986388678 / rajesh@n.com; helper "Your invoice and
+        confirmation will be sent here."
+      - tog_other.png: Book-for-someone-else selected, empty guest fields
+        with placeholder text and "Enter the guest's details" hint.
+      - tog_other_filled.png: Guest details typed in (Ananya Iyer);
+        labels switched to "Guest's full name", "Guest's phone",
+        "Guest's email".
+      - tog_back_self.png: Toggled back to self — Rajesh's data restored,
+        labels reset to standard "Full name / Phone / Email".
+
+
       **GROUP 6: Admin calendar API (Issue #9) (2/2 PASSED)**
       ✅ 6A: GET /api/admin/bookings/calendar?from=&to= → returns array with schedule[] populated for journey bookings, flat resourceId/resourceName/startAt for single-therapy bookings
       ✅ 6B: GET /api/admin/resources → returns 6 resources (Float Tank 1, Float Tank 2, Salt Cave, Infrared Sauna, Cold Plunge, Red-light)

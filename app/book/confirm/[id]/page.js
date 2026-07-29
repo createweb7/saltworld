@@ -93,13 +93,21 @@ export default async function ConfirmPage({ params }) {
             <Field label="Duration"  value={totalTherapyMin ? `${totalTherapyMin} min` : (b.duration || '—')} />
             <Field label="Date"      value={dateFmt} />
             <Field label="Time"      value={b.slotTime} />
-            <Field label="Guest"     value={b.contact?.name} />
+            <Field label={b.bookedForOther ? 'Guest' : 'Guest'} value={b.contact?.name} />
             <Field label="Payment"   value={
               b.payment === 'at-visit'   ? 'At visit (card / UPI)' :
               b.payment === 'membership' ? `Membership: ${b.membershipApplied?.planName || 'Active plan'}` :
               'Online'
             } />
           </div>
+          {b.bookedForOther && (
+            <div className="mt-6 rounded-lg border border-brand/30 bg-brand/5 px-3.5 py-2.5 text-[12.5px] text-foreground flex items-start gap-2.5 leading-6">
+              <Sparkles className="h-3.5 w-3.5 mt-0.5 shrink-0 text-brand" />
+              <span>
+                This session was booked for <span className="font-semibold">{b.contact?.name || 'a guest'}</span>. We&rsquo;ll send confirmation and reminders to their phone/email, and welcome them at reception under this reference.
+              </span>
+            </div>
+          )}
           <div className="mt-8 pt-6 border-t border-border flex items-baseline justify-between">
             <span className="text-[12.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold">Total (est.)</span>
             <span className="font-serif text-[32px] tracking-tight">

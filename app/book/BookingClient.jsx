@@ -721,7 +721,7 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange }) 
 /* Step 4 — Contact & confirm                                         */
 /* ------------------------------------------------------------------ */
 
-function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, customerId, branchId, isStaff = false, isDirectMode = false, eligibleMemberships = [], selectedMembershipId = null, onSelectMembership = () => {} }) {
+function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, customerId, branchId, isStaff = false, isDirectMode = false, eligibleMemberships = [], selectedMembershipId = null, onSelectMembership = () => {}, bookingFor = 'self', onChangeBookingFor = () => {}, showBookingForToggle = false }) {
   const o = getOutcome(outcome);
   const th = o?.protocol?.therapies?.find((x) => x.slug === therapy);
   const isMulti = therapies.length > 1 && slot?.plan?.length > 1;
@@ -761,28 +761,77 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
 
       <div className="mt-8 grid md:grid-cols-2 gap-8">
         <form onSubmit={(e) => { e.preventDefault(); onSubmit(); }} className="space-y-4">
+          {/* Book-for-self / Book-for-others toggle. Only shown when we have
+              known-customer data to fall back on. */}
+          {showBookingForToggle && (
+            <div className="rounded-xl border border-border bg-card p-3.5">
+              <div className="text-[11px] uppercase tracking-[0.16em] font-semibold text-muted-foreground mb-2.5">Who&rsquo;s this booking for?</div>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => onChangeBookingFor('self')}
+                  className={cn(
+                    'h-11 rounded-lg text-[13px] font-medium border transition-colors flex items-center justify-center gap-2',
+                    bookingFor === 'self'
+                      ? 'border-brand bg-brand-soft text-foreground'
+                      : 'border-border hover:bg-muted/40 text-muted-foreground',
+                  )}>
+                  {bookingFor === 'self' && <Check className="h-3.5 w-3.5 text-brand" />}
+                  Book for myself
+                </button>
+                <button type="button" onClick={() => onChangeBookingFor('other')}
+                  className={cn(
+                    'h-11 rounded-lg text-[13px] font-medium border transition-colors flex items-center justify-center gap-2',
+                    bookingFor === 'other'
+                      ? 'border-brand bg-brand-soft text-foreground'
+                      : 'border-border hover:bg-muted/40 text-muted-foreground',
+                  )}>
+                  {bookingFor === 'other' && <Check className="h-3.5 w-3.5 text-brand" />}
+                  Book for someone else
+                </button>
+              </div>
+              {bookingFor === 'other' && (
+                <div className="mt-2.5 text-[11.5px] text-muted-foreground leading-[1.55]">
+                  Enter the guest&rsquo;s details below. We&rsquo;ll send the confirmation to their phone / email &mdash; your account is still the booker of record.
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <label htmlFor="name" className="block text-[12px] font-medium mb-1.5">Full name<span className="text-destructive ml-0.5">*</span></label>
+              <label htmlFor="name" className="block text-[12px] font-medium mb-1.5">
+                {bookingFor === 'other' ? 'Guest\u2019s full name' : 'Full name'}
+                <span className="text-destructive ml-0.5">*</span>
+              </label>
               <input id="name" type="text" required minLength={2}
                 value={contact.name || ''} onChange={(e) => setContact({ ...contact, name: e.target.value })}
+                placeholder={bookingFor === 'other' ? 'e.g. Ananya Iyer' : undefined}
                 className="w-full h-11 px-3.5 rounded-xl border border-border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-brand/40" />
             </div>
             <div>
-              <label htmlFor="phone" className="block text-[12px] font-medium mb-1.5">Phone<span className="text-destructive ml-0.5">*</span></label>
+              <label htmlFor="phone" className="block text-[12px] font-medium mb-1.5">
+                {bookingFor === 'other' ? 'Guest\u2019s phone' : 'Phone'}
+                <span className="text-destructive ml-0.5">*</span>
+              </label>
               <input id="phone" type="tel" required pattern="^[0-9+\-\s]{7,15}$"
                 value={contact.phone || ''} onChange={(e) => setContact({ ...contact, phone: e.target.value })}
-                placeholder="+91 …"
+                placeholder={'+91 \u2026'}
                 className="w-full h-11 px-3.5 rounded-xl border border-border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-brand/40" />
             </div>
           </div>
           <div>
-            <label htmlFor="email" className="block text-[12px] font-medium mb-1.5">Email<span className="text-destructive ml-0.5">*</span></label>
+            <label htmlFor="email" className="block text-[12px] font-medium mb-1.5">
+              {bookingFor === 'other' ? 'Guest\u2019s email' : 'Email'}
+              <span className="text-destructive ml-0.5">*</span>
+            </label>
             <input id="email" type="email" required
               value={contact.email || ''} onChange={(e) => setContact({ ...contact, email: e.target.value })}
               placeholder="you@example.com"
               className="w-full h-11 px-3.5 rounded-xl border border-border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-brand/40" />
-            <div className="mt-1 text-[11px] text-muted-foreground">Your invoice and confirmation will be sent here.</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              {bookingFor === 'other'
+                ? 'Booking confirmation will be sent to the guest.'
+                : 'Your invoice and confirmation will be sent here.'}
+            </div>
           </div>
           <div>
             <label htmlFor="notes" className="block text-[12px] font-medium mb-1.5">Anything we should know? <span className="text-muted-foreground font-normal">(optional)</span></label>
@@ -1133,6 +1182,13 @@ export default function BookingClient({ initialOutcome }) {
   // customer explicitly picks one via the "Use my membership" toggle in Step 3.
   const [eligibleMemberships, setEligibleMemberships] = useState([]); // [{ subscription, willConsume, perTherapy }]
   const [selectedMembershipId, setSelectedMembershipId] = useState(null);
+  // Book-for-self vs book-for-someone-else. When a signed-in / prefilled
+  // customer starts the flow we default to "self" and load their contact.
+  // Switching to "other" keeps the customer's own data cached so we can
+  // instantly restore it — the guest fields start empty for typing.
+  const [bookingFor, setBookingFor] = useState('self');
+  const [selfContact, setSelfContact] = useState({ name: '', phone: '', email: '' });
+  const [otherContact, setOtherContact] = useState({ name: '', phone: '', email: '' });
   const therapy = therapies[0] || null; // convenience alias
 
   // Compute subtotal at component scope so both StepContact (for coupon preview)
@@ -1192,11 +1248,19 @@ export default function BookingClient({ initialOutcome }) {
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (cancelled || !d?.customer) return;
+        const self = {
+          name:  d.customer.name  || '',
+          phone: d.customer.phone || '',
+          email: d.customer.email || '',
+        };
+        setSelfContact(self);
+        // If the guest is still on "self" (default) and the form is empty,
+        // hydrate it. Never clobber a user's own edits.
         setContact((prev) => ({
           ...prev,
-          name:  prev.name  || d.customer.name  || '',
-          phone: prev.phone || d.customer.phone || '',
-          email: prev.email || d.customer.email || '',
+          name:  prev.name  || self.name,
+          phone: prev.phone || self.phone,
+          email: prev.email || self.email,
         }));
         setCustomerId((prev) => prev || d.customer.id || null);
       })
@@ -1287,6 +1351,44 @@ export default function BookingClient({ initialOutcome }) {
   const next = () => setStepIdx((i) => Math.min(i + 1, steps.length - 1));
   const back = () => setStepIdx((i) => Math.max(i - 1, 0));
 
+  // Toggle helper for the Book-for-self / Book-for-others switch.
+  // Preserves whatever the user typed on either side of the toggle so they
+  // don't lose data when flipping back.
+  const switchBookingFor = (mode) => {
+    if (mode === bookingFor) return;
+    if (mode === 'self') {
+      setOtherContact({
+        name:  contact.name  || '',
+        phone: contact.phone || '',
+        email: contact.email || '',
+      });
+      setContact((prev) => ({
+        ...prev,
+        name:  selfContact.name,
+        phone: selfContact.phone,
+        email: selfContact.email,
+      }));
+    } else {
+      setSelfContact((prev) => ({
+        name:  contact.name  || prev.name,
+        phone: contact.phone || prev.phone,
+        email: contact.email || prev.email,
+      }));
+      setContact((prev) => ({
+        ...prev,
+        name:  otherContact.name,
+        phone: otherContact.phone,
+        email: otherContact.email,
+      }));
+    }
+    setBookingFor(mode);
+  };
+
+  // Only surface the toggle when we actually have "self" data available —
+  // otherwise it's meaningless. Signed-in customers or query-param flows both
+  // qualify.
+  const hasSelfData = Boolean(selfContact.name || selfContact.phone || selfContact.email);
+
   const openRazorpay = ({ order, keyId, bookingId, bookingRef, name, contact }) => new Promise((resolve, reject) => {
     if (typeof window === 'undefined' || typeof window.Razorpay === 'undefined') {
       reject(new Error('Payment gateway not ready. Please refresh and try again.'));
@@ -1361,6 +1463,9 @@ export default function BookingClient({ initialOutcome }) {
           total: totalRupees,
           couponCode: (!usingMembership && coupon?.applied) ? coupon.code : null,
           membershipSubscriptionId: usingMembership ? selectedMembershipId : null,
+          // Booked-for-other flag — useful for reception + record-keeping.
+          // customerId still points at the booker/paying account.
+          bookedForOther: bookingFor === 'other',
         }),
       });
       if (r.status === 409) {
@@ -1444,6 +1549,9 @@ export default function BookingClient({ initialOutcome }) {
             eligibleMemberships={eligibleMemberships}
             selectedMembershipId={selectedMembershipId}
             onSelectMembership={setSelectedMembershipId}
+            bookingFor={bookingFor}
+            onChangeBookingFor={switchBookingFor}
+            showBookingForToggle={hasSelfData}
             onPickSuggestion={(s) => {
               setSlot({
                 date: s.date,
