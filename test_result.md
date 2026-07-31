@@ -4239,3 +4239,22 @@ frontend:
       **RECOMMENDATION:**
       All backend endpoints for the 31-JULY-2026 bug batch are working correctly. The only item requiring clarification is the membership eligibility behavior for subscriptions with daily usage limits. If the current behavior (excluding subscriptions that have reached their daily limit) is not desired, please specify the expected behavior and I will flag it for the main agent to implement.
 
+
+
+═══════════════════════════════════════════════════════════════════════════
+### 31-JULY-2026 FOLLOW-UP: Booking sidebar price fix — VERIFIED
+═══════════════════════════════════════════════════════════════════════════
+Fix applied in /app/app/book/BookingClient.jsx (`totalRupees` useMemo):
+  - Sums each selected therapy's `defaultPrice` from /api/therapies
+    (loaded into `therapyMeta` on mount) as the source of truth.
+  - Falls back to outcome-level `pricing.single.price × role multiplier`
+    ONLY when a therapy has no `defaultPrice` set in the admin catalog.
+  - Sidebar `Total (est.)` reads `subtotalInr={totalRupees}` — both the
+    Confirm-step sidebar and the Step-1 "Your session" summary share the
+    same computed value.
+
+Screenshot verification (direct-therapy mode, /book?therapy=float-therapy):
+  ✅ Float Therapy alone → ₹3,000 (matches DB defaultPrice=3000)
+  ✅ Float + Salt Therapy → ₹4,600 (matches 3000+1600 = 4600)
+
+Lint: pass (only 3 unused-eslint-disable warnings, harmless).

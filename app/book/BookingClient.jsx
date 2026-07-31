@@ -1057,7 +1057,7 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
                 ? <span className="text-brand">FREE</span>
                 : coupon?.applied
                   ? <>&#x20B9;{Math.max(0, (Number(subtotalInr) || 0) - (Number(coupon.discountInr) || 0)).toLocaleString('en-IN')}</>
-                  : (o?.pricing?.single?.price || `\u20B9${Number(subtotalInr || 0).toLocaleString('en-IN')}`)}
+                  : <>&#x20B9;{Number(subtotalInr || 0).toLocaleString('en-IN')}</>}
             </span>
           </div>
           {selectedMembershipId && (
