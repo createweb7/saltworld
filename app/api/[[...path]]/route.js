@@ -285,6 +285,15 @@ async function handle(req, method, segs) {
         return NextResponse.json({ ok: true, subscription: after });
       } catch (e) { return NextResponse.json({ error: e.message || 'freeze_failed' }, { status: 400 }); }
     }
+    if (sid && segs[3] === 'unfreeze' && method === 'POST') {
+      try {
+        const { unfreezeSubscription } = await import('@/lib/memberships');
+        const sub = await db.collection('memberSubscriptions').findOne({ id: sid, customerId: customer.id });
+        if (!sub) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+        const after = await unfreezeSubscription({ subscriptionId: sid, actorId: customer.id });
+        return NextResponse.json({ ok: true, subscription: after });
+      } catch (e) { return NextResponse.json({ error: e.message || 'unfreeze_failed' }, { status: 400 }); }
+    }
   }
 
   // ------- Public scheduling engine (single source of truth) -------

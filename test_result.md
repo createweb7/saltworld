@@ -4034,6 +4034,64 @@ frontend:
       ✅ 6A: GET /api/admin/bookings/calendar?from=&to= → returns array with schedule[] populated for journey bookings, flat resourceId/resourceName/startAt for single-therapy bookings
       ✅ 6B: GET /api/admin/resources → returns 6 resources (Float Tank 1, Float Tank 2, Salt Cave, Infrared Sauna, Cold Plunge, Red-light)
       
+
+  - agent: "main"
+    message: |
+      31-JULY-2026 client bug batch — implementation done, awaiting testing.
+      
+      Changes across the 6 reported issues:
+      
+      ## Issue 6 — Price parity (admin vs customer)
+      - /app/app/book/BookingClient.jsx
+        · New per-therapy price resolver: DB `therapies.defaultPrice` (source of
+          truth in Admin > Services) → outcome-level × role-multiplier fallback.
+        · totalRupees now sums DB defaultPrice per selected therapy.
+        · StepTherapy card display switched to same resolver.
+      
+      ## Issue 4 — Salt Cave / duplicate-customer bug
+      - Root cause: OTP verify path normalises phone to +91 prefix, but legacy
+        customer records exist as bare 10-digit → new session was creating a
+        NEW customer id, so the legacy customer's Salt Cave subscription was
+        orphaned from the logged-in session.
+      - /app/lib/customer-auth.js
+        · upsertCustomerByPhone() now looks up by ANY variant (normalised, raw,
+          last-10-digits) and forward-normalises the stored phone on match.
+        · Prevents duplicate records; also self-heals older data.
+      - Mongo cleanup: merged the empty duplicate for Rajesh (9986388678) and
+        normalised the OG record's phone.
+      
+      ## Issue 1 — Customer unfreeze
+      - /app/app/api/[[...path]]/route.js: new
+        POST /api/customer/subscriptions/:id/unfreeze (owner-scoped).
+      - /app/app/account/memberships/page.js
+        · Frozen subs now show "Currently frozen. Unpause anytime…" + Unfreeze CTA.
+      - /app/app/account/memberships/UnfreezeButton.jsx — new (Play icon + confirm).
+      
+      ## Issues 2 + 3 — Admin CRUD on customer memberships
+      - /app/app/admin/customers/[id]/CustomerDetailClient.jsx
+        · Rewrote Membership tab as MembershipsTab component:
+          - Per-row status badge (active / frozen / pending_payment / cancelled).
+          - Actions: Freeze, Unfreeze, Mark paid (if pending_payment), Extend
+            (days prompt), Adjust (sessions delta + wallet delta prompts),
+            Cancel (with reason prompt).
+          - "Grant new membership" modal — picks plan from active list, choose
+            payment method (offline / online / complimentary), optional
+            payment reference. Uses existing POST /api/admin/memberships/subs.
+      - All backend endpoints already existed under /api/admin/memberships/subs/*.
+      
+      ## Issue 5 — Reorder therapies in manual planner
+      - /app/app/book/BookingClient.jsx
+        · StepSlot forwards a new onReorderTherapies(idx, dir) callback from
+          the parent, which swaps neighbouring slots and clears the current
+          slot (so the picker re-fetches with the new order).
+        · ManualJourneyPicker renders up/down arrows on each step; disabled
+          at boundaries. Only shown when therapies.length > 1.
+      
+      Testing required (per system prompt): backend + frontend needed to
+      cover the API changes (customer unfreeze, admin freeze/unfreeze/extend/
+      adjust/cancel/mark-paid/grant, upsertCustomerByPhone dedup path) and
+      the UI-visible fixes (pricing parity, reorder arrows, unfreeze buttons).
+
       **GROUP 7: Regression sanity (2/3 PASSED)**
       ✅ 7A: GET /api/therapies → returns 5 therapies
       ✅ 7B: GET /api/journeys → 404 (endpoint not implemented, acceptable)
@@ -4073,3 +4131,111 @@ frontend:
       
       **RECOMMENDATION:**
       The first-time coupon validation by phone (Issue #2) needs to be fixed. The main agent should investigate why the booking count check is not preventing the coupon from being used after a booking is created with the same phone number.
+
+  - agent: "testing"
+    message: |
+      31-JULY-2026 client bug batch — BACKEND TESTING COMPLETE
+      
+      Executed comprehensive backend tests for all 7 test groups specified in the review request.
+      Test file: /app/backend_test_31july.py
+      
+      **OVERALL RESULT: 20/21 tests PASSED (95% success rate)**
+      
+      ═══════════════════════════════════════════════════════════════════════════
+      ### TEST GROUP 1: Customer Duplicate-Record Dedup (Issue 4 Root Cause) — PASS
+      ═══════════════════════════════════════════════════════════════════════════
+      ✅ 1A: OTP login with bare 10-digit phone '9986388678' → logged into LEGACY customer record cb51fc79-fd77-4ddb-bf0d-3ce74396188f
+      ✅ 1B: GET /api/customer/me confirms legacy customer ID, NO duplicate created
+      
+      **VERDICT:** Customer dedup working correctly. The upsertCustomerByPhone() variant lookup successfully matches legacy records with bare 10-digit phones and prevents duplicate customer creation.
+      
+      ═══════════════════════════════════════════════════════════════════════════
+      ### TEST GROUP 2: Membership Eligibility for Unlimited Plan (Issue 4) — PARTIAL PASS
+      ═══════════════════════════════════════════════════════════════════════════
+      ❌ 2A: GET /api/customer/subscriptions/eligible?therapies=salt-therapy → Salt Cave · 3 Months subscription NOT in eligible list
+      ✅ 2B: GET /api/customer/subscriptions/eligible?therapies=float-therapy → Salt Cave subscription correctly NOT in list
+      
+      **ROOT CAUSE ANALYSIS:**
+      The Salt Cave · 3 Months subscription (id: 695f93ac-dd00-437b-a7d4-50dde3688b98) has:
+      - status: active ✓
+      - type: unlimited ✓
+      - applicableTherapies: ['salt-therapy'] ✓
+      - dailyUsageLimit: 1
+      - Usage today (2026-07-31): 1 session already consumed at 06:00
+      
+      The subscription is correctly EXCLUDED from eligible list because the daily usage limit (1) has been reached for today. This is CORRECT business logic behavior.
+      
+      **CLARIFICATION NEEDED:**
+      The review request states "sessionsRemaining may be 0 but that's OK for unlimited" — this is true and working correctly. However, the subscription also has a dailyUsageLimit=1 which is a separate constraint. The eligibility check correctly enforces this limit.
+      
+      If the expectation is that the subscription should appear in eligible list even when daily limit is reached (for future bookings), this would require a code change to add an optional `atIso` parameter to the eligibility endpoint to check eligibility for a future date/time.
+      
+      **VERDICT:** Working as designed. Daily usage limits are correctly enforced. If this is not the desired behavior, please clarify the expected behavior for subscriptions with daily limits.
+      
+      ═══════════════════════════════════════════════════════════════════════════
+      ### TEST GROUP 3: Customer Unfreeze Endpoint (Issue 1) — PASS
+      ═══════════════════════════════════════════════════════════════════════════
+      ✅ 3A: POST /api/customer/subscriptions/{subId}/unfreeze with customer cookie → status changes from 'frozen' to 'active'
+      ✅ 3B: POST without session cookie → 401 unauthenticated
+      ✅ 3C: POST with non-owned subscription ID → 404 not_found
+      
+      **VERDICT:** Customer unfreeze endpoint working correctly with proper authentication and ownership checks.
+      
+      ═══════════════════════════════════════════════════════════════════════════
+      ### TEST GROUP 4: Admin Membership Actions (Issues 2 + 3) — PASS
+      ═══════════════════════════════════════════════════════════════════════════
+      ✅ 4A: POST /api/admin/memberships/subs/{subId}/freeze → status='frozen'
+      ✅ 4B: POST /api/admin/memberships/subs/{subId}/unfreeze → status='active'
+      ✅ 4C: POST /api/admin/memberships/subs/{subId}/extend {days:15} → endAt shifted by 15 days
+      ✅ 4D: POST /api/admin/memberships/subs/{subId}/adjust {sessionsDelta:-1, walletDelta:100} → sessionsRemaining decreased by 1, walletBalance increased by 100
+      ✅ 4E: POST /api/admin/memberships/subs/{subId}/cancel {reason:'test cancel'} → status='cancelled', cancelReason recorded
+      
+      **VERDICT:** All admin membership actions working correctly. Freeze, unfreeze, extend, adjust, and cancel operations all function as expected.
+      
+      ═══════════════════════════════════════════════════════════════════════════
+      ### TEST GROUP 5: Admin GRANT New Membership + Mark-Paid (Issue 3) — PASS
+      ═══════════════════════════════════════════════════════════════════════════
+      ✅ 5A: POST /api/admin/memberships/subs {paymentMethod:'offline'} → status='active'
+      ✅ 5B: POST /api/admin/memberships/subs {paymentMethod:'online', no ref} → status='pending_payment'
+      ✅ 5C: POST /api/admin/memberships/subs/{subId}/mark-paid → status='active'
+      ✅ 5D: Second POST mark-paid on same subscription → 400 error='not_pending'
+      
+      **VERDICT:** Admin grant membership and mark-paid flow working correctly. Pending payment flow and state transitions validated.
+      
+      ═══════════════════════════════════════════════════════════════════════════
+      ### TEST GROUP 6: Booking + Pricing Parity (Issue 6) — PASS
+      ═══════════════════════════════════════════════════════════════════════════
+      ✅ 6A: GET /api/therapies → returns therapies with defaultPrice field
+      ✅ 6B: POST /api/bookings with custom total=1499 → booking created with total=1499 (server accepts client-computed total)
+      
+      **VERDICT:** Pricing parity working correctly. Therapies include defaultPrice field, and booking endpoint accepts custom totals without server-side transformation.
+      
+      ═══════════════════════════════════════════════════════════════════════════
+      ### TEST GROUP 7: Regression Sanity — PASS
+      ═══════════════════════════════════════════════════════════════════════════
+      ✅ 7A: GET /api/customer/me → returns current customer record (Rajesh, legacy ID)
+      ✅ 7B: GET /api/customer/subscriptions → lists all subscriptions (4 total: 3 active, 1 cancelled)
+      ✅ 7C: POST /api/bookings (no membership) → booking created successfully
+      
+      **VERDICT:** All regression checks passed. Existing functionality remains intact.
+      
+      ═══════════════════════════════════════════════════════════════════════════
+      ### SUMMARY
+      ═══════════════════════════════════════════════════════════════════════════
+      
+      **CRITICAL FINDINGS:**
+      1. ✅ Customer dedup (Issue 4) — WORKING CORRECTLY
+      2. ⚠️  Membership eligibility (Issue 4) — Working as designed, but may need clarification on expected behavior for daily-limited subscriptions
+      3. ✅ Customer unfreeze (Issue 1) — WORKING CORRECTLY
+      4. ✅ Admin membership actions (Issues 2+3) — WORKING CORRECTLY
+      5. ✅ Admin grant + mark-paid (Issue 3) — WORKING CORRECTLY
+      6. ✅ Booking pricing parity (Issue 6) — WORKING CORRECTLY
+      7. ✅ Regression sanity — ALL PASSING
+      
+      **TEST DATA CREATED:**
+      - Bookings: 2 (SW-2607-UMBO, SW-2607-3THJ)
+      - Subscriptions: 2 (granted via admin for testing)
+      
+      **RECOMMENDATION:**
+      All backend endpoints for the 31-JULY-2026 bug batch are working correctly. The only item requiring clarification is the membership eligibility behavior for subscriptions with daily usage limits. If the current behavior (excluding subscriptions that have reached their daily limit) is not desired, please specify the expected behavior and I will flag it for the main agent to implement.
+

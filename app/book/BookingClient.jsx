@@ -6,7 +6,7 @@ import Script from 'next/script';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, ArrowRight, Check, Loader2, Clock, Calendar as Cal,
-  MapPin, Phone, MessageCircle, Sparkles,
+  MapPin, Phone, MessageCircle, Sparkles, ChevronUp, ChevronDown,
 } from 'lucide-react';
 import { cn } from '@/components/ss/utils';
 import { Wordmark } from '@/components/site/shell';
@@ -160,6 +160,15 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
 
   // Resolve the true duration for a therapy: static override > DB meta > outcome-level fallback.
   const durationFor = (t) => t.durationMin || therapyMeta[t.slug]?.durationMin || baseDuration;
+  // Resolve price: DB `defaultPrice` (source of truth in admin Services) →
+  // outcome-level rate × role-multiplier fallback.
+  const priceFor = (t) => {
+    const dbp = Number(therapyMeta[t.slug]?.defaultPrice) || 0;
+    if (dbp > 0) return dbp;
+    const role = String(t.role || '').toLowerCase();
+    const mult = PRICE_MULTIPLIER[role] ?? 0.5;
+    return Math.round(basePrice * mult);
+  };
 
   const toggle = (slug) => {
     const set = new Set(values);
@@ -175,11 +184,7 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
   // Live journey recalc
   const selected = therapies.filter((t) => values.includes(t.slug));
   const combinedDuration = selected.reduce((sum, t) => sum + durationFor(t), 0) || baseDuration;
-  const combinedPrice    = selected.reduce((sum, t) => {
-    const role = String(t.role || '').toLowerCase();
-    const mult = PRICE_MULTIPLIER[role] ?? 0.5;
-    return sum + Math.round(basePrice * mult);
-  }, 0) || basePrice;
+  const combinedPrice    = selected.reduce((sum, t) => sum + priceFor(t), 0) || basePrice;
   const journeyLabel = selected.length === 1
     ? selected[0].label
     : `${selected.length}-therapy ${o?.title?.toLowerCase() || 'wellness'} journey`;
@@ -338,7 +343,7 @@ function fmtVisit(mins) {
   return `${mins}m`;
 }
 
-function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSessionMode }) {
+function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSessionMode, onReorderTherapies }) {
   const days = useMemo(() => {
     const start = new Date(); start.setHours(0,0,0,0);
     return Array.from({ length: 7 }).map((_, i) => {
@@ -486,7 +491,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
       )}
 
       {!loading && mode === 'manual' && (
-        <ManualJourneyPicker therapies={therapies} therapyMeta={therapyMeta} date={date} value={value} onChange={onChange} />
+        <ManualJourneyPicker therapies={therapies} therapyMeta={therapyMeta} date={date} value={value} onChange={onChange} onReorder={onReorderTherapies} />
       )}
     </div>
   );
@@ -568,7 +573,7 @@ function AutoJourneyPicker({ journeyData, date, therapyMeta, value, onChange }) 
 }
 
 /* Manual mode — one card per therapy, downstream cards filter by prior pick. */
-function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange }) {
+function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, onReorder }) {
   // picks[i] = { time, startIso, endIso, planEntry } for therapy i, or undefined
   const [picks, setPicks] = useState(() => value?.plan
     ? value.plan.map((p) => ({ time: p.from ? new Date(new Date(p.from).getTime() + 330*60000).toISOString().slice(11,16) : null, startIso: p.from, endIso: p.to }))
@@ -669,10 +674,27 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange }) 
                   picks[i]?.time ? 'bg-brand text-white' : 'bg-muted text-muted-foreground')}>{i + 1}</div>
                 <div>
                   <div className="text-[15px] font-medium">{meta.name}</div>
-                  <div className="text-[11.5px] text-muted-foreground">{meta.durationMin} min{cutoff && !locked && <span> · earliest {cutoff}</span>}</div>
+                  <div className="text-[11.5px] text-muted-foreground">{meta.durationMin} min{cutoff && !locked && <span> &middot; earliest {cutoff}</span>}</div>
                 </div>
               </div>
-              {picks[i]?.time && <div className="font-mono text-[13px] font-semibold px-3 h-8 rounded-full bg-brand/10 text-brand inline-flex items-center">{picks[i].time}</div>}
+              <div className="flex items-center gap-2">
+                {/* Reorder controls — only makes sense when there's >1 therapy. */}
+                {onReorder && therapies.length > 1 && (
+                  <div className="inline-flex items-center rounded-md border border-border overflow-hidden">
+                    <button type="button" title="Move up" disabled={i === 0}
+                      onClick={() => onReorder(i, -1)}
+                      className="h-7 w-7 flex items-center justify-center hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed">
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    </button>
+                    <button type="button" title="Move down" disabled={i === therapies.length - 1}
+                      onClick={() => onReorder(i, +1)}
+                      className="h-7 w-7 flex items-center justify-center hover:bg-muted border-l border-border disabled:opacity-30 disabled:cursor-not-allowed">
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+                {picks[i]?.time && <div className="font-mono text-[13px] font-semibold px-3 h-8 rounded-full bg-brand/10 text-brand inline-flex items-center">{picks[i].time}</div>}
+              </div>
             </div>
             {locked && (
               <div className="text-[12.5px] text-muted-foreground italic">Pick {therapyMeta[therapies[i-1]]?.name || 'previous therapy'} time first.</div>
@@ -1198,14 +1220,20 @@ export default function BookingClient({ initialOutcome }) {
     const staticTherapies = o?.protocol?.therapies || [];
     const merged = (outcomeMap?.therapies?.length ? outcomeMap.therapies : staticTherapies);
     const selected = merged.filter((t) => therapies.includes(t.slug));
+    // Per-therapy price from the admin Services catalog (defaultPrice on the
+    // therapy doc) is the SOURCE OF TRUTH — matches what admin sees. Fall
+    // back to the outcome-level rate × role-multiplier only when the therapy
+    // hasn't been priced in the catalog yet.
     const basePrice = parsePrice(o?.pricing?.single?.price);
     const sum = selected.reduce((s, t) => {
+      const dbPrice = Number(therapyMeta[t.slug]?.defaultPrice) || 0;
+      if (dbPrice > 0) return s + dbPrice;
       const role = String(t.role || '').toLowerCase();
       const mult = PRICE_MULTIPLIER[role] ?? 0.5;
       return s + Math.round(basePrice * mult);
     }, 0);
     return sum || basePrice || 0;
-  }, [outcome, outcomeMap, therapies]);
+  }, [outcome, outcomeMap, therapies, therapyMeta]);
 
   // Load therapy metadata once (for the journey summary in step 3).
   useEffect(() => {
@@ -1530,7 +1558,18 @@ export default function BookingClient({ initialOutcome }) {
       <main className="max-w-[1200px] mx-auto px-4 md:px-8 pt-10 md:pt-14 pb-28 md:pb-16">
         {stepId === 'outcome' && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); }} />}
         {stepId === 'therapy' && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} therapyMeta={therapyMeta} isDirectMode={isDirectTherapyMode} />}
-        {stepId === 'slot'    && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode} setSessionMode={setSessionMode} />}
+        {stepId === 'slot'    && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode} setSessionMode={setSessionMode}
+          onReorderTherapies={(idx, dir) => {
+            const arr = [...therapies];
+            const j = idx + dir;
+            if (j < 0 || j >= arr.length) return;
+            [arr[idx], arr[j]] = [arr[j], arr[idx]];
+            setTherapies(arr);
+            // Any auto/manual picks are now stale — reset so the fresh order
+            // triggers a slot re-fetch cleanly.
+            setSlot(null);
+          }}
+        />}
         {stepId === 'contact' && (
           <StepContact
             outcome={outcome} therapy={therapy} slot={slot}

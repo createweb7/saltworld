@@ -5,6 +5,7 @@ import { getCurrentCustomer } from '@/lib/customer-auth';
 import { getDb } from '@/lib/mongo';
 import { TopNav, SiteFooter } from '@/components/site/shell';
 import FreezeButton from './FreezeButton';
+import UnfreezeButton from './UnfreezeButton';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Memberships \u00b7 Salt World' };
@@ -141,9 +142,15 @@ function MembershipCard({ s, muted }) {
       )}
 
       {s.status === 'active' && plan.freezeAllowed && !muted && (
-        <div className="mt-4 pt-4 border-t border-border flex items-center justify-between">
+        <div className="mt-4 pt-4 border-t border-border flex items-center justify-between gap-3 flex-wrap">
           <div className="text-[11.5px] text-muted-foreground">Away for a while? Freeze and unpause when you return.</div>
           <FreezeButton subscriptionId={s.id} />
+        </div>
+      )}
+      {s.status === 'frozen' && (
+        <div className="mt-4 pt-4 border-t border-border flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-[11.5px] text-muted-foreground">Currently frozen. Unpause anytime to start booking sessions again.</div>
+          <UnfreezeButton subscriptionId={s.id} />
         </div>
       )}
     </div>

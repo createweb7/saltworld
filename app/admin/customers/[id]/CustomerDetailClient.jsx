@@ -7,7 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   ArrowLeft, Mail, Phone, MessageCircle, Wallet, Calendar,
-  FileText, Heart, Loader2, Save, Plus,
+  FileText, Heart, Loader2, Save, Plus, Snowflake, Play, X, Sliders, CalendarPlus, CreditCard,
 } from 'lucide-react';
 import AdminShell, { PageHeader, AdminSection } from '@/components/admin/shell';
 import { cn } from '@/components/ss/utils';
@@ -135,7 +135,7 @@ export default function CustomerDetailClient({ user, id }) {
           <AdminSection>
             {tab === 'overview' && <OverviewTab customer={c} qc={qc} />}
             {tab === 'visits'   && <VisitsTab visits={data.visits} />}
-            {tab === 'membership' && <ListTab items={data.subscriptions} empty="No membership yet." render={(s) => <div className="flex items-center justify-between"><div><div className="text-[13px] font-medium">{s.membershipId}</div><div className="text-[11px] text-muted-foreground">Started {new Date(s.startAt).toLocaleDateString()}</div></div><span className="text-[11px] uppercase tracking-[0.12em] font-semibold">{s.status}</span></div>} />}
+            {tab === 'membership' && <MembershipsTab subs={data.subscriptions} customerId={id} qc={qc} />}
             {tab === 'wallet'    && <WalletTab customerId={id} qc={qc} />}
             {tab === 'giftcards' && <ListTab items={data.giftcards} empty="No gift cards received or purchased." render={(g) => <div className="flex items-center justify-between"><div><div className="text-[13px] font-mono">{g.code}</div><div className="text-[11px] text-muted-foreground">Balance ₹{(g.balance||g.amount).toLocaleString('en-IN')}</div></div><span className="text-[11px] uppercase tracking-[0.12em] font-semibold">{g.status}</span></div>} />}
             {tab === 'invoices'  && <ListTab items={data.invoices} empty="No invoices yet." render={(i) => <div className="flex items-center justify-between"><div><div className="text-[13px] font-mono">{i.number}</div><div className="text-[11px] text-muted-foreground">{new Date(i.createdAt).toLocaleDateString()}</div></div><div className="text-[13px] font-medium">₹{(i.total||0).toLocaleString('en-IN')}</div></div>} />}
@@ -429,3 +429,214 @@ function WalletAdjustDialog({ customerId, onClose, onSaved }) {
     </div>
   );
 }
+
+/* ================================================================
+ * MembershipsTab — full admin CRUD on a customer's subscriptions.
+ *   · Freeze / Unfreeze  · Extend (days)  · Adjust sessions/wallet
+ *   · Cancel             · Mark paid      · Grant new plan
+ * All endpoints already exist under /api/admin/memberships/subs/*.
+ * ================================================================ */
+function MembershipsTab({ subs = [], customerId, qc }) {
+  const [granting, setGranting] = useState(false);
+  const plans = useQuery({ queryKey: ['admin-membership-plans'], queryFn: async () => (await fetch('/api/admin/memberships')).json() });
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground font-semibold">Memberships</div>
+          <div className="text-[12.5px] text-muted-foreground">{subs.length} subscription{subs.length === 1 ? '' : 's'} on record</div>
+        </div>
+        <button onClick={() => setGranting(true)}
+          className="h-8 px-3 rounded-md bg-foreground text-background text-[12.5px] font-medium inline-flex items-center gap-1.5 hover:bg-foreground/90">
+          <Plus className="h-3.5 w-3.5" /> Grant new membership
+        </button>
+      </div>
+      {subs.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border bg-card p-8 text-center text-[12.5px] text-muted-foreground">
+          No membership on this customer yet. Grant one to begin holding sessions on their record.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {subs.map((s) => <SubscriptionRow key={s.id} sub={s} customerId={customerId} qc={qc} />)}
+        </div>
+      )}
+      {granting && (
+        <GrantMembershipModal
+          customerId={customerId}
+          plans={plans.data || []}
+          onClose={() => setGranting(false)}
+          onGranted={() => { setGranting(false); qc.invalidateQueries({ queryKey: ['admin-customer', customerId] }); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function SubscriptionRow({ sub, customerId, qc }) {
+  const [busy, setBusy] = useState(null);
+  const plan = sub.planSnapshot || {};
+  const badgeCls =
+    sub.status === 'active'          ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+  : sub.status === 'frozen'          ? 'bg-blue-500/10 text-blue-700 dark:text-blue-400'
+  : sub.status === 'pending_payment' ? 'bg-amber-500/15 text-amber-800 dark:text-amber-300'
+  : 'bg-muted text-muted-foreground';
+
+  const call = async (action, body = {}) => {
+    setBusy(action);
+    try {
+      const res = await fetch(`/api/admin/memberships/subs/${sub.id}/${action}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || 'failed');
+      toast.success(`Membership ${action.replace('-', ' ')}\u2019d.`);
+      qc.invalidateQueries({ queryKey: ['admin-customer', customerId] });
+    } catch (e) {
+      toast.error(`Could not ${action}: ${e.message || 'error'}`);
+    } finally { setBusy(null); }
+  };
+
+  const daysLeft = Math.max(0, Math.ceil((new Date(sub.endAt) - Date.now()) / (1000 * 60 * 60 * 24)));
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <div className="text-[14px] font-semibold truncate">{sub.planName || plan.name || 'Membership'}</div>
+            <span className={cn('inline-flex items-center h-5 px-2 rounded-full text-[10px] font-semibold uppercase tracking-[0.12em]', badgeCls)}>
+              {sub.status === 'pending_payment' ? 'Payment pending' : sub.status}
+            </span>
+          </div>
+          <div className="text-[11.5px] text-muted-foreground mt-1">
+            {plan.type === 'sessions' && <>{sub.sessionsRemaining || 0} of {sub.sessionsIncluded || 0} sessions &middot; </>}
+            Started {new Date(sub.startAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+            {' \u00b7 '}
+            ends {new Date(sub.endAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+            {sub.status === 'active' && <> ({daysLeft} days)</>}
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 pt-3 border-t border-border flex flex-wrap items-center gap-2">
+        {sub.status === 'active' && (
+          <ActionBtn icon={Snowflake} label="Freeze" busy={busy === 'freeze'}
+            onClick={() => { const r = prompt('Reason (optional):') || ''; call('freeze', { reason: r }); }} />
+        )}
+        {sub.status === 'frozen' && (
+          <ActionBtn icon={Play} label="Unfreeze" busy={busy === 'unfreeze'}
+            onClick={() => call('unfreeze')} tone="brand" />
+        )}
+        {sub.status === 'pending_payment' && (
+          <ActionBtn icon={CreditCard} label="Mark paid" busy={busy === 'mark-paid'}
+            onClick={() => { const r = prompt('Payment reference (razorpay id / receipt no):') || ''; call('mark-paid', { paymentRef: r, method: 'offline' }); }} tone="brand" />
+        )}
+        {(sub.status === 'active' || sub.status === 'frozen') && (
+          <>
+            <ActionBtn icon={CalendarPlus} label="Extend" busy={busy === 'extend'}
+              onClick={() => { const d = Number(prompt('Extend by how many days?', '30')); if (d > 0) call('extend', { days: d, note: 'admin extension' }); }} />
+            <ActionBtn icon={Sliders} label="Adjust" busy={busy === 'adjust'}
+              onClick={() => {
+                const sd = Number(prompt('Adjust sessions by (positive to add, negative to remove):', '0'));
+                const wd = Number(prompt('Adjust wallet balance by (INR):', '0'));
+                if (sd || wd) call('adjust', { sessionsDelta: sd || 0, walletDelta: wd || 0, note: 'admin adjustment' });
+              }} />
+            <ActionBtn icon={X} label="Cancel" busy={busy === 'cancel'} tone="danger"
+              onClick={() => { if (!confirm('Cancel this membership? This cannot be undone.')) return; const r = prompt('Reason:') || 'admin cancellation'; call('cancel', { reason: r }); }} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ActionBtn({ icon: Icon, label, busy, onClick, tone = 'default' }) {
+  const cls =
+    tone === 'brand'   ? 'border-brand bg-brand text-white hover:bg-brand/90' :
+    tone === 'danger'  ? 'border-red-500/60 text-red-700 dark:text-red-400 hover:bg-red-500/10' :
+                          'border-border hover:bg-muted';
+  return (
+    <button onClick={onClick} disabled={busy}
+      className={cn('h-8 px-2.5 rounded-md border text-[11.5px] font-medium inline-flex items-center gap-1.5 disabled:opacity-60', cls)}>
+      {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Icon className="h-3 w-3" />}
+      {label}
+    </button>
+  );
+}
+
+function GrantMembershipModal({ customerId, plans, onClose, onGranted }) {
+  const [planId, setPlanId] = useState('');
+  const [method, setMethod] = useState('offline'); // offline, complimentary, online
+  const [paymentRef, setPaymentRef] = useState('');
+  const [busy, setBusy] = useState(false);
+  const chosen = plans.find((p) => p.id === planId);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!planId) return;
+    setBusy(true);
+    try {
+      const res = await fetch('/api/admin/memberships/subs', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customerId, membershipId: planId, paymentMethod: method, paymentRef: paymentRef || null }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || 'failed');
+      toast.success(`Granted ${chosen?.name || 'membership'}.`);
+      onGranted();
+    } catch (e) {
+      toast.error('Could not grant: ' + (e.message || 'error'));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl bg-background border border-border p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <div className="font-serif text-[20px] leading-tight">Grant new membership</div>
+            <div className="text-[11.5px] text-muted-foreground mt-1">Add a plan directly to this customer&rsquo;s record.</div>
+          </div>
+          <button onClick={onClose} className="h-8 w-8 rounded-md hover:bg-muted flex items-center justify-center"><X className="h-4 w-4" /></button>
+        </div>
+        <form onSubmit={submit} className="space-y-3">
+          <div>
+            <label className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground font-semibold">Plan</label>
+            <select value={planId} onChange={(e) => setPlanId(e.target.value)} required
+              className="mt-1 w-full h-10 px-3 rounded-md border border-border bg-background text-[13px]">
+              <option value="">Choose a plan\u2026</option>
+              {plans.filter((p) => p.active !== false).map((p) => (
+                <option key={p.id} value={p.id}>{p.name} \u2014 &#8377;{Number(p.price || 0).toLocaleString('en-IN')}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground font-semibold">Payment method</label>
+            <select value={method} onChange={(e) => setMethod(e.target.value)}
+              className="mt-1 w-full h-10 px-3 rounded-md border border-border bg-background text-[13px]">
+              <option value="offline">Offline (cash / UPI at reception)</option>
+              <option value="online">Online (Razorpay reference)</option>
+              <option value="complimentary">Complimentary</option>
+            </select>
+          </div>
+          {(method === 'online' || method === 'offline') && (
+            <div>
+              <label className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground font-semibold">Payment reference (optional)</label>
+              <input value={paymentRef} onChange={(e) => setPaymentRef(e.target.value)} placeholder="e.g. razorpay_payment_id / receipt no"
+                className="mt-1 w-full h-10 px-3 rounded-md border border-border bg-background text-[13px]" />
+            </div>
+          )}
+          <div className="pt-2 flex items-center justify-end gap-2">
+            <button type="button" onClick={onClose} className="h-9 px-3 rounded-md border border-border text-[12.5px]">Cancel</button>
+            <button type="submit" disabled={!planId || busy}
+              className="h-9 px-3.5 rounded-md bg-foreground text-background text-[12.5px] font-medium inline-flex items-center gap-1.5 disabled:opacity-60">
+              {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+              Grant plan
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
