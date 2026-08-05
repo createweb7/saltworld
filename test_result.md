@@ -4258,3 +4258,69 @@ Screenshot verification (direct-therapy mode, /book?therapy=float-therapy):
   ✅ Float + Salt Therapy → ₹4,600 (matches 3000+1600 = 4600)
 
 Lint: pass (only 3 unused-eslint-disable warnings, harmless).
+
+
+═══════════════════════════════════════════════════════════════════════════
+### 05-AUG-2026 · Phase A: Unified Pricing Engine + Resource Scheduling v2
+═══════════════════════════════════════════════════════════════════════════
+
+**NEW BACKEND FILES:**
+- /app/lib/pricing.js — Central pricing engine with `computeQuote()` and `commitQuoteSideEffects()`.
+  Discount stack order (user confirmed): Membership → Wallet → Coupon → GiftCard.
+  Pure calculator; caller commits side effects after booking insert.
+
+**NEW BACKEND ENDPOINT:**
+- POST /api/pricing/quote — Real-time quote calculator used by BookingClient sidebar.
+  Body: { therapies:[{slug}], customerId?, phone?, branchId?, atIso?,
+          membershipSubscriptionId?, walletUseInr?, couponCode?, giftCardCode?, giftCardPin? }
+  Returns: { lines[], baseSubtotalInr, discounts:{membership,wallet,coupon,giftCard},
+             payableInr, currency, errors[] }
+
+**MODIFIED BACKEND — POST /api/bookings:**
+- Now calls computeQuote() for ALL bookings with therapies (server = source of truth).
+- Persists doc.pricingBreakdown with full quote lines + discounts.
+- Accepts NEW body params: walletUseInr, giftCardCode, giftCardPin (in addition to
+  existing couponCode, membershipSubscriptionId).
+- Removed duplicate coupon + membership blocks — they are now consolidated in the engine.
+- After booking insert, calls commitQuoteSideEffects() which:
+  - Debits wallet (postTransaction BOOKING_REDEEM)
+  - Debits gift card balance (updates giftcards collection)
+  - Records coupon redemption (recordRedemption)
+- Payment method auto-set: 'membership' if fully covered by sub, 'wallet' if fully paid
+  from wallet balance, else respects body.payment.
+
+**MODIFIED FRONTEND — /app/app/book/BookingClient.jsx:**
+- Added state: walletUseInr, walletAvailableInr, giftCardCode, giftCardPin, giftCardApplied, quote.
+- New useEffect fetches /api/customer/wallet on customer sign-in to populate available balance.
+- New debounced useEffect (300ms) fetches /api/pricing/quote whenever any input changes.
+- StepContact sidebar now shows:
+  · Wallet redeem input (visible only if walletAvailableInr > 0 and no membership applied)
+  · Gift card code + PIN inputs (visible unless membership applied)
+  · Full itemised breakdown: Subtotal, Membership, Wallet, Coupon, Gift Card, Total (est.)
+- submit() now includes walletUseInr, giftCardCode, giftCardPin in the POST body.
+- Razorpay amount uses server-computed doc.total (never trust client after wallet/giftcard).
+
+**RESOURCE SCHEDULING v2 (P7):**
+- Audit result: /app/lib/scheduling.js already reads preBufferMin, postBufferMin,
+  cleaningBufferMin, durationMin from therapy docs dynamically. Admin Services UI
+  (/admin/services) already exposes these fields for editing. Resources collection
+  supports capacity, branchId, type, therapySlug, supportedModes. Working hours
+  live on branches (per weekday). No hardcoded durations remain in the booking flow.
+- Verdict: P7 requirements already met by existing infrastructure.
+
+**LINT:** All files clean. Only 3 harmless unused-eslint-disable warnings pre-existing.
+
+**SCREENSHOT VERIFIED:**
+- Guest checkout at /book?therapy=float-therapy shows sidebar with Subtotal ₹3,000,
+  Coupon input, Gift Card input, Total (est.) ₹3,000. All connected to server engine.
+
+**NEEDS TESTING (BACKEND):**
+- POST /api/pricing/quote with various inputs (base, coupon, membership, wallet, giftcard).
+- POST /api/bookings with walletUseInr + giftCardCode combinations to verify:
+  1. Correct discount stacking order (membership → wallet → coupon → gift card).
+  2. Wallet debit posted to wallet_transactions.
+  3. Gift card balance decremented and status flipped when depleted.
+  4. Coupon redemption still recorded.
+  5. Membership sessions still consumed correctly.
+  6. Payable never below 0.
+  7. doc.pricingBreakdown persisted with all lines + discounts.

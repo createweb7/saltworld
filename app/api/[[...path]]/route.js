@@ -128,6 +128,31 @@ async function handle(req, method, segs) {
     }
   }
 
+  // ------- Unified Pricing Engine — POST /api/pricing/quote -------
+  // Body: { therapies:[{slug}], customerId?, phone?, branchId?, atIso?,
+  //         membershipSubscriptionId?, walletUseInr?, couponCode?,
+  //         giftCardCode?, giftCardPin? }
+  // Returns { lines, baseSubtotalInr, discounts:{membership,wallet,coupon,giftCard},
+  //           payableInr, currency, errors[] }
+  // Pure calculator — no DB writes. Safe to call as often as needed.
+  if (segs[0] === 'pricing' && segs[1] === 'quote' && method === 'POST') {
+    const body = await req.json().catch(() => ({}));
+    const { computeQuote } = await import('@/lib/pricing');
+    const quote = await computeQuote({
+      therapies:  Array.isArray(body.therapies) ? body.therapies : [],
+      customerId: body.customerId || null,
+      phone:      body.phone      || null,
+      branchId:   body.branchId   || null,
+      atIso:      body.atIso      || null,
+      membershipSubscriptionId: body.membershipSubscriptionId || null,
+      walletUseInr:             Number(body.walletUseInr) || 0,
+      couponCode:               body.couponCode  || null,
+      giftCardCode:             body.giftCardCode|| null,
+      giftCardPin:              body.giftCardPin || null,
+    });
+    return NextResponse.json(quote);
+  }
+
   // ------- Coupons (validate at checkout) -------
   if (segs[0] === 'coupons' && segs[1] === 'validate' && method === 'POST') {
     const body = await req.json().catch(() => ({}));
@@ -592,6 +617,8 @@ async function handle(req, method, segs) {
         payment:    body.payment    || 'at-visit',
         priceLine:  body.priceLine  || null,
         total:      body.total      || 0,
+        // Pricing engine breakdown — populated below
+        pricingBreakdown: null,
         // Coupon fields (populated below if a valid coupon is supplied)
         couponCode:      null,
         couponId:        null,
@@ -600,106 +627,92 @@ async function handle(req, method, segs) {
         createdAt:  now.toISOString(),
       };
 
-      // Coupon apply — validated server-side to prevent client tampering.
-      const inputCouponCode = String(body.couponCode || '').trim().toUpperCase();
-      let couponResult = null;
-      if (inputCouponCode) {
-        try {
-          const { getByCode, validateCoupon } = await import('@/lib/coupons');
-          const coupon = await getByCode(inputCouponCode);
-          if (coupon) {
-            // Same normalized customerId-OR-phone check as /api/coupons/validate.
-            const phones = new Set();
-            const addPhone = (p) => {
-              if (!p) return;
-              const raw = String(p).trim();
-              if (raw) phones.add(raw);
-              const digits = raw.replace(/\D/g, '');
-              if (digits) phones.add(digits);
-              if (digits.length > 10) phones.add(digits.slice(-10));
-            };
-            addPhone(doc.contact?.phone);
-            if (doc.customerId) {
-              const cust = await db.collection('customers').findOne({ id: doc.customerId }, { projection: { phone: 1 } });
-              if (cust?.phone) addPhone(cust.phone);
-            }
-            const or = [];
-            if (doc.customerId) or.push({ customerId: doc.customerId });
-            if (phones.size > 0) or.push({ 'contact.phone': { $in: [...phones] } });
-            const customerBookingsCount = or.length > 0
-              ? await db.collection('bookings').countDocuments({ $or: or, status: { $nin: ['cancelled'] } })
-              : 0;
-            const r = await validateCoupon(coupon, {
-              subtotalInr: Number(doc.total) || 0,
-              therapies:   therapySlugs,
-              branchId:    doc.branchId,
-              customerId:  doc.customerId,
-              customerBookingsCount,
-            });
-            if (r.ok) {
-              couponResult = { couponId: coupon.id, code: coupon.code, discountInr: r.discountInr };
-              doc.couponCode     = coupon.code;
-              doc.couponId       = coupon.id;
-              doc.couponDiscount = r.discountInr;
-              doc.total          = Math.max(0, (Number(doc.total) || 0) - r.discountInr);
-            }
-          }
-        } catch (e) { console.error('coupon apply failed', e); }
-      }
-
-      // Membership — explicit opt-in via body.membershipSubscriptionId.
-      // The frontend surfaces a "Use my membership" toggle in Step 3; when
-      // enabled it sends the subscription id here. We re-validate coverage
-      // + sessions + branch server-side (never trust the client), then
-      // consume `therapies.length` sessions in one shot.
+      // -----------------------------------------------------------------
+      // UNIFIED PRICING ENGINE — single source of truth for booking totals
+      // Order: Membership → Wallet → Coupon → GiftCard (rules confirmed 05-Aug-2026)
+      // -----------------------------------------------------------------
+      let quote = null;
       let membershipApplied = null;
-      const membershipSubscriptionId = body.membershipSubscriptionId
-        ? String(body.membershipSubscriptionId).trim()
-        : null;
-      if (membershipSubscriptionId && doc.customerId && therapySlugs.length > 0) {
+      if (therapySlugs.length > 0) {
         try {
-          const { validateForBooking } = await import('@/lib/memberships');
-          const sub = await db.collection('memberSubscriptions').findOne({
-            id: membershipSubscriptionId, customerId: doc.customerId,
+          const { computeQuote } = await import('@/lib/pricing');
+          quote = await computeQuote({
+            therapies:  therapySlugs.map((slug) => ({ slug })),
+            customerId: doc.customerId,
+            phone:      doc.contact?.phone || null,
+            branchId,
+            atIso:      startIso,
+            membershipSubscriptionId: body.membershipSubscriptionId || null,
+            walletUseInr:             Number(body.walletUseInr) || 0,
+            couponCode:               body.couponCode  || null,
+            giftCardCode:             body.giftCardCode|| null,
+            giftCardPin:              body.giftCardPin || null,
           });
-          if (!sub) return NextResponse.json({ error: 'membership_not_found' }, { status: 400 });
 
-          // 1. Validate each therapy in the journey against the sub.
-          for (const t of therapySlugs) {
-            const check = await validateForBooking({ subscription: sub, therapySlug: t, branchId, atIso: startIso });
-            if (!check.ok) {
+          // If the client explicitly opted in to a membership and the quote
+          // returned an error (not eligible / no sessions), surface it as 400.
+          if (body.membershipSubscriptionId) {
+            const memErr = (quote.errors || []).find((e) => e.step === 'membership');
+            if (memErr && !quote.discounts?.membership) {
               return NextResponse.json({
-                error: 'membership_not_eligible', reason: check.reason, therapySlug: t,
+                error: memErr.error || 'membership_not_eligible',
+                ...memErr,
               }, { status: 400 });
             }
           }
-          // 2. For 'sessions' plans, ensure enough sessions remain for the whole journey.
-          const plan = sub.planSnapshot || {};
-          const needed = therapySlugs.length; // 1 session per therapy
-          if (plan.type === 'sessions' && (sub.sessionsRemaining || 0) < needed) {
-            return NextResponse.json({
-              error: 'membership_insufficient_sessions',
-              have: sub.sessionsRemaining || 0, need: needed,
-            }, { status: 400 });
-          }
-          membershipApplied = {
-            subscriptionId: sub.id,
-            planName: sub.planName || plan.name,
-            type: plan.type,
-            sessionsConsumed: needed,
+
+          // Populate doc from the quote (server = source of truth, never trust client total).
+          doc.total = quote.payableInr;
+          doc.pricingBreakdown = {
+            baseSubtotalInr: quote.baseSubtotalInr,
+            lines:           quote.lines,
+            discounts:       quote.discounts,
+            payableInr:      quote.payableInr,
+            currency:        quote.currency,
           };
-          doc.membershipSubscriptionId = sub.id;
-          doc.membershipApplied = membershipApplied;
-          doc.total = 0;
-          doc.payment = 'membership';
-          doc.priceLine = `Covered by "${membershipApplied.planName}"`;
+          // Backwards-compatible coupon columns (used by admin UI + reports).
+          if (quote.discounts?.coupon) {
+            doc.couponCode     = quote.discounts.coupon.code;
+            doc.couponId       = quote.discounts.coupon.couponId;
+            doc.couponDiscount = quote.discounts.coupon.amountInr;
+          }
+          if (quote.discounts?.membership) {
+            membershipApplied = {
+              subscriptionId:  quote.discounts.membership.subscriptionId,
+              planName:        quote.discounts.membership.planName,
+              type:            quote.discounts.membership.type,
+              sessionsConsumed:quote.discounts.membership.sessionsConsumed,
+              coveredSlugs:    quote.discounts.membership.coveredSlugs,
+            };
+            doc.membershipSubscriptionId = membershipApplied.subscriptionId;
+            doc.membershipApplied        = membershipApplied;
+            if (doc.total === 0) {
+              doc.payment   = 'membership';
+              doc.priceLine = `Covered by "${membershipApplied.planName}"`;
+            }
+          }
+          // Wallet-as-payment: when a wallet debit was applied and the payable
+          // is now zero, mark the payment method 'wallet' so admins see it.
+          if (quote.discounts?.wallet && doc.total === 0 && !membershipApplied) {
+            doc.payment = 'wallet';
+            doc.priceLine = 'Paid from wallet balance';
+          }
         } catch (e) {
-          console.error('membership explicit-apply failed', e);
-          return NextResponse.json({ error: 'membership_apply_error' }, { status: 500 });
+          console.error('pricing quote failed', e);
         }
       }
 
+
       await bookings.insertOne(doc);
+
+      // Commit wallet debit, gift card debit, and coupon redemption ledger
+      // in one shot — these all live in the pricing engine now.
+      if (quote && doc.customerId) {
+        try {
+          const { commitQuoteSideEffects } = await import('@/lib/pricing');
+          await commitQuoteSideEffects({ quote, bookingId: doc.id, bookingRef: doc.ref, customerId: doc.customerId });
+        } catch (e) { console.error('commitQuoteSideEffects failed', e); }
+      }
 
       // If membership was applied, consume one session per therapy in the journey.
       // We do this AFTER the booking insert so consumption is only recorded
@@ -723,20 +736,8 @@ async function handle(req, method, segs) {
       }
 
 
-      // Coupon redemption ledger
-      if (couponResult) {
-        try {
-          const { recordRedemption } = await import('@/lib/coupons');
-          await recordRedemption({
-            couponId: couponResult.couponId,
-            code: couponResult.code,
-            customerId: doc.customerId,
-            bookingId:  doc.id,
-            subtotalInr: (Number(doc.total) || 0) + (Number(doc.couponDiscount) || 0),
-            discountInr: Number(doc.couponDiscount) || 0,
-          });
-        } catch (e) { console.error('coupon redemption record failed', e); }
-      }
+      // Coupon redemption ledger is now handled by commitQuoteSideEffects
+      // (see call site above). Legacy block removed.
 
       // Loyalty: award earn points for signed-in customers.
       if (doc.customerId && Number(doc.total) > 0) {

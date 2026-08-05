@@ -743,7 +743,7 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, on
 /* Step 4 — Contact & confirm                                         */
 /* ------------------------------------------------------------------ */
 
-function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, customerId, branchId, isStaff = false, isDirectMode = false, eligibleMemberships = [], selectedMembershipId = null, onSelectMembership = () => {}, bookingFor = 'self', onChangeBookingFor = () => {}, showBookingForToggle = false }) {
+function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, customerId, branchId, isStaff = false, isDirectMode = false, eligibleMemberships = [], selectedMembershipId = null, onSelectMembership = () => {}, bookingFor = 'self', onChangeBookingFor = () => {}, showBookingForToggle = false, quote = null, walletUseInr = 0, setWalletUseInr = () => {}, walletAvailableInr = 0, giftCardCode = '', setGiftCardCode = () => {}, giftCardPin = '', setGiftCardPin = () => {}, giftCardApplied = null }) {
   const o = getOutcome(outcome);
   const th = o?.protocol?.therapies?.find((x) => x.slug === therapy);
   const isMulti = therapies.length > 1 && slot?.plan?.length > 1;
@@ -1050,14 +1050,101 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
               onChange={setCoupon}
             />
           </div>
+
+          {/* Wallet redemption (signed-in customers with a balance) */}
+          {walletAvailableInr > 0 && !selectedMembershipId && (
+            <div className="mt-4 pt-4 border-t border-border">
+              <div className="flex items-baseline justify-between">
+                <label htmlFor="walletUse" className="text-[11.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground">Wallet balance</label>
+                <span className="text-[11.5px] font-mono text-muted-foreground">&#x20B9;{walletAvailableInr.toLocaleString('en-IN')} available</span>
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  id="walletUse" type="number" inputMode="numeric" min={0} max={walletAvailableInr}
+                  value={walletUseInr || ''} placeholder="0"
+                  onChange={(e) => setWalletUseInr(Math.min(walletAvailableInr, Math.max(0, Number(e.target.value) || 0)))}
+                  className="flex-1 h-10 rounded-md border border-border bg-background px-3 text-[13px] font-mono focus:outline-none focus:border-foreground/40"
+                />
+                <button type="button" onClick={() => setWalletUseInr(walletAvailableInr)}
+                  className="h-10 px-3 rounded-md border border-border text-[11.5px] font-medium hover:bg-muted/40">Use max</button>
+              </div>
+              <div className="mt-1 text-[11px] text-muted-foreground">Up to 50% of the total may be paid from wallet.</div>
+            </div>
+          )}
+
+          {/* Gift card apply */}
+          {!selectedMembershipId && (
+            <div className="mt-4 pt-4 border-t border-border">
+              <label htmlFor="giftCardCode" className="text-[11.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground">Gift card</label>
+              <div className="mt-2 grid grid-cols-[1fr_92px] gap-2">
+                <input
+                  id="giftCardCode" type="text" placeholder="SW-XXXX-XXXX"
+                  value={giftCardCode}
+                  onChange={(e) => setGiftCardCode(e.target.value.toUpperCase().trim())}
+                  className="h-10 rounded-md border border-border bg-background px-3 text-[13px] font-mono uppercase focus:outline-none focus:border-foreground/40"
+                />
+                <input
+                  id="giftCardPin" type="text" placeholder="PIN"
+                  value={giftCardPin} maxLength={6}
+                  onChange={(e) => setGiftCardPin(e.target.value.replace(/\D/g, ''))}
+                  className="h-10 rounded-md border border-border bg-background px-3 text-[13px] font-mono focus:outline-none focus:border-foreground/40"
+                />
+              </div>
+              {giftCardApplied?.error && (
+                <div className="mt-1 text-[11.5px] text-destructive">Gift card not applied ({giftCardApplied.error.replace(/_/g, ' ')}).</div>
+              )}
+              {giftCardApplied?.amountInr > 0 && (
+                <div className="mt-1 text-[11.5px] text-emerald-700 dark:text-emerald-400">
+                  &#x20B9;{Number(giftCardApplied.amountInr).toLocaleString('en-IN')} applied &middot; balance after: &#x20B9;{Number(giftCardApplied.balanceAfter).toLocaleString('en-IN')}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Full breakdown from the server pricing engine */}
+          {quote && (
+            <div className="mt-5 pt-4 border-t border-border space-y-1.5 text-[12.5px]">
+              <div className="flex items-baseline justify-between text-muted-foreground">
+                <span>Subtotal</span>
+                <span className="font-mono">&#x20B9;{Number(quote.baseSubtotalInr).toLocaleString('en-IN')}</span>
+              </div>
+              {quote.discounts?.membership && (
+                <div className="flex items-baseline justify-between text-brand">
+                  <span>Membership &middot; {quote.discounts.membership.planName}</span>
+                  <span className="font-mono">&ndash; &#x20B9;{Number(quote.discounts.membership.amountInr).toLocaleString('en-IN')}</span>
+                </div>
+              )}
+              {quote.discounts?.wallet && (
+                <div className="flex items-baseline justify-between text-emerald-700 dark:text-emerald-400">
+                  <span>Wallet &middot; {quote.discounts.wallet.pointsUsed} pts</span>
+                  <span className="font-mono">&ndash; &#x20B9;{Number(quote.discounts.wallet.amountInr).toLocaleString('en-IN')}</span>
+                </div>
+              )}
+              {quote.discounts?.coupon && (
+                <div className="flex items-baseline justify-between text-emerald-700 dark:text-emerald-400">
+                  <span>Coupon &middot; {quote.discounts.coupon.code}</span>
+                  <span className="font-mono">&ndash; &#x20B9;{Number(quote.discounts.coupon.amountInr).toLocaleString('en-IN')}</span>
+                </div>
+              )}
+              {quote.discounts?.giftCard && (
+                <div className="flex items-baseline justify-between text-emerald-700 dark:text-emerald-400">
+                  <span>Gift card &middot; {quote.discounts.giftCard.code}</span>
+                  <span className="font-mono">&ndash; &#x20B9;{Number(quote.discounts.giftCard.amountInr).toLocaleString('en-IN')}</span>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="mt-4 pt-3 border-t border-border/60 flex items-baseline justify-between">
             <span className="text-[12.5px] text-muted-foreground">Total (est.)</span>
             <span className="font-serif text-[28px] tracking-tight">
               {selectedMembershipId
                 ? <span className="text-brand">FREE</span>
-                : coupon?.applied
-                  ? <>&#x20B9;{Math.max(0, (Number(subtotalInr) || 0) - (Number(coupon.discountInr) || 0)).toLocaleString('en-IN')}</>
-                  : <>&#x20B9;{Number(subtotalInr || 0).toLocaleString('en-IN')}</>}
+                : quote
+                  ? <>&#x20B9;{Number(quote.payableInr).toLocaleString('en-IN')}</>
+                  : coupon?.applied
+                    ? <>&#x20B9;{Math.max(0, (Number(subtotalInr) || 0) - (Number(coupon.discountInr) || 0)).toLocaleString('en-IN')}</>
+                    : <>&#x20B9;{Number(subtotalInr || 0).toLocaleString('en-IN')}</>}
             </span>
           </div>
           {selectedMembershipId && (
@@ -1211,6 +1298,13 @@ export default function BookingClient({ initialOutcome }) {
   const [bookingFor, setBookingFor] = useState('self');
   const [selfContact, setSelfContact] = useState({ name: '', phone: '', email: '' });
   const [otherContact, setOtherContact] = useState({ name: '', phone: '', email: '' });
+  // Unified pricing engine state — wallet debit, gift card, and full quote.
+  const [walletUseInr, setWalletUseInr] = useState(0);
+  const [walletAvailableInr, setWalletAvailableInr] = useState(0);
+  const [giftCardCode, setGiftCardCode] = useState('');
+  const [giftCardPin, setGiftCardPin] = useState('');
+  const [giftCardApplied, setGiftCardApplied] = useState(null); // { code, amountInr, balanceAfter } | { error }
+  const [quote, setQuote] = useState(null);
   const therapy = therapies[0] || null; // convenience alias
 
   // Compute subtotal at component scope so both StepContact (for coupon preview)
@@ -1249,6 +1343,55 @@ export default function BookingClient({ initialOutcome }) {
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
+
+  // Load signed-in customer's wallet balance so we can show wallet redemption.
+  useEffect(() => {
+    if (!customerId) { setWalletAvailableInr(0); return; }
+    fetch('/api/customer/wallet')
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        if (!d) return;
+        // Wallet balance is stored as POINTS. 1 point = ₹0.1 (redeemRate).
+        setWalletAvailableInr(Math.floor((Number(d.balance) || 0) * 0.1));
+      })
+      .catch(() => {});
+  }, [customerId]);
+
+  // Real-time pricing quote — debounced. Runs whenever any input the pricing
+  // engine cares about changes. Keeps the sidebar breakdown live.
+  useEffect(() => {
+    if (!therapies.length) { setQuote(null); return; }
+    const timer = setTimeout(() => {
+      fetch('/api/pricing/quote', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          therapies: therapies.map((slug) => ({ slug })),
+          customerId,
+          phone: contact?.phone || null,
+          branchId: null,
+          membershipSubscriptionId: selectedMembershipId || null,
+          walletUseInr: Number(walletUseInr) || 0,
+          couponCode:   (coupon?.applied ? coupon.code : null),
+          giftCardCode: giftCardCode || null,
+          giftCardPin:  giftCardPin  || null,
+        }),
+      })
+        .then((r) => r.ok ? r.json() : null)
+        .then((q) => {
+          setQuote(q);
+          // Surface gift card apply result inline
+          if (giftCardCode) {
+            const err = (q?.errors || []).find((e) => e.step === 'giftCard');
+            if (err) setGiftCardApplied({ error: err.error });
+            else if (q?.discounts?.giftCard) setGiftCardApplied({ ...q.discounts.giftCard });
+            else setGiftCardApplied(null);
+          } else setGiftCardApplied(null);
+        })
+        .catch(() => setQuote(null));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [therapies, customerId, contact?.phone, selectedMembershipId, walletUseInr, coupon, giftCardCode, giftCardPin]);
+
 
   // Pre-fill contact from query params (used when staff launches "New booking" from
   // /admin/customers/:id — we hand off to the same flow with contact already known).
@@ -1491,6 +1634,10 @@ export default function BookingClient({ initialOutcome }) {
           total: totalRupees,
           couponCode: (!usingMembership && coupon?.applied) ? coupon.code : null,
           membershipSubscriptionId: usingMembership ? selectedMembershipId : null,
+          // Unified pricing engine inputs
+          walletUseInr: Number(walletUseInr) || 0,
+          giftCardCode: giftCardCode || null,
+          giftCardPin:  giftCardPin  || null,
           // Booked-for-other flag — useful for reception + record-keeping.
           // customerId still points at the booker/paying account.
           bookedForOther: bookingFor === 'other',
@@ -1525,10 +1672,12 @@ export default function BookingClient({ initialOutcome }) {
 
       // If online payment requested and Razorpay is configured, open Checkout.
       // Skip entirely when the booking was covered by a membership.
-      if (!usingMembership && payment === 'online' && payCfg.configured && totalRupees > 0) {
+      // Use the server-computed payable (accounts for wallet + coupon + giftcard).
+      const payableForCheckout = Number(doc?.total) || 0;
+      if (!usingMembership && payment === 'online' && payCfg.configured && payableForCheckout > 0) {
         const co = await fetch('/api/payments/create-order', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bookingId: doc.id, amountPaise: Math.round(totalRupees * 100), notes: { ref: doc.ref } }),
+          body: JSON.stringify({ bookingId: doc.id, amountPaise: Math.round(payableForCheckout * 100), notes: { ref: doc.ref } }),
         });
         const coJson = await co.json();
         if (!co.ok) throw new Error(coJson?.error || 'Could not initialise payment.');
@@ -1591,6 +1740,15 @@ export default function BookingClient({ initialOutcome }) {
             bookingFor={bookingFor}
             onChangeBookingFor={switchBookingFor}
             showBookingForToggle={hasSelfData}
+            quote={quote}
+            walletUseInr={walletUseInr}
+            setWalletUseInr={setWalletUseInr}
+            walletAvailableInr={walletAvailableInr}
+            giftCardCode={giftCardCode}
+            setGiftCardCode={setGiftCardCode}
+            giftCardPin={giftCardPin}
+            setGiftCardPin={setGiftCardPin}
+            giftCardApplied={giftCardApplied}
             onPickSuggestion={(s) => {
               setSlot({
                 date: s.date,
