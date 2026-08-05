@@ -705,9 +705,10 @@ async function handle(req, method, segs) {
 
       await bookings.insertOne(doc);
 
-      // Commit wallet debit, gift card debit, and coupon redemption ledger
-      // in one shot — these all live in the pricing engine now.
-      if (quote && doc.customerId) {
+      // Commit wallet debit, gift card debit, and coupon redemption ledger.
+      // Gift-card and coupon side effects apply even to guest bookings; only
+      // the wallet debit requires a signed-in customer (gated internally).
+      if (quote) {
         try {
           const { commitQuoteSideEffects } = await import('@/lib/pricing');
           await commitQuoteSideEffects({ quote, bookingId: doc.id, bookingRef: doc.ref, customerId: doc.customerId });
