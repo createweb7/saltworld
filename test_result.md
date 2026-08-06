@@ -4324,3 +4324,158 @@ Lint: pass (only 3 unused-eslint-disable warnings, harmless).
   5. Membership sessions still consumed correctly.
   6. Payable never below 0.
   7. doc.pricingBreakdown persisted with all lines + discounts.
+
+═══════════════════════════════════════════════════════════════════════════
+### 05-AUG-2026 · Phase A: Backend Tests Complete (17/17 PASS)
+═══════════════════════════════════════════════════════════════════════════
+
+Fixed the critical gift-card side-effect bug:
+- Root cause: `commitQuoteSideEffects()` was gated on `doc.customerId`, which
+  prevented guest bookings from debiting gift cards or recording coupon
+  redemptions. Gate removed — only the wallet debit is now gated internally
+  (it inherently requires a customer id).
+
+Re-tested all scenarios. Confirmed order (user-approved 05-Aug-2026):
+**Membership → Wallet → Coupon → Gift Card.** All 3 stack together correctly.
+
+- ✅ Q1-Q6: pricing quote calculator (base, invalid coupon, invalid gift
+  card, valid coupon 10%, valid gift card, stack coupon+giftcard).
+- ✅ B1: Server overrides client-supplied `total` (verified 99999 → 3000).
+- ✅ B2: Coupon booking — total reduced correctly, pricingBreakdown persisted.
+- ✅ B3: Gift card booking — total reduced, balance decremented, status flipped.
+- ✅ B4: Wallet debit — wallet points debited, transaction ledger recorded.
+- ✅ B5: Wallet cap — 50% policy enforced correctly (₹1500 of ₹3000 available).
+- ✅ B6: Combined coupon+wallet+giftcard — all applied in the confirmed order.
+- ✅ R1-R5: Regression sanity — no existing flow broken.
+
+Backend Phase A.1 (Unified Pricing Engine) is production-ready.
+
+
+═══════════════════════════════════════════════════════════════════════════
+### 06-AUG-2026 · Concierge-Style Preferred-Time Recommender
+═══════════════════════════════════════════════════════════════════════════
+
+**BACKEND — /app/lib/scheduling.js:**
+- New function `recommendJourneys({therapySlugs, branchId, dateIso, preferredTime,
+  windowMin=60, sessionMode, limit=3, startOffset=0})`.
+- Iterates candidate starts on a 15-min grid within ±windowMin of preferred time.
+- Validates each candidate for full journey feasibility (resources, calendar blocks,
+  branch hours).
+- Scores candidates on: distance from preferred, earliest completion, waiting time.
+- Assigns three distinct badges: **Best Match** (closest to preferred),
+  **Fastest Finish** (earliest completion), **Least Waiting** (shortest efficient combo).
+- Supports pagination via `startOffset` for "Show More Recommendations".
+
+**BACKEND — new endpoint:**
+- GET /api/scheduling/recommendations?therapies=slug1,slug2&date=YYYY-MM-DD
+  &preferred=HH:MM&branchId=...&sessionMode=...&limit=3&offset=0&window=60
+- Returns { totalDurationMin, totalVisitMin, recommendations:[{time, startIso,
+  visitFromIso, visitToIso, completionAtIso, plan[], totalDurationMin,
+  totalVisitMin, waitingMin, deltaFromPreferredMin, badge, badgeLabel}],
+  availableCount, reason }
+- Verified via curl: single-therapy and multi-therapy both return 3 distinct badged
+  recommendations.
+
+**FRONTEND — StepSlot fully redesigned:**
+- NEW default flow: date strip → session mode toggle → **"Around what time would
+  you like to start your visit?"** → 15-min interval dropdown (06:00 – 19:45) →
+  **Top 3 recommendation cards** with badges.
+- Each card shows: start time, badge chip, therapy sequence with time ranges,
+  Finishes By (IST), Total visit, Waiting.
+- Primary action: click card to select. Secondary: **Show more recommendations**
+  (pages via `offset+=3`). Tertiary: **Or choose manually** reveals the previous
+  Auto-build / Choose-each-therapy pickers.
+- The full slot calendar is hidden by default and only revealed on demand.
+
+**LINT:** All files clean, 3 pre-existing harmless warnings unchanged.
+
+**SCREENSHOT VERIFIED:**
+- Preferred time picker + 3 badged cards render correctly (Best Match, Fastest
+  Finish, Least Waiting). Local IST time in "Finishes by" (fixed timezone bug).
+
+**NEEDS TESTING (BACKEND):**
+- GET /api/scheduling/recommendations with various therapy combos, preferred times,
+  and offsets. Verify badges are assigned uniquely, delta math correct, and paging
+  works.
+
+
+═══════════════════════════════════════════════════════════════════════════
+### 06-AUG-2026 · Concierge Recommender Testing Complete (7/9 PASS, 2 BUGS)
+═══════════════════════════════════════════════════════════════════════════
+
+**TESTING AGENT REPORT:**
+
+Comprehensive backend testing of GET /api/scheduling/recommendations endpoint completed.
+All 9 test scenarios (REC-1 through REC-9) executed.
+
+**✅ PASSING TESTS (7/9):**
+
+- ✅ REC-1: Single therapy, valid inputs
+  - Returns 3 recommendations with correct structure
+  - Each has badge ∈ {best_match, fastest_finish, least_waiting}
+  - Distinct startIso values
+  - deltaFromPreferredMin >= 0
+  - plan array length = 1 for single therapy
+
+- ✅ REC-2: Multi-therapy (Float + Salt)
+  - Returns 3 recommendations
+  - plan array length = 2 in each
+  - Therapy order correct: [float-therapy, salt-therapy]
+  - totalDurationMin = 120 (60 + 60)
+  - totalVisitMin = 150 (within 135-155 range with buffers)
+
+- ✅ REC-5: Sold-out edge case
+  - preferred=05:00 with window=15 (before opening hours)
+  - Correctly returns 200 with recommendations: [] and reason: 'no_availability'
+
+- ✅ REC-6: Badge uniqueness
+  - All recommendations have distinct startIso
+  - No duplicate times across cards
+  - Badges correctly assigned
+
+- ✅ REC-7: Exact open time (08:00)
+  - Returns 08:00 recommendation with deltaFromPreferredMin: 0
+  - Badge = 'best_match'
+
+- ✅ REC-8: Regression - /api/scheduling/slots
+  - Existing endpoint still works correctly
+  - Returns expected structure with groups {morning, afternoon, evening}
+  - 48 slots returned for test date
+
+- ✅ REC-9: Regression - POST /api/bookings
+  - Successfully creates booking using recommendation slot
+  - Booking ref: SW-2608-X2YB
+  - Status: confirmed
+  - All required fields present
+
+**❌ FAILING TESTS (2/9) - BUGS FOUND:**
+
+**BUG #1: REC-3 - Pagination returns duplicate recommendations**
+- Location: /app/lib/scheduling.js lines 459-460
+- Issue: `byFastest` and `byWait` arrays are NOT sliced by `startOffset`
+- Result: Page 2 (offset=3) returns duplicate startIso from Page 1 (offset=0)
+- Example: Page 1 returns ['10:00', '09:00', '09:45'], Page 2 returns ['09:30', '09:00', '10:00']
+- Duplicates found: '09:00' and '10:00' appear in both pages
+- Root cause:
+  ```javascript
+  const paged = byBest.slice(startOffset);  // ✅ Correctly sliced
+  addPick(paged[0], 'best_match', 'Best Match');
+  addPick(byFastest.find((c) => !seen.has(c.startIso)), 'fastest_finish', 'Fastest Finish');  // ❌ NOT sliced
+  addPick(byWait.find((c) => !seen.has(c.startIso)), 'least_waiting', 'Least Waiting');      // ❌ NOT sliced
+  ```
+- Fix needed: Apply `startOffset` to `byFastest` and `byWait` arrays OR track globally seen startIso across pages
+
+**BUG #2: REC-4 - Invalid time format validation (25:99 passes)**
+- Location: /app/app/api/[[...path]]/route.js line 354
+- Issue: Regex `/^\d{2}:\d{2}$/` only checks format, not validity
+- Result: Invalid times like '25:99' return 200 instead of 400
+- Test case: preferred='25:99' → Expected 400 with error='preferred_time_required', Got 200
+- Root cause: Regex matches any 2-digit:2-digit pattern without validating hours (00-23) or minutes (00-59)
+- Fix needed: Add validation to check hours <= 23 and minutes <= 59, OR catch the error when localOnDayToUtc() fails
+
+**SUMMARY:**
+- Core functionality: ✅ WORKING (single/multi-therapy, badges, delta calculation, regression)
+- Pagination: ❌ BROKEN (duplicates across pages)
+- Validation: ❌ INCOMPLETE (invalid time format not caught)
+- Recommendation: Fix 2 bugs before production. Core algorithm is solid.
+

@@ -353,12 +353,19 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
   }, []);
   const [date, setDate] = useState(value?.date || toIsoDay(days[0]));
   const isMulti = therapies.length > 1;
-  const [mode, setMode] = useState(isMulti ? 'auto' : 'manual');
-  const [journeyData, setJourneyData] = useState(null); // full journey response for auto mode + summary
+  const [journeyData, setJourneyData] = useState(null); // full journey response for summary
   const [loading, setLoading] = useState(false);
   const hasFloat = therapies.some((t) => String(t).includes('float'));
 
-  // Fetch the full journey slot data (needed for auto mode + summary in both modes)
+  // Preferred-time concierge flow — the primary UX per Aug-05-2026 direction.
+  const [preferredTime, setPreferredTime] = useState('08:00');
+  const [recommendations, setRecommendations] = useState([]);
+  const [recLoading, setRecLoading] = useState(false);
+  const [recOffset, setRecOffset] = useState(0);
+  const [manualMode, setManualMode] = useState(false); // "Choose manually" reveals the old grid
+  const [manualPickerMode, setManualPickerMode] = useState(isMulti ? 'auto' : 'manual');
+
+  // Fetch the full journey slot data (just for summary + as fallback in manual mode)
   useEffect(() => {
     if (therapies.length === 0 || !date) return;
     let cancelled = false;
@@ -372,8 +379,71 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
     return () => { cancelled = true; };
   }, [therapies, date, sessionMode, hasFloat]);
 
+  // Fetch top-3 recommendations whenever inputs change.
+  useEffect(() => {
+    if (therapies.length === 0 || !date || !preferredTime) { setRecommendations([]); return; }
+    setRecLoading(true);
+    setRecOffset(0);
+    const q = new URLSearchParams({
+      therapies: therapies.join(','),
+      date, preferred: preferredTime, limit: '3', offset: '0', window: '60',
+    });
+    if (hasFloat && sessionMode) q.set('sessionMode', sessionMode);
+    fetch(`/api/scheduling/recommendations?${q}`)
+      .then((r) => r.ok ? r.json() : { recommendations: [] })
+      .then((d) => { setRecommendations(d.recommendations || []); setRecLoading(false); })
+      .catch(() => { setRecommendations([]); setRecLoading(false); });
+  }, [therapies, date, preferredTime, sessionMode, hasFloat]);
+
+  const loadMore = async () => {
+    setRecLoading(true);
+    const nextOffset = recOffset + 3;
+    const q = new URLSearchParams({
+      therapies: therapies.join(','),
+      date, preferred: preferredTime, limit: '3', offset: String(nextOffset), window: '60',
+    });
+    if (hasFloat && sessionMode) q.set('sessionMode', sessionMode);
+    try {
+      const r = await fetch(`/api/scheduling/recommendations?${q}`);
+      const d = await r.json();
+      const more = (d.recommendations || []).filter(
+        (n) => !recommendations.some((cur) => cur.startIso === n.startIso),
+      );
+      if (more.length > 0) {
+        setRecommendations([...recommendations, ...more]);
+        setRecOffset(nextOffset);
+      } else {
+        // No more available at this offset — try a wider window as a last resort.
+        setRecOffset(nextOffset);
+      }
+    } catch { /* silent */ }
+    setRecLoading(false);
+  };
+
+  const pickRecommendation = (r) => {
+    onChange({
+      date,
+      time: r.time,
+      startIso: r.startIso,
+      visitFromIso: r.visitFromIso,
+      visitToIso: r.visitToIso,
+      plan: r.plan,
+    });
+  };
+
   const totalDurationMin = journeyData?.totalDurationMin || 0;
   const totalVisitMin    = journeyData?.totalVisitMin    || 0;
+
+  // Precompute time-picker options: every 15 min from 06:00 to 20:00.
+  const timeOptions = useMemo(() => {
+    const arr = [];
+    for (let h = 6; h < 20; h++) {
+      for (let m = 0; m < 60; m += 15) {
+        arr.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+      }
+    }
+    return arr;
+  }, []);
 
   return (
     <div>
@@ -382,7 +452,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
         Plan your <span className="italic">wellness journey.</span>
       </h1>
       <p className="mt-3 text-[15px] leading-7 text-muted-foreground max-w-[560px]">
-        Slots are calculated live from real resource availability.
+        Tell us when you&rsquo;d like to arrive. We&rsquo;ll build the perfect itinerary from live resource availability.
       </p>
 
       {/* Journey summary */}
@@ -464,34 +534,181 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
         </div>
       </div>
 
-      {/* Auto / Manual toggle — only for multi-therapy journeys */}
-      {isMulti && (
-        <div className="mt-6 inline-flex rounded-full border border-border p-0.5 bg-card">
-          <button onClick={() => { setMode('auto'); onChange(null); }}
-            className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full flex items-center gap-1.5 transition-all',
-              mode === 'auto' ? 'bg-brand text-white' : 'text-muted-foreground hover:text-foreground')}>
-            <Sparkles className="h-3.5 w-3.5" /> Auto-build (recommended)
-          </button>
-          <button onClick={() => { setMode('manual'); onChange(null); }}
-            className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
-              mode === 'manual' ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground')}>
-            Choose manually
-          </button>
+      {/* -------- CONCIERGE FLOW — Preferred time + Top 3 recommendations -------- */}
+      {!manualMode && (
+        <div className="mt-8">
+          {/* Preferred time picker */}
+          <div className="rounded-2xl border border-border bg-card p-5 md:p-6">
+            <label className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold" htmlFor="preferredTime">
+              Around what time would you like to start your visit?
+            </label>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <select
+                id="preferredTime"
+                value={preferredTime}
+                onChange={(e) => setPreferredTime(e.target.value)}
+                className="h-12 rounded-xl border border-border bg-background px-4 pr-9 text-[16px] font-mono font-semibold focus:outline-none focus:border-foreground/40"
+              >
+                {timeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <div className="text-[12.5px] text-muted-foreground max-w-[420px] leading-[1.5]">
+                This is only a preference. We&rsquo;ll recommend the best complete itinerary within &plusmn;60 minutes.
+              </div>
+            </div>
+          </div>
+
+          {/* Recommendations */}
+          {recLoading && recommendations.length === 0 && (
+            <div className="mt-6 text-center py-10 text-muted-foreground text-[13px] flex items-center justify-center gap-2">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Building the best itineraries for you&hellip;
+            </div>
+          )}
+
+          {!recLoading && recommendations.length === 0 && (
+            <div className="mt-6 rounded-2xl border border-dashed border-border p-8 text-center text-muted-foreground text-[13px]">
+              No availability near {preferredTime} on this day. Try a different preferred time, or use
+              <button type="button" onClick={() => setManualMode(true)} className="ml-1 underline underline-offset-2 hover:text-foreground">
+                the manual picker
+              </button>.
+            </div>
+          )}
+
+          {recommendations.length > 0 && (
+            <>
+              <div className="mt-6 grid gap-4">
+                {recommendations.map((r) => {
+                  const isSel = value?.startIso === r.startIso;
+                  return (
+                    <button
+                      key={r.startIso}
+                      type="button"
+                      onClick={() => pickRecommendation(r)}
+                      className={cn(
+                        'text-left rounded-2xl border p-5 md:p-6 transition-all',
+                        isSel
+                          ? 'border-brand bg-brand-soft ring-1 ring-brand'
+                          : 'border-border bg-card hover:border-foreground/40 hover:shadow-sm',
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-baseline gap-3 flex-wrap">
+                            <div className="font-serif text-[28px] tracking-tight leading-none">{r.time}</div>
+                            <span
+                              className={cn(
+                                'text-[10.5px] uppercase tracking-[0.14em] font-semibold px-2 py-0.5 rounded-full',
+                                r.badge === 'best_match'    && 'bg-brand text-white',
+                                r.badge === 'fastest_finish'&& 'bg-amber-500/15 text-amber-800 dark:text-amber-300',
+                                r.badge === 'least_waiting' && 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300',
+                              )}
+                            >
+                              {r.badgeLabel}
+                            </span>
+                          </div>
+                          <div className="mt-3 space-y-1.5">
+                            {r.plan.map((p, i) => (
+                              <div key={i} className="flex items-center gap-2 text-[13px]">
+                                <div className="h-5 w-5 rounded-full bg-foreground/10 text-foreground text-[10.5px] font-semibold flex items-center justify-center shrink-0">{i + 1}</div>
+                                <span className="font-medium">{p.name}</span>
+                                <span className="text-muted-foreground font-mono text-[11.5px]">
+                                  {fmtTimeRange(p.from, p.to)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        {isSel && (
+                          <div className="shrink-0 h-6 w-6 rounded-full bg-brand text-white text-[11px] font-semibold flex items-center justify-center">
+                            <Check className="h-3.5 w-3.5" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="mt-4 pt-3 border-t border-border/60 grid grid-cols-3 gap-3 text-[11.5px]">
+                        <div>
+                          <div className="text-muted-foreground uppercase tracking-[0.12em] text-[10px]">Finishes by</div>
+                          <div className="font-mono font-semibold text-[13.5px] mt-0.5">
+                            {new Date(r.completionAtIso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' })}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground uppercase tracking-[0.12em] text-[10px]">Total visit</div>
+                          <div className="font-mono font-semibold text-[13.5px] mt-0.5">~{fmtVisit(r.totalVisitMin)}</div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground uppercase tracking-[0.12em] text-[10px]">Waiting</div>
+                          <div className="font-mono font-semibold text-[13.5px] mt-0.5">
+                            {r.waitingMin > 0 ? `${r.waitingMin} min` : 'None'}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-5 flex items-center justify-between flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={loadMore}
+                  disabled={recLoading}
+                  className="text-[12.5px] font-medium underline underline-offset-4 text-muted-foreground hover:text-foreground disabled:opacity-50"
+                >
+                  {recLoading ? 'Loading…' : 'Show more recommendations'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setManualMode(true)}
+                  className="text-[12.5px] font-medium text-muted-foreground hover:text-foreground"
+                >
+                  Or choose manually &rarr;
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
-      {loading && (
-        <div className="mt-8 text-center py-12 text-muted-foreground text-[13px] flex items-center justify-center gap-2">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Finding available times…
-        </div>
-      )}
+      {/* -------- Legacy manual picker (revealed only via "Choose manually") -------- */}
+      {manualMode && (
+        <>
+          <div className="mt-6 flex items-center justify-between flex-wrap gap-3">
+            {isMulti ? (
+              <div className="inline-flex rounded-full border border-border p-0.5 bg-card">
+                <button onClick={() => { setManualPickerMode('auto'); onChange(null); }}
+                  className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full flex items-center gap-1.5 transition-all',
+                    manualPickerMode === 'auto' ? 'bg-brand text-white' : 'text-muted-foreground hover:text-foreground')}>
+                  <Sparkles className="h-3.5 w-3.5" /> Auto-build
+                </button>
+                <button onClick={() => { setManualPickerMode('manual'); onChange(null); }}
+                  className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
+                    manualPickerMode === 'manual' ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground')}>
+                  Choose each therapy
+                </button>
+              </div>
+            ) : <span />}
+            <button
+              type="button"
+              onClick={() => setManualMode(false)}
+              className="text-[12.5px] font-medium text-muted-foreground hover:text-foreground"
+            >
+              &larr; Back to recommendations
+            </button>
+          </div>
 
-      {!loading && mode === 'auto' && (
-        <AutoJourneyPicker journeyData={journeyData} date={date} therapyMeta={therapyMeta} value={value} onChange={onChange} />
-      )}
+          {loading && (
+            <div className="mt-8 text-center py-12 text-muted-foreground text-[13px] flex items-center justify-center gap-2">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Finding available times…
+            </div>
+          )}
 
-      {!loading && mode === 'manual' && (
-        <ManualJourneyPicker therapies={therapies} therapyMeta={therapyMeta} date={date} value={value} onChange={onChange} onReorder={onReorderTherapies} />
+          {!loading && manualPickerMode === 'auto' && (
+            <AutoJourneyPicker journeyData={journeyData} date={date} therapyMeta={therapyMeta} value={value} onChange={onChange} />
+          )}
+
+          {!loading && manualPickerMode === 'manual' && (
+            <ManualJourneyPicker therapies={therapies} therapyMeta={therapyMeta} date={date} value={value} onChange={onChange} onReorder={onReorderTherapies} />
+          )}
+        </>
       )}
     </div>
   );

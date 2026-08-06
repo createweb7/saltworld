@@ -335,6 +335,34 @@ async function handle(req, method, segs) {
     return NextResponse.json(r || { groups: { morning: [], afternoon: [], evening: [] }, totalDurationMin: 0, totalVisitMin: 0 });
   }
 
+  // Concierge-style recommender — returns Top N intelligently-ranked
+  // complete wellness journeys based on the customer's preferred start time.
+  //   ?therapies=slug1,slug2 &date=YYYY-MM-DD &preferred=HH:MM
+  //   &branchId=... &sessionMode=single|couple &limit=3 &offset=0 &window=60
+  if (segs[0] === 'scheduling' && segs[1] === 'recommendations' && method === 'GET') {
+    const u = new URL(req.url);
+    const therapiesQ = u.searchParams.get('therapies');
+    const branchId   = u.searchParams.get('branchId') || null;
+    const date       = u.searchParams.get('date');
+    const preferred  = u.searchParams.get('preferred');
+    const sessionMode= u.searchParams.get('sessionMode') || null;
+    const limit      = Math.max(1, Math.min(12, Number(u.searchParams.get('limit')) || 3));
+    const offset     = Math.max(0, Number(u.searchParams.get('offset')) || 0);
+    const windowMin  = Math.max(15, Math.min(240, Number(u.searchParams.get('window')) || 60));
+    if (!therapiesQ) return NextResponse.json({ error: 'therapies_required' }, { status: 400 });
+    if (!date) return NextResponse.json({ error: 'date_required' }, { status: 400 });
+    if (!preferred || !/^\d{2}:\d{2}$/.test(preferred)) {
+      return NextResponse.json({ error: 'preferred_time_required', hint: 'HH:MM (24h)' }, { status: 400 });
+    }
+    const therapies = therapiesQ.split(',').map((s) => s.trim()).filter(Boolean);
+    const { recommendJourneys } = await import('@/lib/scheduling');
+    const r = await recommendJourneys({
+      therapySlugs: therapies, branchId, dateIso: date,
+      preferredTime: preferred, windowMin, sessionMode, limit, startOffset: offset,
+    });
+    return NextResponse.json(r);
+  }
+
   // Single-therapy slot list with optional 'after' cutoff. Used by the
   // manual-mode Wellness Journey planner to filter downstream therapy cards.
   if (segs[0] === 'scheduling' && segs[1] === 'therapy-slots' && method === 'GET') {
