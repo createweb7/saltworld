@@ -4620,3 +4620,19 @@ issues found. All regression tests passed.
 **NEXT STEPS:**
 - Main agent can proceed with confidence that both bugs are fixed
 - No further action required on these two specific bugs
+
+═══════════════════════════════════════════════════════════════════════════
+### 06-AUG-2026 · Concierge Recommender — Backend 100% PASSED (7/7)
+═══════════════════════════════════════════════════════════════════════════
+
+Fixed both bugs the tester surfaced:
+- BUG 1 (pagination duplicates): Rewrote /app/lib/scheduling.js to build a
+  deterministic global ordering (interleaving best_match → fastest_finish →
+  least_waiting picks, deduped) before slicing by `startOffset`. Verified
+  offset=0 vs offset=3 return disjoint sets.
+- BUG 2 (invalid preferred time accepted): Added semantic validation in
+  /app/app/api/[[...path]]/route.js for HH in 0-23, MM in 0-59. Values like
+  25:99, 12:99, 99:00, -1:00 now correctly return 400.
+
+7/7 tests passing. Feature is production ready.
+
