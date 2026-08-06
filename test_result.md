@@ -4479,3 +4479,144 @@ All 9 test scenarios (REC-1 through REC-9) executed.
 - Validation: ❌ INCOMPLETE (invalid time format not caught)
 - Recommendation: Fix 2 bugs before production. Core algorithm is solid.
 
+
+
+═══════════════════════════════════════════════════════════════════════════
+### 06-AUG-2026 · Concierge Recommender BUG FIX VERIFICATION (7/7 PASS) ✅
+═══════════════════════════════════════════════════════════════════════════
+
+**TESTING AGENT RE-VERIFICATION REPORT:**
+
+Re-tested the two specific bugs that were reported as fixed by the main agent:
+  - **BUG #1**: Pagination duplicates (REC-3)
+  - **BUG #2**: Invalid time validation (REC-4)
+
+Also ran full regression suite (REC-1, REC-2, REC-5, REC-6, REC-7) to ensure no regressions.
+
+**TEST EXECUTION:**
+Test file: /app/backend_test_concierge_bugfix.py
+Endpoint: GET /api/scheduling/recommendations
+Test date: 2026-09-05 (30 days in future)
+
+**✅ ALL TESTS PASSED (7/7 - 100% SUCCESS RATE):**
+
+**REGRESSION TESTS (5/5 PASSED):**
+
+✅ **REC-1: Single therapy, valid inputs**
+  - Returns 3 recommendations with correct structure
+  - Each has badge ∈ {best_match, fastest_finish, least_waiting}
+  - Distinct startIso values: ['2026-09-05T04:30:00.000Z', '2026-09-05T03:30:00.000Z', '2026-09-05T04:15:00.000Z']
+  - Times: ['10:00', '09:00', '09:45']
+  - deltaFromPreferredMin values: [0, 60, 15]
+  - plan array length = 1 for single therapy ✅
+
+✅ **REC-2: Multi-therapy (Float + Salt)**
+  - Returns 3 recommendations
+  - plan array length = 2 in each recommendation ✅
+  - Therapy order correct: [float-therapy, salt-therapy] ✅
+  - All recommendations have distinct startIso ✅
+
+✅ **REC-5: Sold-out edge case**
+  - preferred=05:00 with window=15 (before opening hours 08:00)
+  - Correctly returns 200 with recommendations: [] and reason: 'no_availability' ✅
+
+✅ **REC-6: Badge uniqueness**
+  - All 3 recommendations have distinct startIso values ✅
+  - No duplicate times across cards ✅
+  - Badges correctly assigned ✅
+
+✅ **REC-7: Early morning time (08:00)**
+  - Returns 3 recommendations with reasonable deltas ✅
+  - best_match at 08:15 (delta=15min) ✅
+  - fastest_finish at 08:30 (delta=30min) ✅
+  - least_waiting at 08:45 (delta=45min) ✅
+  - Note: 08:00 not available due to 15-min grid + therapy pre-buffer (expected behavior)
+
+**BUG FIX VERIFICATION TESTS (2/2 PASSED):**
+
+✅ **REC-3 (BUG #1): Pagination - NO DUPLICATES FOUND**
+  🔍 **THIS IS THE CRITICAL BUG FIX VERIFICATION**
+  
+  **Test Setup:**
+  - Same params (therapies=salt-therapy, date=2026-09-05, preferred=10:00)
+  - Page 1: offset=0, limit=3
+  - Page 2: offset=3, limit=3
+  
+  **Results:**
+  - Page 1 times: ['10:00', '09:00', '09:45']
+  - Page 1 startIso: ['2026-09-05T04:30:00.000Z', '2026-09-05T03:30:00.000Z', '2026-09-05T04:15:00.000Z']
+  - Page 2 times: ['10:15', '09:15', '09:30']
+  - Page 2 startIso: ['2026-09-05T04:45:00.000Z', '2026-09-05T03:45:00.000Z', '2026-09-05T04:00:00.000Z']
+  
+  **Verification:**
+  - ✅ NO DUPLICATES found between Page 1 and Page 2
+  - ✅ All 6 recommendations are distinct (disjoint sets)
+  - ✅ Pagination working correctly
+  
+  **FIX CONFIRMED:** The rewritten ranking-to-picks logic in /app/lib/scheduling.js 
+  (lines 449-471) now builds a single global ordering (interleaving best_match → 
+  fastest_finish → least_waiting picks, deduplicated) before slicing by `startOffset`. 
+  This guarantees no duplicates across pages.
+
+✅ **REC-4 (BUG #2): Invalid time validation - ALL INVALID FORMATS REJECTED**
+  🔍 **THIS IS THE CRITICAL BUG FIX VERIFICATION**
+  
+  **Test Cases (all returned 400 with error='preferred_time_required'):**
+  
+  1. ✅ preferred='25:99' (hour=25, minute=99 - both out of range)
+     - Status: 400 ✅
+     - Response: {'error': 'preferred_time_required', 'hint': 'HH:MM (24h)'}
+  
+  2. ✅ preferred='12:99' (minute=99 - out of range)
+     - Status: 400 ✅
+     - Response: {'error': 'preferred_time_required', 'hint': 'HH:MM (24h)'}
+  
+  3. ✅ preferred='99:00' (hour=99 - out of range)
+     - Status: 400 ✅
+     - Response: {'error': 'preferred_time_required', 'hint': 'HH:MM (24h)'}
+  
+  4. ✅ preferred='-1:00' (hour=-1 - negative)
+     - Status: 400 ✅
+     - Response: {'error': 'preferred_time_required', 'hint': 'HH:MM (24h)'}
+  
+  5. ✅ preferred='' (empty string)
+     - Status: 400 ✅
+     - Response: {'error': 'preferred_time_required', 'hint': 'HH:MM (24h)'}
+  
+  **FIX CONFIRMED:** The semantic validation added in /app/app/api/[[...path]]/route.js 
+  (lines 358-361) now validates that hour ∈ [0-23] and minute ∈ [0-59], not just the 
+  regex format. All invalid time formats are correctly rejected with 400 status.
+
+**SUMMARY:**
+
+✅ **BUG #1 (Pagination duplicates): FIXED AND VERIFIED**
+   - Root cause: byFastest and byWait arrays were not sliced by startOffset
+   - Fix: Rewrote to build single global ordering before slicing
+   - Verification: offset=0 and offset=3 return completely disjoint sets
+   - Status: PRODUCTION READY ✅
+
+✅ **BUG #2 (Invalid time validation): FIXED AND VERIFIED**
+   - Root cause: Regex only checked format, not semantic validity
+   - Fix: Added semantic validation for hour [0-23] and minute [0-59]
+   - Verification: All invalid formats (25:99, 12:99, 99:00, -1:00, empty) rejected with 400
+   - Status: PRODUCTION READY ✅
+
+✅ **REGRESSION TESTS: ALL PASSING (5/5)**
+   - No regressions introduced by the bug fixes
+   - Core functionality intact
+   - Badge assignment working correctly
+   - Multi-therapy journeys working correctly
+
+**OVERALL RESULT: 7/7 TESTS PASSED (100% SUCCESS RATE)**
+
+**CONCLUSION:**
+Both bug fixes are working correctly and are production-ready. The Concierge Recommender 
+endpoint is now fully functional with proper pagination and input validation. No critical 
+issues found. All regression tests passed.
+
+**TEST DATA CREATED:**
+- No test data created (all tests were read-only GET requests)
+
+**NEXT STEPS:**
+- Main agent can proceed with confidence that both bugs are fixed
+- No further action required on these two specific bugs

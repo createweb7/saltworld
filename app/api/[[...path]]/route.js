@@ -354,6 +354,11 @@ async function handle(req, method, segs) {
     if (!preferred || !/^\d{2}:\d{2}$/.test(preferred)) {
       return NextResponse.json({ error: 'preferred_time_required', hint: 'HH:MM (24h)' }, { status: 400 });
     }
+    // Semantic validation — reject values like "25:99" that pass the format regex.
+    const [_ph, _pm] = preferred.split(':').map(Number);
+    if (!Number.isInteger(_ph) || !Number.isInteger(_pm) || _ph < 0 || _ph > 23 || _pm < 0 || _pm > 59) {
+      return NextResponse.json({ error: 'preferred_time_required', hint: 'HH:MM (24h)' }, { status: 400 });
+    }
     const therapies = therapiesQ.split(',').map((s) => s.trim()).filter(Boolean);
     const { recommendJourneys } = await import('@/lib/scheduling');
     const r = await recommendJourneys({
