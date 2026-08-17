@@ -360,6 +360,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
   // Preferred-time concierge flow — the primary UX per Aug-05-2026 direction.
   const [preferredTime, setPreferredTime] = useState('08:00');
   const [recommendations, setRecommendations] = useState([]);
+  const [recExpanded, setRecExpanded] = useState(false);       // usedWindow > requestedWindow
   const [recLoading, setRecLoading] = useState(false);
   const [recOffset, setRecOffset] = useState(0);
   const [manualMode, setManualMode] = useState(false); // "Choose manually" reveals the old grid
@@ -391,8 +392,12 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
     if (hasFloat && sessionMode) q.set('sessionMode', sessionMode);
     fetch(`/api/scheduling/recommendations?${q}`)
       .then((r) => r.ok ? r.json() : { recommendations: [] })
-      .then((d) => { setRecommendations(d.recommendations || []); setRecLoading(false); })
-      .catch(() => { setRecommendations([]); setRecLoading(false); });
+      .then((d) => {
+        setRecommendations(d.recommendations || []);
+        setRecExpanded(!!d.expandedWindow);
+        setRecLoading(false);
+      })
+      .catch(() => { setRecommendations([]); setRecExpanded(false); setRecLoading(false); });
   }, [therapies, date, preferredTime, sessionMode, hasFloat]);
 
   const loadMore = async () => {
@@ -575,6 +580,11 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
 
           {recommendations.length > 0 && (
             <>
+              {recExpanded && (
+                <div className="mt-4 rounded-xl border border-amber-200/70 dark:border-amber-800/40 bg-amber-50/60 dark:bg-amber-500/5 px-4 py-3 text-[12.5px] text-amber-900 dark:text-amber-200 leading-[1.55]">
+                  Nothing available around <span className="font-mono font-semibold">{preferredTime}</span> on this day — showing the closest available itineraries instead.
+                </div>
+              )}
               <div className="mt-6 grid gap-4">
                 {recommendations.map((r) => {
                   const isSel = value?.startIso === r.startIso;
@@ -592,7 +602,10 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-baseline gap-3 flex-wrap">
+                          <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground font-semibold">
+                            {new Date(date + 'T00:00').toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long' })}
+                          </div>
+                          <div className="mt-1 flex items-baseline gap-3 flex-wrap">
                             <div className="font-serif text-[28px] tracking-tight leading-none">{r.time}</div>
                             <span
                               className={cn(

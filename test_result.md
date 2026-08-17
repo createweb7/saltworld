@@ -4636,3 +4636,37 @@ Fixed both bugs the tester surfaced:
 
 7/7 tests passing. Feature is production ready.
 
+
+═══════════════════════════════════════════════════════════════════════════
+### 17-AUG-2026 · Concierge Recommender — Final Polish
+═══════════════════════════════════════════════════════════════════════════
+
+Added the last-mile enhancements requested in the 17-Aug user spec:
+
+- **Auto-expand window fallback (backend):** When no journey is feasible in
+  the requested ±window, the recommender now widens progressively (60 → 120 →
+  240 → 720 min) until at least one candidate exists, and returns
+  `expandedWindow: true` + `usedWindow` so the UI can surface the fallback.
+
+- **Date on recommendation cards (frontend):** Each card now shows
+  "Thursday, 20 August" above the start time so the customer can see the
+  full itinerary at a glance.
+
+- **Expansion hint banner (frontend):** When `expandedWindow` is true, a
+  subtle amber notice appears above the cards: "Nothing available around
+  HH:MM on this day — showing the closest available itineraries instead."
+
+- **Screenshot verified** on http://localhost:3000/book?therapy=float-therapy
+  with Float+Halo, day=Thu 20 Aug, preferred=06:00 → card renders full
+  concierge itinerary with date header + Best Match badge + per-therapy
+  time ranges + finishes-by + total visit + waiting.
+
+Spec items ✅ complete: preferred-time picker, ±60min Top-3, scoring by
+delta/finish/waiting/availability, badges, date on card, no past times,
+full-journey feasibility, auto-expand fallback, existing engine consumed
+(not duplicated), Show More paging, Choose manually fallback, final
+re-check on POST /api/bookings (existing 409-with-suggestions flow).
+
+Deferred (separate feature, in backlog): **per-therapy reschedule** for
+bundled experiences during rescheduling of an existing booking.
+
