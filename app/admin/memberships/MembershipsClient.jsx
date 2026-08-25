@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2, Edit3, Sparkles, X, ChevronDown } from 'lucide-react';
 import AdminShell, { PageHeader, AdminSection } from '@/components/admin/shell';
@@ -105,6 +105,18 @@ export default function MembershipsClient({ user }) {
     )},
   ];
 
+  const markPaidMut = useMutation({
+    mutationFn: async (sid) => {
+      const r = await fetch(`/api/admin/memberships/subs/${sid}/mark-paid`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ method: 'offline', paymentRef: 'admin-marked' }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'failed');
+      return r.json();
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-subs'] }),
+  });
+
   const subColumns = [
     { key: 'planName', label: 'Plan', render: (r) => <div className="font-medium">{r.planName || r.planSnapshot?.name}</div> },
     { key: 'customerId', label: 'Customer', render: (r) => <span className="font-mono text-[11px] text-muted-foreground">{(r.customerId || '').slice(0, 8)}\u2026</span> },
@@ -115,8 +127,19 @@ export default function MembershipsClient({ user }) {
         <div className="text-muted-foreground">Started {new Date(r.startAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</div>
       </div>
     )},
-    { key: 'usage', label: 'Usage', render: (r) => r.planSnapshot?.type === 'sessions' ? `${r.sessionsUsed || 0}/${r.sessionsIncluded || 0}` : '—' },
-    { key: 'payment', label: 'Payment', render: (r) => <span className="capitalize text-[12px]">{r.payment?.method || '—'}</span> },
+    { key: 'usage', label: 'Usage', render: (r) => r.planSnapshot?.type === 'sessions' ? `${r.sessionsUsed || 0}/${r.sessionsIncluded || 0}` : '\u2014' },
+    { key: 'payment', label: 'Payment', render: (r) => <span className="capitalize text-[12px]">{r.payment?.method || '\u2014'}</span> },
+    { key: 'actions', label: '', render: (r) => (
+      r.status === 'pending_payment'
+        ? (
+          <button
+            type="button"
+            onClick={() => markPaidMut.mutate(r.id)}
+            disabled={markPaidMut.isPending}
+            className="text-[11.5px] font-medium h-7 px-2.5 rounded-md border border-brand/40 text-brand hover:bg-brand-soft transition-colors disabled:opacity-50"
+          >Mark paid</button>
+        ) : null
+    )},
   ];
 
   return (

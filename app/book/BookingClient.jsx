@@ -1077,13 +1077,27 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
             </label>
             <input id="email" type="email" required
               value={contact.email || ''} onChange={(e) => setContact({ ...contact, email: e.target.value })}
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                if (!v) return;
+                const re = /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,}$/;
+                setContact((c) => ({ ...c, _emailValid: !/\.\./.test(v) && !/\s/.test(v) && re.test(v) }));
+              }}
               placeholder="you@example.com"
-              className="w-full h-11 px-3.5 rounded-xl border border-border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-brand/40" />
-            <div className="mt-1 text-[11px] text-muted-foreground">
-              {bookingFor === 'other'
-                ? 'Booking confirmation will be sent to the guest.'
-                : 'Your invoice and confirmation will be sent here.'}
-            </div>
+              className={cn(
+                'w-full h-11 px-3.5 rounded-xl border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-brand/40',
+                contact._emailValid === false ? 'border-destructive' : 'border-border',
+              )} />
+            {contact._emailValid === false && (
+              <div className="mt-1 text-[11px] text-destructive">Please enter a valid email address with a domain extension (e.g., name@example.com).</div>
+            )}
+            {contact._emailValid !== false && (
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                {bookingFor === 'other'
+                  ? 'Booking confirmation will be sent to the guest.'
+                  : 'Your invoice and confirmation will be sent here.'}
+              </div>
+            )}
           </div>
           <div>
             <label htmlFor="notes" className="block text-[12px] font-medium mb-1.5">Anything we should know? <span className="text-muted-foreground font-normal">(optional)</span></label>
@@ -1835,6 +1849,15 @@ export default function BookingClient({ initialOutcome }) {
     setError(null);
     if (!contact.name || !contact.phone) { setError('Name and phone are required.'); return; }
     if (therapies.length === 0) { setError('Please pick at least one therapy.'); return; }
+    // Strict email format guard — the backend enforces the SAME rule.
+    if (contact.email) {
+      const re = /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,}$/;
+      const ok = !/\.\./.test(contact.email) && !/\s/.test(contact.email) && re.test(contact.email.trim());
+      if (!ok) {
+        setError('Please enter a valid email address with a domain extension (e.g., name@example.com).');
+        return;
+      }
+    }
     setSubmitting(true);
     try {
       const o = getOutcome(outcome);
@@ -1889,8 +1912,12 @@ export default function BookingClient({ initialOutcome }) {
           setError(`This membership doesn't cover ${j.therapySlug || 'the selected therapy'} (${j.reason || 'not_eligible'}). Uncheck "Use my membership" or pick a different plan.`);
         } else if (j?.error === 'membership_insufficient_sessions') {
           setError(`Not enough sessions on this membership (have ${j.have}, need ${j.need}). Uncheck "Use my membership" to continue.`);
-        } else if (j?.error === 'slot_in_past') {
+        } else if (j?.error === 'slot_in_past' || j?.error === 'past_time') {
           setError('This slot is in the past. Please pick a future time.');
+        } else if (j?.error === 'invalid_email') {
+          setError(j.message || 'Please enter a valid email address with a domain extension (e.g., name@example.com).');
+        } else if (j?.error === 'below_min_lead_time' || j?.error === 'same_day_late_cutoff' || j?.error === 'next_day_early_cutoff') {
+          setError(j.message || 'This time is no longer available under our booking rules. Please pick another slot.');
         } else {
           throw new Error(j?.error || 'Failed to create booking');
         }

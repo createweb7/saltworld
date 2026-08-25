@@ -584,6 +584,19 @@ async function handle(req, method, segs) {
       const therapySlugs = bodyTherapies.length > 0
         ? bodyTherapies.map((t) => t.slug).filter(Boolean)
         : (body.therapy ? [body.therapy] : []);
+      // Contact validation — email must match strict username@domain.tld
+      // format (backend source of truth). Rejects bookings before we touch
+      // any resource allocation.
+      const contactEmail = String(body?.contact?.email || '').trim();
+      if (contactEmail) {
+        const { isValidEmail, EMAIL_INVALID_MESSAGE } = await import('@/lib/email-validation');
+        if (!isValidEmail(contactEmail)) {
+          return NextResponse.json({
+            error: 'invalid_email', field: 'contact.email',
+            message: EMAIL_INVALID_MESSAGE,
+          }, { status: 400 });
+        }
+      }
       // Float-tank session mode ('single' | 'couple'), optional
       const sessionMode = body.sessionMode || null;
       // Derive an ISO startAt: prefer explicit body.startAt, else compose from slotDate+slotTime.
@@ -599,6 +612,19 @@ async function handle(req, method, segs) {
         if (!Number.isFinite(startMs) || startMs < Date.now()) {
           return NextResponse.json({ error: 'slot_in_past', reason: 'past_time' }, { status: 400 });
         }
+        // Booking Rules gate — per-therapy lead time, next-day 9PM cutoff,
+        // same-day 7PM cutoff. Same engine the frontend recommender uses.
+        try {
+          const { assertCanBook } = await import('@/lib/booking-rules');
+          const rulesCheck = await assertCanBook({ therapies: therapySlugs, startIso });
+          if (!rulesCheck.ok) {
+            return NextResponse.json({
+              error: rulesCheck.code || 'booking_rule_violation',
+              message: rulesCheck.message,
+              meta: rulesCheck.meta || null,
+            }, { status: 400 });
+          }
+        } catch (e) { console.error('assertCanBook failed', e); }
         try {
           const { allocateJourney, suggestNextAvailableSlots } = await import('@/lib/scheduling');
           const r = await allocateJourney({ therapySlugs, branchId, startIso, sessionMode });
@@ -871,6 +897,18 @@ async function handle(req, method, segs) {
       if (!newStart) return NextResponse.json({ error: 'startAt_required' }, { status: 400 });
       const therapySlugs = (doc.therapies || []).map((t) => t.slug).filter(Boolean);
       const sessionMode = body.sessionMode || doc.sessionMode || null;
+      // Booking-rules gate — reject reschedules that would violate lead time
+      // or cutoff windows.
+      {
+        const { assertCanBook } = await import('@/lib/booking-rules');
+        const rc = await assertCanBook({ therapies: therapySlugs, startIso: newStart });
+        if (!rc.ok) {
+          return NextResponse.json({
+            error: rc.code || 'booking_rule_violation',
+            message: rc.message, meta: rc.meta || null,
+          }, { status: 400 });
+        }
+      }
       const { allocateJourney, suggestNextAvailableSlots } = await import('@/lib/scheduling');
       const r = await allocateJourney({ therapySlugs, branchId: doc.branchId, startIso: newStart, excludeBookingId: bid, sessionMode });
       if (!r.ok) {
