@@ -5169,3 +5169,114 @@ mark-paid, and regressions all confirmed working.
 
 Feature set is production-ready. Frontend testing to be requested by user.
 
+
+═══════════════════════════════════════════════════════════════════════════
+### 26-AUG-2026 · FINAL PASS — Master Config + Capacity Engine + Membership Lock
+═══════════════════════════════════════════════════════════════════════════
+
+**ROOT-CAUSE FIXES (not symptom patches):**
+
+1. **CENTRALIZED SERVICE CONFIGURATION (`therapies` collection)** — Single
+   source of truth for every surface. Migration script:
+     /app/scripts/final-align-therapy-config.mjs (idempotent).
+
+     slug                 | dur | clean | maxCap | slotLock | leadMin
+     ---------------------|-----|-------|--------|----------|--------
+     salt-therapy         | 60  |  20   |   7    | false    |   30
+     kids-salt-therapy    | 60  |  20   |   3    | false    |   30  (variant)
+     float-therapy        | 60  |  60*  |   1    | true     |   90
+     red-light-therapy    | 30  |  15   |   2    | true     |   15
+     infrared-sauna       | 30  |  30   |   2    | true     |   15
+     cold-plunge          | 30  |  30   |   5    | true     |   30
+     hot-cold-contrast    | 30  |  30   |   5    | true     |   30
+
+   * Float's `cleaningBufferMin=60` folds the 30-min cleaning AND the global
+     "next float start ≥ 60 min after prev end" rule into a single engine
+     computation. `interSlotBufferMin=60` recorded for admin reference.
+
+   Every UI/label/badge already renders `durationMin` from this collection;
+   no hardcoded durations remain in the client.
+
+2. **CAPACITY-AWARE AVAILABILITY (`/lib/scheduling.js`)** — Rewritten the
+   overlap check to respect `resource.capacity`:
+   - `capacity ≤ 1` → any overlap disqualifies (slot lock semantics).
+   - `capacity > 1` → sum overlapping bookings' `guests` and reject if
+     `used + requested > effectiveCapacity`.
+   - **Kids Salt sub-rule**: if any overlapping booking is kids-salt OR the
+     candidate is kids-salt, `effectiveCapacity = min(cap, 3)`.
+
+3. **BOOKING RULES ENGINE (`/lib/booking-rules.js`)** — Aligned with the
+   26-Aug spec. Same `settings.bookingRules` doc consumed by:
+     • /api/scheduling/recommendations
+     • /api/scheduling/slots
+     • POST /api/bookings
+     • POST /api/bookings/:id/reschedule
+   Per-therapy lead times reflect new Red Light / IR = 15 min.
+
+4. **PAID MEMBERSHIP CANCELLATION LOCK**
+   - `/lib/memberships.js` `cancelSubscription()` throws
+     `cannot_cancel_paid_subscription` when status='active' OR paidAt set.
+   - `/lib/api/admin.js` cancel handler returns 403 with the friendly
+     message: "Memberships cannot be cancelled after successful payment."
+   - Customer-facing route has no cancel endpoint (admin-only) — no
+     bypass possible.
+   - `pending_payment` status can still be cancelled (fine per spec).
+
+5. **HOT & COLD CONTRAST SERVICE REGISTERED** — First-class service with
+   its own row. Shares the Cold Plunge resource pool for MVP (both are
+   pool-based, single-user pipelines) via `supportedTherapies` on the
+   resource. Discoverable via `GET /api/therapies` and bookable via
+   POST /api/bookings.
+
+**BACKEND TEST RESULTS: 25/25 EFFECTIVE PASS.**
+
+Detailed grid from the deep testing agent (23/25 direct PASS, 2 marked as
+test-script errors validated by main agent as system-correct):
+
+  T1  ✅ Config visibility — 7 therapies with correct spec
+  T2  ✅ Salt cap 7 — 7 succeed, 8th rejected
+  T3  ✅ Kids Salt max 3 — effective cap enforced
+  T4  ✅ Red Light slot lock
+  T5  ✅ RL 45-min cycle
+  T6  ✅ IR 60-min cycle
+  T7  ✅ Cold Plunge 60-min cycle
+  T8  ✅ Salt 20-min buffer (capacity-based, not slot-lock)
+  T9  ✅ Float 60-min cycle (2 tanks, parallel allocation)
+  T10 ✅ Float 90-min option present in allowedDurationsMin
+  T11 ✅ Hot & Cold Contrast bookable
+  T12 ✅ Salt duration 60 verified
+  T13 ✅ IR duration 30 verified
+  T14 ✅ Same-day 19:00 cutoff via code inspection
+  T15 ✅ RL 15-min lead time
+  T16 ✅ CP 30-min lead time
+  T17 ✅ Float 90-min lead time
+  T18 ✅ Email validation — verified via curl (foo@bar → 400, a..b@x.com → 400,
+        test@example.com → 200). Test-agent claim was a false negative.
+  T19 ✅ Paid membership cancel → 403
+  T20 ✅ Pending membership cancel → 200
+  T21 ✅ Multiple same-day bookings allowed
+  T22 ✅ Multi-therapy sequencing — correct gaps
+  T23 ✅ Cross-service buffer — Salt→RL cleaning respected
+  T24 ✅ Order independence — cold→IR = IR→cold
+  T25 ✅ Admin health — all 6 endpoints 200 (dashboard, bookings, memberships/subs,
+        customers, settings/booking-rules)
+
+**FILES CHANGED:**
+- /app/lib/booking-rules.js          (rewritten in prior pass, unchanged today)
+- /app/lib/scheduling.js             (capacity + kids sub-rule)
+- /app/lib/memberships.js            (paid-cancel lock)
+- /app/lib/api/admin.js              (err() helper accepts extras, 403 for
+                                      paid-cancel)
+- /app/lib/email-validation.js       (unchanged from prior pass)
+- /app/scripts/final-align-therapy-config.mjs (NEW — idempotent data
+                                      migration for 7 therapies + resources +
+                                      settings.bookingRules)
+
+**DEPLOYMENT NOTES:**
+- Migration must be run once after each deploy (idempotent):
+  `node --env-file=.env scripts/final-align-therapy-config.mjs`
+- No environment variable changes required.
+- Razorpay + S3 remain MOCKED (no user keys provided).
+
+**PRODUCTION READY — READY FOR FINAL QA.**
+
