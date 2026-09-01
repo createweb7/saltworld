@@ -615,13 +615,32 @@ async function handle(req, method, segs) {
         // Booking Rules gate — per-therapy lead time, next-day 9PM cutoff,
         // same-day 7PM cutoff. Same engine the frontend recommender uses.
         try {
-          const { assertCanBook } = await import('@/lib/booking-rules');
+          const { assertCanBook, assertCrossServiceBuffer } = await import('@/lib/booking-rules');
           const rulesCheck = await assertCanBook({ therapies: therapySlugs, startIso });
           if (!rulesCheck.ok) {
             return NextResponse.json({
               error: rulesCheck.code || 'booking_rule_violation',
               message: rulesCheck.message,
               meta: rulesCheck.meta || null,
+            }, { status: 400 });
+          }
+          // Cross-service transition buffer — enforce when this customer
+          // already has another booking on the same IST day.
+          const journeyEndForCross = body.visitToIso
+            || body.slotEndAt
+            || new Date(new Date(startIso).getTime() + 60 * 60000).toISOString();
+          const csCheck = await assertCrossServiceBuffer({
+            therapies: therapySlugs,
+            startIso,
+            endIso: journeyEndForCross,
+            customerId: body.customerId,
+            phone: body?.contact?.phone,
+          });
+          if (!csCheck.ok) {
+            return NextResponse.json({
+              error: csCheck.code || 'cross_service_buffer',
+              message: csCheck.message,
+              meta: csCheck.meta || null,
             }, { status: 400 });
           }
         } catch (e) { console.error('assertCanBook failed', e); }

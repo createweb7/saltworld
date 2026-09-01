@@ -345,7 +345,16 @@ function fmtVisit(mins) {
 
 function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSessionMode, onReorderTherapies }) {
   const days = useMemo(() => {
-    const start = new Date(); start.setHours(0,0,0,0);
+    // Auto-rollover: if IST wall-clock is past 20:00 (branch close) we hide
+    // "today" from the picker and default to tomorrow. TC-1 fix.
+    // Uses fixed IST offset (+5:30, no DST). MIN_LEAD_MIN is applied by the
+    // scheduling engine downstream so this only affects the calendar strip.
+    const now = new Date();
+    const istHour = new Date(now.getTime() + 330 * 60000).getUTCHours();
+    const branchCloseHour = 20;
+    const skipToday = istHour >= branchCloseHour;
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    if (skipToday) start.setDate(start.getDate() + 1);
     return Array.from({ length: 7 }).map((_, i) => {
       const d = new Date(start); d.setDate(d.getDate() + i);
       return d;
