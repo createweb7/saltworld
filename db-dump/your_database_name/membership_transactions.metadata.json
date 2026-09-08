@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"subscriptionId":{"$numberInt":"1"},"createdAt":{"$numberInt":"-1"}},"name":"subscriptionId_1_createdAt_-1"}],"uuid":"f49e2687ed3b41529f253f874d10d3d2","collectionName":"membership_transactions","type":"collection"}

@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"createdAt":{"$numberInt":"-1"}},"name":"createdAt_-1"},{"v":{"$numberInt":"2"},"key":{"actorId":{"$numberInt":"1"}},"name":"actorId_1"}],"uuid":"7f082b4b725c4302bbce779b4fac2a12","collectionName":"activityLog","type":"collection"}

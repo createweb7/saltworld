@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"phone":{"$numberInt":"1"},"createdAt":{"$numberInt":"-1"}},"name":"phone_1_createdAt_-1"}],"uuid":"5abdb80c67d7419d8cf7a61da0da11c4","collectionName":"otp","type":"collection"}
