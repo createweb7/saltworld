@@ -2,7 +2,8 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { TopNav, SiteFooter } from '@/components/site/shell';
 import { getCurrentCustomer } from '@/lib/customer-auth';
-import { getDb } from '@/lib/mongo';
+import { getSupabase } from '@/lib/supabase';
+import { toGiftcard } from '@/lib/db-mappers';
 import GiftCardsClient from './GiftCardsClient';
 import { Gift } from 'lucide-react';
 
@@ -11,8 +12,9 @@ export const metadata = { title: 'Gift cards · Salt World' };
 export default async function GiftCardsPage() {
   const customer = await getCurrentCustomer();
   if (!customer) redirect('/account/login?next=/account/giftcards');
-  const db = await getDb();
-  const cards = await db.collection('giftcards').find({ claimedByCustomerId: customer.id }).sort({ createdAt: -1 }).toArray();
+  const supabase = getSupabase();
+  const { data: rows } = await supabase.from('giftcards').select('*').eq('claimed_by_customer_id', customer.id).order('created_at', { ascending: false });
+  const cards = (rows || []).map(toGiftcard);
   return (
     <div className="min-h-screen bg-background text-foreground">
       <TopNav />
@@ -28,7 +30,7 @@ export default async function GiftCardsPage() {
           </div>
         </div>
         <div className="mt-8">
-          <GiftCardsClient initialCards={cards.map(({ _id, pin, ...rest }) => rest)} />
+          <GiftCardsClient initialCards={cards.map(({ pin, ...rest }) => rest)} />
         </div>
       </main>
       <SiteFooter />

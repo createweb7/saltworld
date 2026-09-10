@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ArrowRight, BookOpen } from 'lucide-react';
 import { TopNav, SiteFooter, StickyBookingBar } from '@/components/site/shell';
-import { getDb } from '@/lib/mongo';
+import { getSupabase } from '@/lib/supabase';
 
 export const metadata = {
   title: 'Journal · Salt World',
@@ -14,14 +14,9 @@ export const dynamic = 'force-dynamic';
 
 async function loadPublishedPosts() {
   try {
-    const db = await getDb();
-    const docs = await db
-      .collection('blog')
-      .find({ status: 'published' })
-      .sort({ publishedAt: -1, createdAt: -1 })
-      .limit(30)
-      .toArray();
-    return docs.map(({ _id, ...rest }) => rest);
+    const supabase = getSupabase();
+    const { data: rows } = await supabase.from('blog_posts').select('*').eq('status', 'published').order('created_at', { ascending: false }).limit(30);
+    return (rows || []).map((r) => ({ ...r.data, id: r.id, slug: r.slug, status: r.status, createdAt: r.created_at, updatedAt: r.updated_at }));
   } catch {
     return [];
   }

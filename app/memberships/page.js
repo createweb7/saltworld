@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ArrowRight, Check, Sparkles, Clock, Infinity as InfinityIcon } from 'lucide-react';
 import { TopNav, SiteFooter, StickyBookingBar } from '@/components/site/shell';
-import { getDb } from '@/lib/mongo';
+import { getSupabase } from '@/lib/supabase';
 
 export const metadata = {
   title: 'Memberships · Salt World',
@@ -9,9 +9,11 @@ export const metadata = {
 };
 
 async function loadPlans() {
-  const db = await getDb();
-  const docs = await db.collection('memberships').find({ active: { $ne: false } }).sort({ order: 1, price: 1 }).toArray();
-  return docs.map(({ _id, ...r }) => r);
+  const supabase = getSupabase();
+  const { data: rows } = await supabase.from('memberships').select('*').eq('active', true);
+  const plans = (rows || []).map((r) => ({ ...r.plan, id: r.id, slug: r.slug, name: r.name, active: r.active, createdAt: r.created_at, updatedAt: r.updated_at }));
+  plans.sort((a, b) => (Number(a.order) || 999) - (Number(b.order) || 999) || (Number(a.price) || 0) - (Number(b.price) || 0));
+  return plans;
 }
 
 function formatCurrency(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}`; }

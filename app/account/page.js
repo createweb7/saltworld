@@ -2,7 +2,9 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowRight, Calendar, Wallet, Gift, ClipboardList, User as UserIcon, LogOut, Users } from 'lucide-react';
 import { getCurrentCustomer } from '@/lib/customer-auth';
-import { getDb } from '@/lib/mongo';
+import { getSupabase } from '@/lib/supabase';
+import { toBooking, toSubscription } from '@/lib/db-mappers';
+import { customerHistory } from '@/lib/loyalty';
 import { TopNav, SiteFooter } from '@/components/site/shell';
 import { formatDate } from '@/lib/date';
 
@@ -10,17 +12,18 @@ export const metadata = { title: 'My account · Salt World' };
 export const dynamic = 'force-dynamic';
 
 async function loadDashboard(customerId, phone) {
-  const db = await getDb();
-  const filter = customerId ? { $or: [{ customerId }, { 'contact.phone': phone }] } : { 'contact.phone': phone };
-  const [bookings, activeSubs, recentTxs] = await Promise.all([
-    db.collection('bookings').find(filter).sort({ createdAt: -1 }).limit(20).toArray(),
-    db.collection('memberSubscriptions').find({ customerId, status: 'active' }).toArray(),
-    db.collection('wallet_transactions').find({ customerId }).sort({ createdAt: -1 }).limit(3).toArray(),
+  const supabase = getSupabase();
+  let bookingQuery = supabase.from('bookings').select('*').order('created_at', { ascending: false }).limit(20);
+  bookingQuery = customerId ? bookingQuery.or(`customer_id.eq.${customerId},contact_phone.eq.${phone}`) : bookingQuery.eq('contact_phone', phone);
+  const [{ data: bookingRows }, { data: subRows }, recentTxs] = await Promise.all([
+    bookingQuery,
+    customerId ? supabase.from('member_subscriptions').select('*').eq('customer_id', customerId).eq('status', 'active') : Promise.resolve({ data: [] }),
+    customerId ? customerHistory(customerId, 3) : Promise.resolve([]),
   ]);
   return {
-    bookings:  bookings.map(({ _id, ...r }) => r),
-    activeSubs: activeSubs.map(({ _id, ...r }) => r),
-    recentTxs:  recentTxs.map(({ _id, ...r }) => r),
+    bookings: (bookingRows || []).map(toBooking),
+    activeSubs: (subRows || []).map(toSubscription),
+    recentTxs,
   };
 }
 
@@ -30,7 +33,7 @@ export default async function AccountHome() {
   const { bookings, activeSubs, recentTxs } = await loadDashboard(customer.id, customer.phone);
 
   const today = new Date(new Date().toDateString());
-  const upcoming = bookings.filter((b) => b.slotDate && new Date(b.slotDate) >= today).slice(0, 5);
+  const upcoming = bookings.filter((b) => b.startAt && new Date(b.startAt) >= today).slice(0, 5);
   const past     = bookings.filter((b) => !upcoming.includes(b)).slice(0, 5);
 
   return (
@@ -146,7 +149,8 @@ function BalanceCard({ label, value, icon: Icon, href, hint }) {
 }
 
 function BookingRow({ b, muted }) {
-  const isoDate = b.slotDate ? formatDate(b.slotDate) : '';
+  const isoDate = b.startAt ? formatDate(b.startAt) : '';
+  const slotTime = b.startAt ? new Date(b.startAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : '';
   return (
     <Link href={`/account/bookings/${b.id}`} className={`rounded-xl border border-border p-4 md:p-5 flex items-center gap-4 flex-wrap hover:border-foreground/30 transition-colors ${muted ? 'bg-muted/30' : 'bg-card'}`}>
       <div className="flex-1 min-w-0">
@@ -154,7 +158,7 @@ function BookingRow({ b, muted }) {
         <div className="mt-1 font-serif text-[19px] leading-tight tracking-tight">
           {b.outcomeLabel || b.therapyLabel || b.therapy || 'Salt World session'}
         </div>
-        <div className="mt-1 text-[12.5px] text-muted-foreground">{isoDate}{b.slotTime ? ` · ${b.slotTime}` : ''}{b.schedule?.length > 1 ? ` · ${b.schedule.length} therapies` : ''}</div>
+        <div className="mt-1 text-[12.5px] text-muted-foreground">{isoDate}{slotTime ? ` · ${slotTime}` : ''}{b.schedule?.length > 1 ? ` · ${b.schedule.length} therapies` : ''}</div>
       </div>
       <div className="flex items-center gap-3 ml-auto">
         {b.total > 0 && <div className="font-mono text-[14px] font-semibold">₹{Number(b.total).toLocaleString('en-IN')}</div>}

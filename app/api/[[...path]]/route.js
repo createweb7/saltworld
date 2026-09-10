@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getDb, clean } from '@/lib/mongo';
+import { getSupabase } from '@/lib/supabase';
+import { toBooking, toBookingFull, toPage, toTherapy } from '@/lib/db-mappers';
 import { TEMPLATES, getTemplate, emptyPage } from '@/lib/templates';
 import { randomUUID } from 'crypto';
 import { adminHandle } from '@/lib/api/admin';
@@ -13,11 +14,16 @@ import {
 import { sendWhatsappTemplate, whatsappIsConfigured } from '@/lib/whatsapp';
 
 const slugify = (s) => (s || 'page').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'page';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-async function uniqueSlug(db, base) {
+async function uniqueSlug(supabase, base) {
   let slug = base, i = 1;
-  while (await db.collection('pages').findOne({ slug })) slug = `${base}-${++i}`;
-  return slug;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { data } = await supabase.from('pages').select('id').eq('slug', slug).maybeSingle();
+    if (!data) return slug;
+    slug = `${base}-${++i}`;
+  }
 }
 
 async function handle(req, method, segs) {
@@ -26,13 +32,10 @@ async function handle(req, method, segs) {
     return adminHandle(req, method, segs.slice(1));
   }
 
-  const db = await getDb();
-  const col = db.collection('pages');
-  const bookings = db.collection('bookings');
+  const supabase = getSupabase();
 
   // ------- Leads (Corporate / General) -------
   if (segs[0] === 'leads') {
-    const leadsCol = db.collection('leads');
     if (segs.length === 1 && method === 'POST') {
       const body = await req.json().catch(() => ({}));
       const now = new Date();
@@ -50,32 +53,40 @@ async function handle(req, method, segs) {
       if (!doc.email || !doc.name) {
         return NextResponse.json({ error: 'name_email_required' }, { status: 400 });
       }
-      await leadsCol.insertOne(doc);
-      const { _id, ...cleanDoc } = doc;
-      return NextResponse.json(cleanDoc);
+      const { error } = await supabase.from('leads').insert({
+        id: doc.id, name: doc.name, email: doc.email, company: doc.company, team_size: doc.teamSize,
+        notes: doc.notes, source: doc.source, status: doc.status, created_at: doc.createdAt,
+      });
+      if (error) return NextResponse.json({ error: 'insert_failed' }, { status: 500 });
+      return NextResponse.json(doc);
     }
     if (segs.length === 1 && method === 'GET') {
-      const docs = await leadsCol.find({}).sort({ createdAt: -1 }).limit(200).toArray();
-      return NextResponse.json(docs.map(clean));
+      const { data: rows } = await supabase.from('leads').select('*').order('created_at', { ascending: false }).limit(200);
+      return NextResponse.json((rows || []).map((r) => ({
+        ...r.data, id: r.id, name: r.name, email: r.email, company: r.company, teamSize: r.team_size,
+        notes: r.notes, source: r.source, status: r.status, createdAt: r.created_at,
+      })));
     }
   }
 
   // ------- Public mini-blogs (homepage strip) -------
   if (segs[0] === 'mini-blogs' && segs.length === 1 && method === 'GET') {
-    const docs = await db.collection('mini_blog')
-      .find({ status: 'published' })
-      .sort({ order: 1, createdAt: -1 })
-      .limit(24)
-      .toArray();
-    return NextResponse.json(docs.map(({ _id, ...rest }) => rest));
+    const { data: rows } = await supabase.from('mini_blog_posts').select('*')
+      .eq('status', 'published').order('order', { ascending: true }).order('created_at', { ascending: false }).limit(24);
+    return NextResponse.json((rows || []).map((r) => ({
+      ...r.data, id: r.id, status: r.status, order: r.order, createdAt: r.created_at, updatedAt: r.updated_at,
+    })));
   }
 
   // ------- Public outcome→therapy mapping (used by /book step 2) -------
   if (segs[0] === 'outcome-mapping' && segs.length === 2 && method === 'GET') {
-    const doc = await db.collection('outcome_therapy_map').findOne({ outcomeSlug: segs[1], active: { $ne: false } });
-    if (!doc) return NextResponse.json({ error: 'not_configured' }, { status: 404 });
-    const { _id, ...rest } = doc;
-    return NextResponse.json(rest);
+    const { data: row } = await supabase.from('outcome_therapy_map').select('*')
+      .eq('outcome_slug', segs[1]).neq('active', false).maybeSingle();
+    if (!row) return NextResponse.json({ error: 'not_configured' }, { status: 404 });
+    return NextResponse.json({
+      ...row.data, id: row.id, outcomeSlug: row.outcome_slug, active: row.active,
+      createdAt: row.created_at, updatedAt: row.updated_at,
+    });
   }
 
   // ------- Public memberships (plans, customer subs, purchase) -------
@@ -103,28 +114,35 @@ async function handle(req, method, segs) {
       const code = String(body.code || '').trim().toUpperCase();
       const pin  = String(body.pin  || '').trim();
       if (!code || !pin) return NextResponse.json({ error: 'code_and_pin_required' }, { status: 400 });
-      const gc = await db.collection('giftcards').findOne({ code });
+      const { data: gc } = await supabase.from('giftcards').select('*').eq('code', code).maybeSingle();
       if (!gc)             return NextResponse.json({ error: 'not_found' }, { status: 404 });
       if (gc.pin && gc.pin !== pin) return NextResponse.json({ error: 'invalid_pin' }, { status: 403 });
       if (gc.status !== 'active')   return NextResponse.json({ error: `card_${gc.status}` }, { status: 400 });
-      if (gc.expiresAt && new Date(gc.expiresAt).getTime() < Date.now()) return NextResponse.json({ error: 'expired' }, { status: 400 });
-      if (gc.claimedByCustomerId && gc.claimedByCustomerId !== customer.id) {
+      if (gc.expires_at && new Date(gc.expires_at).getTime() < Date.now()) return NextResponse.json({ error: 'expired' }, { status: 400 });
+      if (gc.claimed_by_customer_id && gc.claimed_by_customer_id !== customer.id) {
         return NextResponse.json({ error: 'already_claimed' }, { status: 400 });
       }
-      await db.collection('giftcards').updateOne({ id: gc.id }, { $set: {
-        claimedByCustomerId: customer.id,
-        claimedAt: new Date().toISOString(),
-      }});
-      const after = await db.collection('giftcards').findOne({ id: gc.id });
-      const { _id, pin: _p, ...rest } = after;
-      return NextResponse.json({ ok: true, giftcard: rest });
+      await supabase.from('giftcards').update({
+        claimed_by_customer_id: customer.id, claimed_at: new Date().toISOString(),
+      }).eq('id', gc.id);
+      const { data: after } = await supabase.from('giftcards').select('*').eq('id', gc.id).single();
+      const { pin: _p, data, ...rest } = after;
+      return NextResponse.json({ ok: true, giftcard: {
+        ...data, id: rest.id, code: rest.code, balance: rest.balance, status: rest.status,
+        claimedByCustomerId: rest.claimed_by_customer_id, claimedAt: rest.claimed_at, expiresAt: rest.expires_at,
+        createdAt: rest.created_at, updatedAt: rest.updated_at,
+      } });
     }
 
     // GET /api/customer/giftcards → all cards owned by this customer
     if (segs.length === 2 && method === 'GET') {
       if (!customer) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
-      const docs = await db.collection('giftcards').find({ claimedByCustomerId: customer.id }).sort({ createdAt: -1 }).toArray();
-      return NextResponse.json(docs.map(({ _id, pin, ...rest }) => rest));
+      const { data: rows } = await supabase.from('giftcards').select('*').eq('claimed_by_customer_id', customer.id).order('created_at', { ascending: false });
+      return NextResponse.json((rows || []).map(({ pin, data, ...r }) => ({
+        ...data, id: r.id, code: r.code, balance: r.balance, status: r.status,
+        claimedByCustomerId: r.claimed_by_customer_id, claimedAt: r.claimed_at, expiresAt: r.expires_at,
+        createdAt: r.created_at, updatedAt: r.updated_at,
+      })));
     }
   }
 
@@ -172,18 +190,18 @@ async function handle(req, method, segs) {
     };
     addPhone(body.phone);
     if (body.customerId) {
-      const cust = await db.collection('customers').findOne({ id: body.customerId }, { projection: { phone: 1 } });
+      const { data: cust } = await supabase.from('customers').select('phone').eq('id', body.customerId).maybeSingle();
       if (cust?.phone) addPhone(cust.phone);
     }
     // Count non-cancelled prior bookings by customerId OR any known phone.
     let customerBookingsCount = 0;
-    const or = [];
-    if (body.customerId) or.push({ customerId: body.customerId });
-    if (phones.size > 0) or.push({ 'contact.phone': { $in: [...phones] } });
-    if (or.length > 0) {
-      customerBookingsCount = await db.collection('bookings').countDocuments({
-        $or: or, status: { $nin: ['cancelled'] },
-      });
+    const ors = [];
+    if (body.customerId) ors.push(`customer_id.eq.${body.customerId}`);
+    if (phones.size > 0) ors.push(`contact_phone.in.(${[...phones].join(',')})`);
+    if (ors.length > 0) {
+      const { count } = await supabase.from('bookings').select('id', { count: 'exact', head: true })
+        .neq('status', 'cancelled').or(ors.join(','));
+      customerBookingsCount = count || 0;
     }
     const result = await validateCoupon(coupon, {
       subtotalInr: Number(body.subtotalInr) || 0,
@@ -198,15 +216,19 @@ async function handle(req, method, segs) {
   if (segs[0] === 'memberships') {
     // GET /api/memberships → all active plans (public catalog)
     if (segs.length === 1 && method === 'GET') {
-      const docs = await db.collection('memberships').find({ active: { $ne: false } }).sort({ order: 1, price: 1 }).toArray();
-      return NextResponse.json(docs.map(({ _id, ...r }) => r));
+      const { data: rows } = await supabase.from('memberships').select('*').neq('active', false);
+      const docs = (rows || [])
+        .map((r) => ({ ...r.plan, id: r.id, slug: r.slug, name: r.name, active: r.active, createdAt: r.created_at, updatedAt: r.updated_at }))
+        .sort((a, b) => (Number(a.order) || 100) - (Number(b.order) || 100) || (Number(a.price) || 0) - (Number(b.price) || 0));
+      return NextResponse.json(docs);
     }
     // GET /api/memberships/:slug → one plan by slug OR id
     if (segs.length === 2 && method === 'GET') {
-      const doc = await db.collection('memberships').findOne({ $or: [{ slug: segs[1] }, { id: segs[1] }], active: { $ne: false } });
-      if (!doc) return NextResponse.json({ error: 'not_found' }, { status: 404 });
-      const { _id, ...r } = doc;
-      return NextResponse.json(r);
+      let query = supabase.from('memberships').select('*').neq('active', false);
+      query = UUID_RE.test(segs[1]) ? query.or(`slug.eq.${segs[1]},id.eq.${segs[1]}`) : query.eq('slug', segs[1]);
+      const { data: row } = await query.maybeSingle();
+      if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      return NextResponse.json({ ...row.plan, id: row.id, slug: row.slug, name: row.name, active: row.active, createdAt: row.created_at, updatedAt: row.updated_at });
     }
     // POST /api/memberships/purchase → { planId, paymentMethod:'online'|'offline', razorpayPaymentId? }
     // For online path, the caller has already completed a Razorpay checkout via a
@@ -244,11 +266,12 @@ async function handle(req, method, segs) {
   // ------- Customer subscriptions (signed-in) -------
   if (segs[0] === 'customer' && segs[1] === 'subscriptions') {
     const { getCurrentCustomer } = await import('@/lib/customer-auth');
+    const { toSubscription } = await import('@/lib/db-mappers');
     const customer = await getCurrentCustomer();
     if (!customer) return NextResponse.json({ error: 'not_signed_in' }, { status: 401 });
     if (segs.length === 2 && method === 'GET') {
-      const subs = await db.collection('memberSubscriptions').find({ customerId: customer.id }).sort({ startAt: -1 }).toArray();
-      return NextResponse.json(subs.map(({ _id, ...r }) => r));
+      const { data: rows } = await supabase.from('member_subscriptions').select('*').eq('customer_id', customer.id).order('starts_at', { ascending: false });
+      return NextResponse.json((rows || []).map(toSubscription));
     }
     // Membership-aware booking: return subscriptions that cover the requested
     // therapies + branch, still active, with remaining sessions. Used by the
@@ -261,9 +284,9 @@ async function handle(req, method, segs) {
       const atIso     = u.searchParams.get('atIso') || null;
 
       const { validateForBooking } = await import('@/lib/memberships');
-      const active = await db.collection('memberSubscriptions').find({
-        customerId: customer.id, status: 'active',
-      }).sort({ endAt: 1 }).toArray();
+      const { data: activeRows } = await supabase.from('member_subscriptions').select('*')
+        .eq('customer_id', customer.id).eq('status', 'active').order('expires_at', { ascending: true });
+      const active = (activeRows || []).map(toSubscription);
 
       const results = [];
       for (const sub of active) {
@@ -286,25 +309,27 @@ async function handle(req, method, segs) {
           perTherapy.push({ therapySlug: '*', ok: false, reason: 'insufficient_sessions_for_journey' });
         }
         if (allOk) {
-          const { _id, ...rest } = sub;
-          results.push({
-            subscription: rest,
-            perTherapy,
-            willConsume,
-          });
+          results.push({ subscription: sub, perTherapy, willConsume });
         }
       }
       return NextResponse.json({ therapies, eligible: results });
     }
     const sid = segs[2];
     if (sid && segs[3] === 'usage' && method === 'GET') {
-      const rows = await db.collection('membership_usage').find({ subscriptionId: sid, customerId: customer.id }).sort({ consumedAt: -1 }).limit(50).toArray();
-      return NextResponse.json(rows.map(({ _id, ...r }) => r));
+      // Verify ownership via the subscription row (membership_usage has no
+      // customer_id column of its own), then list its usage.
+      const { data: subRow } = await supabase.from('member_subscriptions').select('id').eq('id', sid).eq('customer_id', customer.id).maybeSingle();
+      if (!subRow) return NextResponse.json([]);
+      const { data: rows } = await supabase.from('membership_usage').select('*').eq('subscription_id', sid).order('consumed_at', { ascending: false }).limit(50);
+      return NextResponse.json((rows || []).map((r) => ({
+        ...r.data, id: r.id, subscriptionId: r.subscription_id, bookingId: r.booking_id,
+        therapySlug: r.therapy_slug, consumedAt: r.consumed_at,
+      })));
     }
     if (sid && segs[3] === 'freeze' && method === 'POST') {
       try {
         const { freezeSubscription } = await import('@/lib/memberships');
-        const sub = await db.collection('memberSubscriptions').findOne({ id: sid, customerId: customer.id });
+        const { data: sub } = await supabase.from('member_subscriptions').select('id').eq('id', sid).eq('customer_id', customer.id).maybeSingle();
         if (!sub) return NextResponse.json({ error: 'not_found' }, { status: 404 });
         const after = await freezeSubscription({ subscriptionId: sid, actorId: customer.id, reason: 'customer_freeze' });
         return NextResponse.json({ ok: true, subscription: after });
@@ -313,7 +338,7 @@ async function handle(req, method, segs) {
     if (sid && segs[3] === 'unfreeze' && method === 'POST') {
       try {
         const { unfreezeSubscription } = await import('@/lib/memberships');
-        const sub = await db.collection('memberSubscriptions').findOne({ id: sid, customerId: customer.id });
+        const { data: sub } = await supabase.from('member_subscriptions').select('id').eq('id', sid).eq('customer_id', customer.id).maybeSingle();
         if (!sub) return NextResponse.json({ error: 'not_found' }, { status: 404 });
         const after = await unfreezeSubscription({ subscriptionId: sid, actorId: customer.id });
         return NextResponse.json({ ok: true, subscription: after });
@@ -403,21 +428,24 @@ async function handle(req, method, segs) {
 
   // ------- Public therapies (used by /therapies pages + booking flow) -------
   if (segs[0] === 'therapies') {
-    const therapiesCol = db.collection('therapies');
     if (segs.length === 1 && method === 'GET') {
       // Only publish therapies that are active AND online-bookable by default
-      const docs = await therapiesCol.find({ active: { $ne: false } }).sort({ isSystem: -1, name: 1 }).toArray();
-      return NextResponse.json(docs.map(({ _id, ...rest }) => rest));
+      const { data: rows } = await supabase.from('therapies').select('*').neq('active', false)
+        .order('is_system', { ascending: false }).order('name', { ascending: true });
+      return NextResponse.json((rows || []).map(toTherapy));
     }
     if (segs.length === 2 && method === 'GET') {
-      const doc = await therapiesCol.findOne({ slug: segs[1], active: { $ne: false } });
-      if (!doc) return NextResponse.json({ error: 'not_found' }, { status: 404 });
-      const { _id, ...rest } = doc;
+      const { data: row } = await supabase.from('therapies').select('*, therapy_resources(resource_id)').eq('slug', segs[1]).neq('active', false).maybeSingle();
+      if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      const rest = toTherapy(row);
+      const resourceIds = (row.therapy_resources || []).map((tr) => tr.resource_id);
       // Attach linked resources by branch (public: only names & count, no ids)
-      const resources = await db.collection('resources').find({ id: { $in: rest.resourceIds || [] } }).toArray();
+      const { data: resources } = resourceIds.length
+        ? await supabase.from('resources').select('branch_id').in('id', resourceIds)
+        : { data: [] };
       const byBranch = {};
-      for (const r of resources) {
-        const bid = r.branchId || 'default';
+      for (const r of resources || []) {
+        const bid = r.branch_id || 'default';
         byBranch[bid] = (byBranch[bid] || 0) + 1;
       }
       rest.resourceCountByBranch = byBranch;
@@ -564,8 +592,8 @@ async function handle(req, method, segs) {
 
   // ------- Public analytics config (only public IDs, no secrets) -------
   if (segs[0] === 'analytics-config' && segs.length === 1 && method === 'GET') {
-    const doc = await db.collection('settings').findOne({ key: 'analytics' });
-    const v = doc?.value || {};
+    const { data: row } = await supabase.from('app_settings').select('value').eq('key', 'analytics').maybeSingle();
+    const v = row?.value || {};
     return NextResponse.json({
       gtmId:        v.gtmId        || null,
       ga4Id:        v.ga4Id        || null,
@@ -638,12 +666,9 @@ async function handle(req, method, segs) {
       // and last-slot gating below).
       const requestedGuests = Math.max(1, Number(body.guests) || 1);
       if (therapySlugs.length > 0 && requestedGuests > 1) {
-        const capDocs = await db.collection('therapies')
-          .find({ slug: { $in: therapySlugs } })
-          .project({ slug: 1, maxCapacity: 1 })
-          .toArray();
-        const strictestCap = capDocs.reduce((min, t) => {
-          const cap = Number(t.maxCapacity);
+        const { data: capDocs } = await supabase.from('therapies').select('slug, max_capacity').in('slug', therapySlugs);
+        const strictestCap = (capDocs || []).reduce((min, t) => {
+          const cap = Number(t.max_capacity);
           return cap > 0 ? Math.min(min, cap) : min;
         }, Infinity);
         if (Number.isFinite(strictestCap) && requestedGuests > strictestCap) {
@@ -725,14 +750,14 @@ async function handle(req, method, segs) {
         } catch (e) { console.error('allocateJourney failed', e); }
       }
 
+      const bookingId = randomUUID();
       const doc = {
-        id: randomUUID(),
+        id: bookingId,
         ref,
         outcome:      body.outcome      || null,
         outcomeLabel: body.outcomeLabel || null,
         therapy:      body.therapy      || null,
         therapyLabel: body.therapyLabel || null,
-        therapies:    bodyTherapies.length > 0 ? bodyTherapies : (body.therapy ? [{ slug: body.therapy, label: body.therapyLabel, role: 'Primary' }] : []),
         sessionMode: sessionMode || null,
         slotDate:   body.slotDate   || null,
         slotTime:   body.slotTime   || null,
@@ -742,25 +767,16 @@ async function handle(req, method, segs) {
         customerId: body.customerId || null,
         bookedForOther: !!body.bookedForOther,
         branchId,
-        // Primary (first therapy) — surfaced for calendar row rendering
-        resourceId,
-        resourceName,
-        blockedFrom,
-        blockedTo,
-        // Full journey schedule with per-therapy resource assignment
-        schedule,
+        resourceId, resourceName, blockedFrom, blockedTo,
         payment:    body.payment    || 'at-visit',
         priceLine:  body.priceLine  || null,
         total:      body.total      || 0,
-        // Pricing engine breakdown — populated below
         pricingBreakdown: null,
-        // Coupon fields (populated below if a valid coupon is supplied)
-        couponCode:      null,
-        couponId:        null,
-        couponDiscount:  0,
+        couponCode: null, couponId: null, couponDiscount: 0,
         status:     'confirmed',
         createdAt:  now.toISOString(),
       };
+      const therapyLines = bodyTherapies.length > 0 ? bodyTherapies : (body.therapy ? [{ slug: body.therapy, label: body.therapyLabel, role: 'Primary' }] : []);
 
       // -----------------------------------------------------------------
       // UNIFIED PRICING ENGINE — single source of truth for booking totals
@@ -837,8 +853,40 @@ async function handle(req, method, segs) {
         }
       }
 
-
-      await bookings.insertOne(doc);
+      const usedKeys = ['id','ref','outcome','outcomeLabel','therapy','therapyLabel','sessionMode','slotDate','slotTime',
+        'startAt','guests','contact','customerId','bookedForOther','branchId','resourceId','resourceName','blockedFrom',
+        'blockedTo','payment','priceLine','total','pricingBreakdown','couponCode','couponId','couponDiscount','status','createdAt'];
+      const { error: insertErr } = await supabase.from('bookings').insert({
+        id: doc.id, ref: doc.ref, branch_id: doc.branchId, customer_id: doc.customerId, booked_for_other: doc.bookedForOther,
+        outcome: doc.outcome, outcome_label: doc.outcomeLabel, session_mode: doc.sessionMode,
+        contact_name: doc.contact?.name || '', contact_phone: doc.contact?.phone || '', contact_email: doc.contact?.email || '',
+        start_at: doc.startAt, blocked_from: doc.blockedFrom, blocked_to: doc.blockedTo, guests: doc.guests,
+        status: doc.status, payment: doc.payment, total: doc.total, pricing_breakdown: doc.pricingBreakdown,
+        coupon_id: doc.couponId, coupon_code: doc.couponCode, coupon_discount: doc.couponDiscount,
+        primary_resource_id: doc.resourceId, primary_resource_name: doc.resourceName,
+        created_at: doc.createdAt, updated_at: doc.createdAt,
+        data: { ...Object.fromEntries(Object.entries(doc).filter(([k]) => !usedKeys.includes(k))), slotDate: doc.slotDate, slotTime: doc.slotTime, priceLine: doc.priceLine },
+      });
+      if (insertErr) {
+        console.error('booking insert failed', insertErr);
+        return NextResponse.json({ error: 'booking_insert_failed' }, { status: 500 });
+      }
+      let pos = 0;
+      for (const t of therapyLines) {
+        if (!t?.slug) continue;
+        await supabase.from('booking_therapies').insert({
+          id: randomUUID(), booking_id: bookingId, therapy_slug: t.slug, label: t.label || null, role: t.role || null,
+          duration_min: durationOverrides[t.slug] || t.durationMin || null, position: pos++,
+        });
+      }
+      let spos = 0;
+      for (const s of schedule || []) {
+        if (!s?.resourceId || !s?.from || !s?.to) continue;
+        await supabase.from('booking_schedule_items').insert({
+          id: randomUUID(), booking_id: bookingId, therapy_slug: s.therapySlug || null, resource_id: s.resourceId,
+          starts_at: s.from, ends_at: s.to, position: spos++,
+        });
+      }
 
       // Commit wallet debit, gift card debit, and coupon redemption ledger.
       // Gift-card and coupon side effects apply even to guest bookings; only
@@ -856,12 +904,13 @@ async function handle(req, method, segs) {
       if (membershipApplied) {
         try {
           const { consumeForBooking } = await import('@/lib/memberships');
+          const { toSubscription } = await import('@/lib/db-mappers');
           // Re-fetch AFTER each consume so sessionsRemaining reflects prior calls.
           for (const t of therapySlugs) {
-            const subDoc = await db.collection('memberSubscriptions').findOne({ id: membershipApplied.subscriptionId });
-            if (!subDoc) break;
+            const { data: subRow } = await supabase.from('member_subscriptions').select('*').eq('id', membershipApplied.subscriptionId).maybeSingle();
+            if (!subRow) break;
             await consumeForBooking({
-              subscription: subDoc,
+              subscription: toSubscription(subRow),
               bookingId: doc.id,
               therapySlug: t,
               branchId,
@@ -870,10 +919,6 @@ async function handle(req, method, segs) {
           }
         } catch (e) { console.error('consumeForBooking failed', e); }
       }
-
-
-      // Coupon redemption ledger is now handled by commitQuoteSideEffects
-      // (see call site above). Legacy block removed.
 
       // Loyalty: award earn points for signed-in customers.
       if (doc.customerId && Number(doc.total) > 0) {
@@ -906,14 +951,14 @@ async function handle(req, method, segs) {
           }))
         .catch(() => {});
 
-      const { _id, ...cleanDoc } = doc;
-      return NextResponse.json(cleanDoc);
+      doc.therapies = therapyLines;
+      doc.schedule = schedule;
+      return NextResponse.json(doc);
     }
     if (segs[1] && method === 'GET') {
-      const doc = await bookings.findOne({ id: segs[1] });
-      if (!doc) return NextResponse.json({ error: 'not_found' }, { status: 404 });
-      const { _id, ...cleanDoc } = doc;
-      return NextResponse.json(cleanDoc);
+      const { data: row } = await supabase.from('bookings').select('*').eq('id', segs[1]).maybeSingle();
+      if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      return NextResponse.json(await toBookingFull(supabase, row));
     }
 
     // Customer-initiated cancel / reschedule (cutoff enforced).
@@ -923,44 +968,42 @@ async function handle(req, method, segs) {
       const bid = segs[1];
       const { getCurrentCustomer } = await import('@/lib/customer-auth');
       const customer = await getCurrentCustomer();
-      const doc = await bookings.findOne({ id: bid });
-      if (!doc) return NextResponse.json({ error: 'not_found' }, { status: 404 });
-      if (!customer || doc.customerId !== customer.id) {
+      const { data: row } = await supabase.from('bookings').select('*').eq('id', bid).maybeSingle();
+      if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      if (!customer || row.customer_id !== customer.id) {
         return NextResponse.json({ error: 'forbidden' }, { status: 403 });
       }
-      if (['cancelled', 'completed', 'no_show', 'in_session'].includes(doc.status)) {
-        return NextResponse.json({ error: `already_${doc.status}` }, { status: 400 });
+      if (['cancelled', 'completed', 'no_show', 'in_session'].includes(row.status)) {
+        return NextResponse.json({ error: `already_${row.status}` }, { status: 400 });
       }
       const { assertCustomerCanMutate } = await import('@/lib/booking-rules');
       try {
-        await assertCustomerCanMutate(doc, 'cancel');
+        await assertCustomerCanMutate(toBooking(row), 'cancel');
       } catch (e) {
         return NextResponse.json({ error: 'cutoff_passed', cutoff: e.cutoff, rules: e.rules }, { status: 403 });
       }
       const body = await req.json().catch(() => ({}));
-      await bookings.updateOne({ id: bid }, { $set: {
-        status: 'cancelled',
-        cancelledAt: new Date().toISOString(),
-        cancelledBy: 'customer',
-        cancelReason: body.reason || null,
-      }});
-      const after = await bookings.findOne({ id: bid });
-      const { _id, ...clean } = after;
-      return NextResponse.json({ ok: true, booking: clean });
+      await supabase.from('bookings').update({
+        status: 'cancelled', updated_at: new Date().toISOString(),
+        data: { ...row.data, cancelledAt: new Date().toISOString(), cancelledBy: 'customer', cancelReason: body.reason || null },
+      }).eq('id', bid);
+      const { data: after } = await supabase.from('bookings').select('*').eq('id', bid).single();
+      return NextResponse.json({ ok: true, booking: await toBookingFull(supabase, after) });
     }
 
     if (segs[1] && segs[2] === 'reschedule' && method === 'POST') {
       const bid = segs[1];
       const { getCurrentCustomer } = await import('@/lib/customer-auth');
       const customer = await getCurrentCustomer();
-      const doc = await bookings.findOne({ id: bid });
-      if (!doc) return NextResponse.json({ error: 'not_found' }, { status: 404 });
-      if (!customer || doc.customerId !== customer.id) {
+      const { data: row } = await supabase.from('bookings').select('*').eq('id', bid).maybeSingle();
+      if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      if (!customer || row.customer_id !== customer.id) {
         return NextResponse.json({ error: 'forbidden' }, { status: 403 });
       }
-      if (['cancelled', 'completed', 'no_show', 'in_session'].includes(doc.status)) {
-        return NextResponse.json({ error: `already_${doc.status}` }, { status: 400 });
+      if (['cancelled', 'completed', 'no_show', 'in_session'].includes(row.status)) {
+        return NextResponse.json({ error: `already_${row.status}` }, { status: 400 });
       }
+      const doc = await toBookingFull(supabase, row);
       const { assertCustomerCanMutate } = await import('@/lib/booking-rules');
       try {
         await assertCustomerCanMutate(doc, 'reschedule');
@@ -998,22 +1041,22 @@ async function handle(req, method, segs) {
         const suggestions = await suggestNextAvailableSlots({ therapySlugs, branchId: doc.branchId, startIso: newStart, sessionMode, durationOverrides, limit: 5 }).catch(() => []);
         return NextResponse.json({ error: 'slot_unavailable', reason: r.reason, suggestions }, { status: 409 });
       }
-      await bookings.updateOne({ id: bid }, { $set: {
-        startAt: newStart,
-        slotDate: body.slotDate || newStart.slice(0, 10),
-        slotTime: body.slotTime || newStart.slice(11, 16),
-        sessionMode,
-        resourceId: r.resourceId,
-        resourceName: r.resourceName,
-        blockedFrom: r.blockedFrom,
-        blockedTo: r.blockedTo,
-        schedule: r.schedule,
-        rescheduledAt: new Date().toISOString(),
-        rescheduledBy: 'customer',
-      }});
-      const after = await bookings.findOne({ id: bid });
-      const { _id, ...clean } = after;
-      return NextResponse.json({ ok: true, booking: clean });
+      await supabase.from('bookings').update({
+        start_at: newStart, session_mode: sessionMode,
+        primary_resource_id: r.resourceId, primary_resource_name: r.resourceName,
+        blocked_from: r.blockedFrom, blocked_to: r.blockedTo, updated_at: new Date().toISOString(),
+        data: { ...row.data, slotDate: body.slotDate || newStart.slice(0, 10), slotTime: body.slotTime || newStart.slice(11, 16), rescheduledAt: new Date().toISOString(), rescheduledBy: 'customer' },
+      }).eq('id', bid);
+      await supabase.from('booking_schedule_items').delete().eq('booking_id', bid);
+      let spos = 0;
+      for (const s of r.schedule || []) {
+        await supabase.from('booking_schedule_items').insert({
+          id: randomUUID(), booking_id: bid, therapy_slug: s.therapySlug || null, resource_id: s.resourceId,
+          starts_at: s.from, ends_at: s.to, position: spos++,
+        });
+      }
+      const { data: after } = await supabase.from('bookings').select('*').eq('id', bid).single();
+      return NextResponse.json({ ok: true, booking: await toBookingFull(supabase, after) });
     }
   }
 
@@ -1053,7 +1096,7 @@ async function handle(req, method, segs) {
       if (!Number.isFinite(amt) || amt <= 0) {
         return NextResponse.json({ error: 'invalid_amount' }, { status: 400 });
       }
-      const booking = await bookings.findOne({ id: bookingId });
+      const { data: booking } = await supabase.from('bookings').select('id, ref').eq('id', bookingId).maybeSingle();
       if (!booking) return NextResponse.json({ error: 'booking_not_found' }, { status: 404 });
 
       if (!(await razorpayIsConfigured())) {
@@ -1073,14 +1116,10 @@ async function handle(req, method, segs) {
         return NextResponse.json({ error: 'razorpay_error', details: String(e?.message || e) }, { status: 502 });
       }
 
-      await db.collection('bookingPayments').insertOne({
-        id: randomUUID(),
-        bookingId,
-        razorpayOrderId: order.id,
-        amount: order.amount,
-        currency: order.currency,
-        status: 'created',
-        createdAt: new Date().toISOString(),
+      await supabase.from('booking_payments').insert({
+        id: randomUUID(), booking_id: bookingId, provider: 'razorpay', provider_order_id: order.id,
+        amount: order.amount, status: 'created', created_at: new Date().toISOString(),
+        raw: { currency: order.currency },
       });
 
       const keyId = await getPublicKeyId();
@@ -1094,33 +1133,33 @@ async function handle(req, method, segs) {
       if (!bookingId || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
         return NextResponse.json({ success: false, error: 'missing_fields' }, { status: 400 });
       }
-      const paymentRecord = await db.collection('bookingPayments').findOne({
-        bookingId, razorpayOrderId: razorpay_order_id,
-      });
+      const { data: paymentRecord } = await supabase.from('booking_payments').select('*')
+        .eq('booking_id', bookingId).eq('provider_order_id', razorpay_order_id).maybeSingle();
       if (!paymentRecord) {
         return NextResponse.json({ success: false, error: 'payment_record_not_found' }, { status: 404 });
       }
       const valid = await rpVerifySignature({
-        orderId: paymentRecord.razorpayOrderId,
+        orderId: paymentRecord.provider_order_id,
         paymentId: razorpay_payment_id,
         signature: razorpay_signature,
       });
       const nowIso = new Date().toISOString();
       if (!valid) {
-        await db.collection('bookingPayments').updateOne(
-          { id: paymentRecord.id },
-          { $set: { status: 'signature_failed', razorpayPaymentId: razorpay_payment_id, verifiedAt: nowIso } },
-        );
+        await supabase.from('booking_payments').update({
+          status: 'signature_failed', provider_payment_id: razorpay_payment_id,
+          raw: { ...paymentRecord.raw, verifiedAt: nowIso }, updated_at: nowIso,
+        }).eq('id', paymentRecord.id);
         return NextResponse.json({ success: false, error: 'signature_mismatch' }, { status: 400 });
       }
-      await db.collection('bookingPayments').updateOne(
-        { id: paymentRecord.id },
-        { $set: { status: 'verified', razorpayPaymentId: razorpay_payment_id, verifiedAt: nowIso } },
-      );
-      await bookings.updateOne(
-        { id: bookingId },
-        { $set: { payment: 'online', paymentStatus: 'paid', paymentProvider: 'razorpay', paymentId: razorpay_payment_id, paymentVerifiedAt: nowIso } },
-      );
+      await supabase.from('booking_payments').update({
+        status: 'verified', provider_payment_id: razorpay_payment_id,
+        raw: { ...paymentRecord.raw, verifiedAt: nowIso }, updated_at: nowIso,
+      }).eq('id', paymentRecord.id);
+      const { data: bookingRow } = await supabase.from('bookings').select('data').eq('id', bookingId).maybeSingle();
+      await supabase.from('bookings').update({
+        payment: 'online',
+        data: { ...bookingRow?.data, paymentStatus: 'paid', paymentProvider: 'razorpay', paymentId: razorpay_payment_id, paymentVerifiedAt: nowIso },
+      }).eq('id', bookingId);
       return NextResponse.json({ success: true });
     }
 
@@ -1136,19 +1175,25 @@ async function handle(req, method, segs) {
       const event = payload?.event;
       const entity = payload?.payload?.payment?.entity;
       if (event === 'payment.captured' && entity) {
-        await db.collection('bookingPayments').updateOne(
-          { razorpayOrderId: entity.order_id },
-          { $set: { status: 'captured', razorpayPaymentId: entity.id, capturedAt: new Date().toISOString() } },
-        );
-        const rec = await db.collection('bookingPayments').findOne({ razorpayOrderId: entity.order_id });
-        if (rec?.bookingId) {
-          await bookings.updateOne({ id: rec.bookingId }, { $set: { paymentStatus: 'captured' } });
+        const { data: rec } = await supabase.from('booking_payments').select('*').eq('provider_order_id', entity.order_id).maybeSingle();
+        if (rec) {
+          await supabase.from('booking_payments').update({
+            status: 'captured', provider_payment_id: entity.id,
+            raw: { ...rec.raw, capturedAt: new Date().toISOString() }, updated_at: new Date().toISOString(),
+          }).eq('id', rec.id);
+          if (rec.booking_id) {
+            const { data: bookingRow } = await supabase.from('bookings').select('data').eq('id', rec.booking_id).maybeSingle();
+            await supabase.from('bookings').update({
+              data: { ...bookingRow?.data, paymentStatus: 'captured' },
+            }).eq('id', rec.booking_id);
+          }
         }
       } else if (event === 'payment.failed' && entity) {
-        await db.collection('bookingPayments').updateOne(
-          { razorpayOrderId: entity.order_id },
-          { $set: { status: 'failed', razorpayPaymentId: entity.id, failureReason: entity.error_reason || entity.error_description, updatedAt: new Date().toISOString() } },
-        );
+        const { data: rec } = await supabase.from('booking_payments').select('raw').eq('provider_order_id', entity.order_id).maybeSingle();
+        await supabase.from('booking_payments').update({
+          status: 'failed', provider_payment_id: entity.id,
+          raw: { ...rec?.raw, failureReason: entity.error_reason || entity.error_description }, updated_at: new Date().toISOString(),
+        }).eq('provider_order_id', entity.order_id);
       }
       return NextResponse.json({ ok: true });
     }
@@ -1163,8 +1208,8 @@ async function handle(req, method, segs) {
   if (segs[0] === 'pages') {
     // list
     if (segs.length === 1 && method === 'GET') {
-      const docs = await col.find({}).sort({ updatedAt: -1 }).limit(200).toArray();
-      return NextResponse.json(docs.map(clean));
+      const { data: rows } = await supabase.from('pages').select('*').order('updated_at', { ascending: false }).limit(200);
+      return NextResponse.json((rows || []).map(toPage));
     }
     // create
     if (segs.length === 1 && method === 'POST') {
@@ -1177,71 +1222,73 @@ async function handle(req, method, segs) {
       const now = new Date().toISOString();
       const doc = {
         id: randomUUID(),
-        slug: await uniqueSlug(db, slugify(base.title)),
+        slug: await uniqueSlug(supabase, slugify(base.title)),
         status: 'draft',
         ...base,
         createdAt: now, updatedAt: now, publishedAt: null,
       };
-      await col.insertOne(doc);
-      return NextResponse.json(clean(doc));
+      const { id, slug, status, createdAt, updatedAt, ...rest } = doc;
+      const { error } = await supabase.from('pages').insert({ id, slug, status, created_at: createdAt, updated_at: updatedAt, data: rest });
+      if (error) return NextResponse.json({ error: 'insert_failed' }, { status: 500 });
+      return NextResponse.json(doc);
     }
 
     // /api/pages/by-slug/:slug  (public)
     if (segs[1] === 'by-slug' && segs[2] && method === 'GET') {
-      const doc = await col.findOne({ slug: segs[2], status: 'published' });
-      if (!doc) return NextResponse.json({ error: 'not_found' }, { status: 404 });
-      return NextResponse.json(clean(doc));
+      const { data: row } = await supabase.from('pages').select('*').eq('slug', segs[2]).eq('status', 'published').maybeSingle();
+      if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      return NextResponse.json(toPage(row));
     }
 
     const id = segs[1];
     if (id) {
       if (segs[2] === 'duplicate' && method === 'POST') {
-        const src = await col.findOne({ id });
-        if (!src) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+        const { data: srcRow } = await supabase.from('pages').select('*').eq('id', id).maybeSingle();
+        if (!srcRow) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+        const src = toPage(srcRow);
         const now = new Date().toISOString();
         const newTitle = `${src.title} (copy)`;
-        const copy = {
-          ...src, _id: undefined, id: randomUUID(),
-          slug: await uniqueSlug(db, slugify(newTitle)),
-          title: newTitle, status: 'draft', createdAt: now, updatedAt: now, publishedAt: null,
-        };
-        delete copy._id;
-        await col.insertOne(copy);
-        return NextResponse.json(clean(copy));
+        const newId = randomUUID();
+        const newSlug = await uniqueSlug(supabase, slugify(newTitle));
+        const { title, id: _oldId, slug: _oldSlug, status: _oldStatus, createdAt: _c, updatedAt: _u, ...rest } = src;
+        const copy = { ...rest, id: newId, slug: newSlug, title: newTitle, status: 'draft', createdAt: now, updatedAt: now, publishedAt: null };
+        await supabase.from('pages').insert({ id: newId, slug: newSlug, status: 'draft', created_at: now, updated_at: now, data: { ...rest, title: newTitle, publishedAt: null } });
+        return NextResponse.json(copy);
       }
       if (segs[2] === 'publish' && method === 'POST') {
         const now = new Date().toISOString();
-        await col.updateOne({ id }, { $set: { status: 'published', publishedAt: now, updatedAt: now } });
-        const doc = await col.findOne({ id });
-        return NextResponse.json(clean(doc));
+        const { data: row } = await supabase.from('pages').select('data').eq('id', id).maybeSingle();
+        await supabase.from('pages').update({ status: 'published', updated_at: now, data: { ...row?.data, publishedAt: now } }).eq('id', id);
+        const { data: after } = await supabase.from('pages').select('*').eq('id', id).single();
+        return NextResponse.json(toPage(after));
       }
       if (segs[2] === 'unpublish' && method === 'POST') {
         const now = new Date().toISOString();
-        await col.updateOne({ id }, { $set: { status: 'draft', updatedAt: now } });
-        const doc = await col.findOne({ id });
-        return NextResponse.json(clean(doc));
+        await supabase.from('pages').update({ status: 'draft', updated_at: now }).eq('id', id);
+        const { data: after } = await supabase.from('pages').select('*').eq('id', id).single();
+        return NextResponse.json(toPage(after));
       }
       if (method === 'GET') {
-        const doc = await col.findOne({ id });
-        if (!doc) return NextResponse.json({ error: 'not_found' }, { status: 404 });
-        return NextResponse.json(clean(doc));
+        const { data: row } = await supabase.from('pages').select('*').eq('id', id).maybeSingle();
+        if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+        return NextResponse.json(toPage(row));
       }
       if (method === 'PATCH') {
         const body = await req.json();
         const now = new Date().toISOString();
-        const $set = { updatedAt: now };
-        for (const k of ['title', 'description', 'sections', 'seo']) if (k in body) $set[k] = body[k];
-        if (body.title) {
-          const cur = await col.findOne({ id });
-          if (cur && slugify(cur.title) === cur.slug) $set.slug = await uniqueSlug(db, slugify(body.title));
-        }
-        if (body.slug) $set.slug = await uniqueSlug(db, slugify(body.slug));
-        await col.updateOne({ id }, { $set });
-        const doc = await col.findOne({ id });
-        return NextResponse.json(clean(doc));
+        const { data: cur } = await supabase.from('pages').select('*').eq('id', id).maybeSingle();
+        if (!cur) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+        const dataPatch = { ...cur.data };
+        for (const k of ['title', 'description', 'sections', 'seo']) if (k in body) dataPatch[k] = body[k];
+        let newSlug = cur.slug;
+        if (body.title && slugify(cur.data?.title) === cur.slug) newSlug = await uniqueSlug(supabase, slugify(body.title));
+        if (body.slug) newSlug = await uniqueSlug(supabase, slugify(body.slug));
+        await supabase.from('pages').update({ slug: newSlug, updated_at: now, data: dataPatch }).eq('id', id);
+        const { data: after } = await supabase.from('pages').select('*').eq('id', id).single();
+        return NextResponse.json(toPage(after));
       }
       if (method === 'DELETE') {
-        await col.deleteOne({ id });
+        await supabase.from('pages').delete().eq('id', id);
         return NextResponse.json({ ok: true });
       }
     }
@@ -1267,4 +1314,3 @@ export const GET = route('GET');
 export const POST = route('POST');
 export const PATCH = route('PATCH');
 export const DELETE = route('DELETE');
-export const PUT = route('PUT');

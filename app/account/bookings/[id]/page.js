@@ -2,7 +2,8 @@ import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, MapPin, Clock, Download } from 'lucide-react';
 import { getCurrentCustomer } from '@/lib/customer-auth';
-import { getDb } from '@/lib/mongo';
+import { getSupabase } from '@/lib/supabase';
+import { toBookingFull } from '@/lib/db-mappers';
 import { TopNav, SiteFooter } from '@/components/site/shell';
 import { formatDate } from '@/lib/date';
 import BookingActions from './BookingActions';
@@ -19,18 +20,13 @@ function fmtTimeRange(fromIso, toIso) {
 }
 
 async function loadBooking(id, customer) {
-  const db = await getDb();
-  const doc = await db.collection('bookings').findOne({
-    id,
-    $or: [
-      { customerId: customer.id },
-      { 'contact.phone': customer.phone },
-    ],
-  });
-  if (!doc) return null;
-  const { _id, ...rest } = doc;
-  const invoice = await db.collection('invoices').findOne({ bookingId: doc.id });
-  return { booking: rest, invoice: invoice ? { number: invoice.number, id: invoice.id, total: invoice.total } : null };
+  const supabase = getSupabase();
+  const { data: row } = await supabase.from('bookings').select('*').eq('id', id)
+    .or(`customer_id.eq.${customer.id},contact_phone.eq.${customer.phone}`).maybeSingle();
+  if (!row) return null;
+  const booking = await toBookingFull(supabase, row);
+  const { data: invRow } = await supabase.from('invoices').select('*').eq('booking_id', row.id).maybeSingle();
+  return { booking, invoice: invRow ? { number: invRow.number, id: invRow.id, total: Number(invRow.amount) || 0 } : null };
 }
 
 export default async function BookingDetailPage({ params }) {
@@ -41,6 +37,7 @@ export default async function BookingDetailPage({ params }) {
   if (!data) notFound();
   const { booking, invoice } = data;
   const isMulti = Array.isArray(booking.schedule) && booking.schedule.length > 1;
+  const slotTime = booking.startAt ? new Date(new Date(booking.startAt).getTime() + 330 * 60000).toISOString().slice(11, 16) : null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -53,7 +50,7 @@ export default async function BookingDetailPage({ params }) {
             <div>
               <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold">Ref · {booking.ref}</div>
               <h1 className="mt-1 font-serif text-[32px] md:text-[42px] leading-none tracking-tight">{booking.outcomeLabel || 'Wellness journey'}</h1>
-              <div className="mt-2 text-[14px] text-muted-foreground">{booking.slotDate && formatDate(booking.slotDate)}{booking.slotTime ? ` · ${booking.slotTime}` : ''}</div>
+              <div className="mt-2 text-[14px] text-muted-foreground">{booking.startAt && formatDate(booking.startAt)}{slotTime ? ` · ${slotTime}` : ''}</div>
             </div>
             <span className="inline-flex items-center h-7 px-3 rounded-full text-[11px] font-semibold uppercase tracking-[0.14em] bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">{booking.status || 'confirmed'}</span>
           </div>

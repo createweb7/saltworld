@@ -2,7 +2,8 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, ArrowRight, Sparkles, Infinity as InfinityIcon, Snowflake } from 'lucide-react';
 import { getCurrentCustomer } from '@/lib/customer-auth';
-import { getDb } from '@/lib/mongo';
+import { getSupabase } from '@/lib/supabase';
+import { toSubscription } from '@/lib/db-mappers';
 import { TopNav, SiteFooter } from '@/components/site/shell';
 import FreezeButton from './FreezeButton';
 import UnfreezeButton from './UnfreezeButton';
@@ -11,12 +12,13 @@ export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Memberships \u00b7 Salt World' };
 
 async function loadMemberships(customerId) {
-  const db = await getDb();
-  const subs = await db.collection('memberSubscriptions').find({ customerId }).sort({ startAt: -1 }).toArray();
-  const withUsage = await Promise.all(subs.map(async (s) => {
-    const usage = await db.collection('membership_usage').find({ subscriptionId: s.id }).sort({ consumedAt: -1 }).limit(10).toArray();
-    const { _id, ...rest } = s;
-    return { ...rest, usage: usage.map(({ _id, ...u }) => u) };
+  const supabase = getSupabase();
+  const { data: subRows } = await supabase.from('member_subscriptions').select('*').eq('customer_id', customerId).order('starts_at', { ascending: false });
+  const withUsage = await Promise.all((subRows || []).map(async (row) => {
+    const s = toSubscription(row);
+    const { data: usageRows } = await supabase.from('membership_usage').select('*').eq('subscription_id', s.id).order('consumed_at', { ascending: false }).limit(10);
+    const usage = (usageRows || []).map((u) => ({ ...u.data, id: u.id, subscriptionId: u.subscription_id, bookingId: u.booking_id, therapySlug: u.therapy_slug, consumedAt: u.consumed_at }));
+    return { ...s, usage };
   }));
   return withUsage;
 }

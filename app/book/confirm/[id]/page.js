@@ -1,20 +1,33 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getDb, clean } from '@/lib/mongo';
+import { getSupabase } from '@/lib/supabase';
+import { toBookingFull } from '@/lib/db-mappers';
 import { Wordmark } from '@/components/site/shell';
 import { Check, Phone, MessageCircle, MapPin, Sparkles, Clock } from 'lucide-react';
 
 async function fetchBooking(id) {
-  const db = await getDb();
-  const doc = await db.collection('bookings').findOne({ id });
-  return doc ? clean(doc) : null;
+  const supabase = getSupabase();
+  const { data: row } = await supabase.from('bookings').select('*').eq('id', id).maybeSingle();
+  if (!row) return null;
+  const booking = await toBookingFull(supabase, row);
+  if (booking.schedule?.length) {
+    const resourceIds = [...new Set(booking.schedule.map((s) => s.resourceId).filter(Boolean))];
+    if (resourceIds.length) {
+      const { data: resources } = await supabase.from('resources').select('id, name').in('id', resourceIds);
+      const nameById = Object.fromEntries((resources || []).map((r) => [r.id, r.name]));
+      booking.schedule = booking.schedule.map((s) => ({ ...s, resourceName: nameById[s.resourceId] || null }));
+    }
+  }
+  return booking;
 }
 
 async function fetchBranch(branchId) {
   if (!branchId) return null;
-  const db = await getDb();
-  const b = await db.collection('branches').findOne({ id: branchId });
-  return b ? clean(b) : null;
+  const supabase = getSupabase();
+  const { data: row } = await supabase.from('branches').select('*').eq('id', branchId).maybeSingle();
+  if (!row) return null;
+  const { data, ...b } = row;
+  return { ...data, id: b.id, code: b.code, name: b.name, hours: b.hours };
 }
 
 export const dynamic = 'force-dynamic';
@@ -46,9 +59,10 @@ export default async function ConfirmPage({ params }) {
   const b = await fetchBooking(id);
   if (!b) notFound();
   const branch = await fetchBranch(b.branchId);
-  const dateFmt = new Date(b.slotDate + 'T00:00').toLocaleDateString('en-IN', {
-    weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
-  });
+  const dateFmt = b.startAt ? new Date(b.startAt).toLocaleDateString('en-IN', {
+    weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata',
+  }) : '—';
+  const slotTime = b.startAt ? fmtIstTime(b.startAt) : null;
 
   const schedule = Array.isArray(b.schedule) ? b.schedule : [];
   const therapies = Array.isArray(b.therapies) ? b.therapies : [];
@@ -92,7 +106,7 @@ export default async function ConfirmPage({ params }) {
             />
             <Field label="Duration"  value={totalTherapyMin ? `${totalTherapyMin} min` : (b.duration || '—')} />
             <Field label="Date"      value={dateFmt} />
-            <Field label="Time"      value={b.slotTime} />
+            <Field label="Time"      value={slotTime} />
             <Field label={b.bookedForOther ? 'Guest' : 'Guest'} value={b.contact?.name} />
             <Field label="Payment"   value={
               b.payment === 'at-visit'   ? 'At visit (card / UPI)' :

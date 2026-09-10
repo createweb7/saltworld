@@ -2,19 +2,18 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Wallet as WalletIcon, ArrowDownRight, ArrowUpRight } from 'lucide-react';
 import { getCurrentCustomer } from '@/lib/customer-auth';
-import { getDb } from '@/lib/mongo';
+import { customerBalance, customerHistory } from '@/lib/loyalty';
 import { TopNav, SiteFooter } from '@/components/site/shell';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Wallet · Salt World' };
 
 async function loadWallet(customerId) {
-  const db = await getDb();
-  const [customer, txs] = await Promise.all([
-    db.collection('customers').findOne({ id: customerId }),
-    db.collection('wallet_transactions').find({ customerId }).sort({ createdAt: -1 }).limit(100).toArray(),
+  const [balance, txs] = await Promise.all([
+    customerBalance(customerId),
+    customerHistory(customerId, 100),
   ]);
-  return { balance: customer?.walletBalance || 0, txs: txs.map(({ _id, ...r }) => r) };
+  return { balance, txs };
 }
 
 const TX_LABEL = {

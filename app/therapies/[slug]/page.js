@@ -4,7 +4,8 @@ import { ArrowRight, ArrowLeft, Clock, Check, XCircle, Sparkles, Gift, Award } f
 import { TopNav, SiteFooter, StickyBookingBar } from '@/components/site/shell';
 import { getTherapy, allTherapies } from '@/lib/therapies';
 import { getOutcome } from '@/lib/outcomes';
-import { getDb } from '@/lib/mongo';
+import { getSupabase } from '@/lib/supabase';
+import { toTherapy } from '@/lib/db-mappers';
 
 // Merge DB-configured ops fields (duration/price/description/images/SEO/heroImage)
 // with the dev-controlled rich content in lib/therapies.js (whoFor, benefits,
@@ -14,10 +15,10 @@ import { getDb } from '@/lib/mongo';
 async function loadTherapy(slug) {
   const staticData = getTherapy(slug);
   try {
-    const db = await getDb();
-    const dbDoc = await db.collection('therapies').findOne({ slug, active: { $ne: false } });
-    if (!dbDoc) return staticData || null;
-    const { _id, ...rest } = dbDoc;
+    const supabase = getSupabase();
+    const { data: dbRow } = await supabase.from('therapies').select('*').eq('slug', slug).not('active', 'is', false).maybeSingle();
+    if (!dbRow) return staticData || null;
+    const rest = toTherapy(dbRow);
     if (!staticData) {
       // DB-only therapy (added by admin later): synthesize minimal shape.
       return {

@@ -2,24 +2,32 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, Check, Clock, Infinity as InfinityIcon, Sparkles, UserPlus, ShieldCheck } from 'lucide-react';
 import { TopNav, SiteFooter } from '@/components/site/shell';
-import { getDb } from '@/lib/mongo';
+import { getSupabase } from '@/lib/supabase';
 import { getCurrentCustomer } from '@/lib/customer-auth';
 import PurchaseButton from './PurchaseButton';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function loadPlan(slugOrId) {
+  const supabase = getSupabase();
+  let query = supabase.from('memberships').select('*');
+  query = UUID_RE.test(slugOrId) ? query.or(`slug.eq.${slugOrId},id.eq.${slugOrId}`) : query.eq('slug', slugOrId);
+  const { data: row } = await query.maybeSingle();
+  if (!row) return null;
+  return { ...row.plan, id: row.id, slug: row.slug, name: row.name, active: row.active, createdAt: row.created_at, updatedAt: row.updated_at };
+}
+
 export async function generateMetadata({ params }) {
   const { slug } = await params;
-  const db = await getDb();
-  const p = await db.collection('memberships').findOne({ $or: [{ slug }, { id: slug }] });
+  const p = await loadPlan(slug);
   if (!p) return { title: 'Not found' };
   return { title: `${p.name} · Salt World`, description: p.description || '' };
 }
 
 export default async function PlanDetailPage({ params }) {
   const { slug } = await params;
-  const db = await getDb();
-  const doc = await db.collection('memberships').findOne({ $or: [{ slug }, { id: slug }], active: { $ne: false } });
-  if (!doc) notFound();
-  const { _id, ...p } = doc;
+  const p = await loadPlan(slug);
+  if (!p || p.active === false) notFound();
 
   // Enforce: only signed-in customers can purchase. When missing profile
   // info (name/email needed for invoice), prompt them to complete it first.

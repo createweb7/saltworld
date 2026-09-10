@@ -2,17 +2,16 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { TopNav, SiteFooter, StickyBookingBar } from '@/components/site/shell';
-import { getDb } from '@/lib/mongo';
+import { getSupabase } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
 async function loadPost(slug) {
   try {
-    const db = await getDb();
-    const doc = await db.collection('blog').findOne({ slug, status: 'published' });
-    if (!doc) return null;
-    const { _id, ...rest } = doc;
-    return rest;
+    const supabase = getSupabase();
+    const { data: row } = await supabase.from('blog_posts').select('*').eq('slug', slug).eq('status', 'published').maybeSingle();
+    if (!row) return null;
+    return { ...row.data, id: row.id, slug: row.slug, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at };
   } catch {
     return null;
   }

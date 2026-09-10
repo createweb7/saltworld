@@ -1,11 +1,12 @@
 import { notFound } from 'next/navigation';
-import { getDb, clean } from '@/lib/mongo';
+import { getSupabase } from '@/lib/supabase';
+import { toPage } from '@/lib/db-mappers';
 import { PageRenderer } from '@/components/ss/renderer';
 
 async function fetchPage(slug) {
-  const db = await getDb();
-  const doc = await db.collection('pages').findOne({ slug, status: 'published' });
-  return doc ? clean(doc) : null;
+  const supabase = getSupabase();
+  const { data: row } = await supabase.from('pages').select('*').eq('slug', slug).eq('status', 'published').maybeSingle();
+  return toPage(row);
 }
 
 export async function generateMetadata({ params }) {
