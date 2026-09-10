@@ -1,5 +1,6 @@
 const nextConfig = {
   output: 'standalone',
+  outputFileTracingRoot: __dirname,
   images: {
     unoptimized: true,
     remotePatterns: [
@@ -8,34 +9,29 @@ const nextConfig = {
   },
   // Renamed from experimental.serverComponentsExternalPackages in Next 15
   serverExternalPackages: ['mongodb'],
-  webpack(config, { dev }) {
-    if (dev) {
-      // Reduce CPU/memory from file watching
-      config.watchOptions = {
-        poll: 2000, // check every 2 seconds
-        aggregateTimeout: 300, // wait before rebuilding
-        ignored: ['**/node_modules'],
-      };
-    }
-    return config;
-  },
   onDemandEntries: {
     maxInactiveAge: 10000,
     pagesBufferLength: 2,
   },
   async headers() {
-    return [
-      {
-        source: "/(.*)",
-        headers: [
-          { key: "X-Frame-Options", value: "ALLOWALL" },
-          { key: "Content-Security-Policy", value: "frame-ancestors *;" },
-          { key: "Access-Control-Allow-Origin", value: process.env.CORS_ORIGINS || "*" },
+    const baseHeaders = [
+      { key: "X-Frame-Options", value: "SAMEORIGIN" },
+      { key: "Content-Security-Policy", value: "frame-ancestors 'self';" },
+    ];
+    // Same-origin calls never need CORS headers. Only set them when an
+    // external origin has been explicitly whitelisted via CORS_ORIGINS
+    // (comma-separated), e.g. for a separate marketing site or mobile app
+    // calling this API from the browser.
+    const corsOrigin = process.env.CORS_ORIGINS?.split(',')[0]?.trim();
+    const headers = corsOrigin
+      ? [
+          ...baseHeaders,
+          { key: "Access-Control-Allow-Origin", value: corsOrigin },
           { key: "Access-Control-Allow-Methods", value: "GET, POST, PUT, DELETE, OPTIONS" },
           { key: "Access-Control-Allow-Headers", value: "*" },
-        ],
-      },
-    ];
+        ]
+      : baseHeaders;
+    return [{ source: "/(.*)", headers }];
   },
 };
 
