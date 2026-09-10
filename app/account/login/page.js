@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -27,6 +27,21 @@ export default function CustomerLoginPage() {
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [devOtp, setDevOtp] = useState(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get('error');
+    if (!error) return;
+    const messages = {
+      google_not_configured: 'Google sign-in isn’t set up yet. Please use WhatsApp instead.',
+      google_denied: 'Google sign-in was cancelled.',
+      google_state_mismatch: 'Your sign-in session expired. Please try again.',
+      account_disabled: 'This account has been disabled. Contact support.',
+      google_signin_failed: 'Sign-in failed. Please try again.',
+    };
+    toast.error(messages[error] || 'Could not sign in with Google.');
+    window.history.replaceState(null, '', window.location.pathname);
+  }, []);
 
   const requestOtp = async (e) => {
     e.preventDefault();
@@ -63,8 +78,7 @@ export default function CustomerLoginPage() {
   };
 
   const startGoogle = () => {
-    const redirect = `${window.location.origin}/account/auth/complete`;
-    window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirect)}`;
+    window.location.href = '/api/customer/auth/google-start';
   };
 
   return (

@@ -499,39 +499,56 @@ async function handle(req, method, segs) {
       return NextResponse.json({ ok: true });
     }
 
-    // ---- Emergent Auth (Google) callback finaliser ----
-    // Client posts { session_id } extracted from the URL fragment. We call
-    // Emergent's session-data endpoint, upsert the customer by verified email,
-    // and set the same sw_customer cookie the OTP flow issues.
-    if (segs[2] === 'google-complete' && method === 'POST') {
-      const body = await req.json().catch(() => ({}));
-      const sid = body.session_id || body.sessionId;
-      if (!sid) return NextResponse.json({ ok: false, error: 'missing_session_id' }, { status: 400 });
+    // ---- Google Sign-In (standard OAuth 2.0 authorization-code flow) ----
+    // google-start: mint a CSRF `state`, stash it in a short-lived cookie,
+    // redirect to Google's consent screen.
+    if (segs[2] === 'google-start' && method === 'GET') {
+      const { googleIsConfigured, buildGoogleAuthUrl } = await import('@/lib/google-auth');
+      if (!googleIsConfigured()) {
+        return NextResponse.redirect(new URL('/account/login?error=google_not_configured', req.url));
+      }
+      const origin = new URL(req.url).origin;
+      const state = randomUUID();
+      const res = NextResponse.redirect(buildGoogleAuthUrl({ origin, state }));
+      res.cookies.set('sw_g_state', state, {
+        httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 300,
+      });
+      return res;
+    }
+
+    // google-callback: Google redirects here with ?code&state. Verify state,
+    // exchange the code directly with Google (server-to-server), upsert the
+    // customer by verified email, and set the same sw_customer cookie the
+    // OTP flow issues.
+    if (segs[2] === 'google-callback' && method === 'GET') {
+      const url = new URL(req.url);
+      const code = url.searchParams.get('code');
+      const state = url.searchParams.get('state');
+      const expectedState = req.cookies.get('sw_g_state')?.value;
+      const fail = (error) => {
+        const res = NextResponse.redirect(new URL(`/account/login?error=${error}`, req.url));
+        res.cookies.delete('sw_g_state');
+        return res;
+      };
+      if (url.searchParams.get('error')) return fail('google_denied');
+      if (!code || !state || !expectedState || state !== expectedState) return fail('google_state_mismatch');
       try {
-        const resp = await fetch('https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data', {
-          method: 'GET',
-          headers: { 'X-Session-ID': sid },
-        });
-        if (!resp.ok) {
-          return NextResponse.json({ ok: false, error: 'emergent_session_invalid' }, { status: 401 });
-        }
-        const profile = await resp.json();
-        const email = profile.email;
-        if (!email) return NextResponse.json({ ok: false, error: 'email_required' }, { status: 400 });
-        const customer = await upsertCustomerByEmail(email, {
+        const { exchangeGoogleCode } = await import('@/lib/google-auth');
+        const profile = await exchangeGoogleCode({ code, origin: url.origin });
+        const customer = await upsertCustomerByEmail(profile.email, {
           name: profile.name,
           picture: profile.picture,
           source: 'google_signin',
         });
-        if (customer.disabled) {
-          return NextResponse.json({ ok: false, error: 'account_disabled' }, { status: 403 });
-        }
+        if (customer.disabled) return fail('account_disabled');
         const token = await signCustomerToken({ sub: customer.id, email: customer.email, phone: customer.phone });
         await setCustomerCookie(token);
-        return NextResponse.json({ ok: true, customer: { id: customer.id, name: customer.name, email: customer.email, phone: customer.phone, picture: customer.picture } });
+        const res = NextResponse.redirect(new URL('/account', req.url));
+        res.cookies.delete('sw_g_state');
+        return res;
       } catch (e) {
-        console.error('google-complete failed', e);
-        return NextResponse.json({ ok: false, error: 'emergent_upstream_error' }, { status: 502 });
+        console.error('google-callback failed', e);
+        return fail('google_signin_failed');
       }
     }
   }
