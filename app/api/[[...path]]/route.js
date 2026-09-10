@@ -328,10 +328,13 @@ async function handle(req, method, segs) {
     const branchId = u.searchParams.get('branchId') || null;
     const date = u.searchParams.get('date');
     const sessionMode = u.searchParams.get('sessionMode') || null;
+    const floatDurationMin = Number(u.searchParams.get('floatDurationMin')) || null;
     if (therapies.length === 0) return NextResponse.json({ error: 'therapies_required' }, { status: 400 });
     if (!date) return NextResponse.json({ error: 'date_required' }, { status: 400 });
+    const durationOverrides = floatDurationMin && therapies.includes('float-therapy')
+      ? { 'float-therapy': floatDurationMin } : null;
     const { availableJourneySlots } = await import('@/lib/scheduling');
-    const r = await availableJourneySlots({ therapySlugs: therapies, branchId, dateIso: date, sessionMode });
+    const r = await availableJourneySlots({ therapySlugs: therapies, branchId, dateIso: date, sessionMode, durationOverrides });
     return NextResponse.json(r || { groups: { morning: [], afternoon: [], evening: [] }, totalDurationMin: 0, totalVisitMin: 0 });
   }
 
@@ -360,10 +363,13 @@ async function handle(req, method, segs) {
       return NextResponse.json({ error: 'preferred_time_required', hint: 'HH:MM (24h)' }, { status: 400 });
     }
     const therapies = therapiesQ.split(',').map((s) => s.trim()).filter(Boolean);
+    const floatDurationMin = Number(u.searchParams.get('floatDurationMin')) || null;
+    const durationOverrides = floatDurationMin && therapies.includes('float-therapy')
+      ? { 'float-therapy': floatDurationMin } : null;
     const { recommendJourneys } = await import('@/lib/scheduling');
     const r = await recommendJourneys({
       therapySlugs: therapies, branchId, dateIso: date,
-      preferredTime: preferred, windowMin, sessionMode, limit, startOffset: offset,
+      preferredTime: preferred, windowMin, sessionMode, durationOverrides, limit, startOffset: offset,
     });
     return NextResponse.json(r);
   }
@@ -376,10 +382,13 @@ async function handle(req, method, segs) {
     const branchId = u.searchParams.get('branchId') || null;
     const date = u.searchParams.get('date');
     const after = u.searchParams.get('after'); // 'HH:mm' local, exclusive
+    const floatDurationMin = Number(u.searchParams.get('floatDurationMin')) || null;
     if (!therapy) return NextResponse.json({ error: 'therapy_required' }, { status: 400 });
     if (!date) return NextResponse.json({ error: 'date_required' }, { status: 400 });
+    const durationOverrides = floatDurationMin && therapy === 'float-therapy'
+      ? { 'float-therapy': floatDurationMin } : null;
     const { availableJourneySlots } = await import('@/lib/scheduling');
-    const r = await availableJourneySlots({ therapySlugs: [therapy], branchId, dateIso: date });
+    const r = await availableJourneySlots({ therapySlugs: [therapy], branchId, dateIso: date, durationOverrides });
     if (!r) return NextResponse.json({ groups: { morning: [], afternoon: [], evening: [] }, totalDurationMin: 0, totalVisitMin: 0 });
     if (after) {
       const filt = (arr) => arr.filter((s) => s.time >= after);
@@ -601,6 +610,16 @@ async function handle(req, method, segs) {
       const therapySlugs = bodyTherapies.length > 0
         ? bodyTherapies.map((t) => t.slug).filter(Boolean)
         : (body.therapy ? [body.therapy] : []);
+      // Per-therapy duration override (e.g. Float Tank's 60/90-min choice).
+      // Accepted either per-line (body.therapies[].durationMin) or as a
+      // top-level shorthand (body.floatDurationMin) for single-therapy bookings.
+      const durationOverrides = {};
+      for (const t of bodyTherapies) {
+        if (t?.slug && Number(t.durationMin) > 0) durationOverrides[t.slug] = Number(t.durationMin);
+      }
+      if (Number(body.floatDurationMin) > 0 && therapySlugs.includes('float-therapy')) {
+        durationOverrides['float-therapy'] = Number(body.floatDurationMin);
+      }
       // Contact validation — email must match strict username@domain.tld
       // format (backend source of truth). Rejects bookings before we touch
       // any resource allocation.
@@ -611,6 +630,27 @@ async function handle(req, method, segs) {
           return NextResponse.json({
             error: 'invalid_email', field: 'contact.email',
             message: EMAIL_INVALID_MESSAGE,
+          }, { status: 400 });
+        }
+      }
+      // Guest-count cap — e.g. Red Light/IR Sauna max 2, Cold Plunge max 5.
+      // Takes the STRICTEST cap across selected therapies (mirrors lead-time
+      // and last-slot gating below).
+      const requestedGuests = Math.max(1, Number(body.guests) || 1);
+      if (therapySlugs.length > 0 && requestedGuests > 1) {
+        const capDocs = await db.collection('therapies')
+          .find({ slug: { $in: therapySlugs } })
+          .project({ slug: 1, maxCapacity: 1 })
+          .toArray();
+        const strictestCap = capDocs.reduce((min, t) => {
+          const cap = Number(t.maxCapacity);
+          return cap > 0 ? Math.min(min, cap) : min;
+        }, Infinity);
+        if (Number.isFinite(strictestCap) && requestedGuests > strictestCap) {
+          return NextResponse.json({
+            error: 'guest_cap_exceeded',
+            message: `This selection allows up to ${strictestCap} guest${strictestCap === 1 ? '' : 's'} per booking.`,
+            meta: { maxGuests: strictestCap },
           }, { status: 400 });
         }
       }
@@ -663,7 +703,7 @@ async function handle(req, method, segs) {
         } catch (e) { console.error('assertCanBook failed', e); }
         try {
           const { allocateJourney, suggestNextAvailableSlots } = await import('@/lib/scheduling');
-          const r = await allocateJourney({ therapySlugs, branchId, startIso, sessionMode });
+          const r = await allocateJourney({ therapySlugs, branchId, startIso, sessionMode, durationOverrides });
           if (r.ok) {
             resourceId   = r.resourceId;
             resourceName = r.resourceName;
@@ -674,7 +714,7 @@ async function handle(req, method, segs) {
             // Slot no longer available — do NOT create the booking. Suggest
             // alternatives so the customer can continue without restarting.
             const suggestions = await suggestNextAvailableSlots({
-              therapySlugs, branchId, startIso, sessionMode, limit: 5,
+              therapySlugs, branchId, startIso, sessionMode, durationOverrides, limit: 5,
             }).catch(() => []);
             return NextResponse.json({
               error: 'slot_unavailable',
@@ -732,7 +772,7 @@ async function handle(req, method, segs) {
         try {
           const { computeQuote } = await import('@/lib/pricing');
           quote = await computeQuote({
-            therapies:  therapySlugs.map((slug) => ({ slug })),
+            therapies:  therapySlugs.map((slug) => ({ slug, durationMin: durationOverrides[slug] || null, sessionMode })),
             customerId: doc.customerId,
             phone:      doc.contact?.phone || null,
             branchId,
@@ -933,6 +973,13 @@ async function handle(req, method, segs) {
       if (!newStart) return NextResponse.json({ error: 'startAt_required' }, { status: 400 });
       const therapySlugs = (doc.therapies || []).map((t) => t.slug).filter(Boolean);
       const sessionMode = body.sessionMode || doc.sessionMode || null;
+      // Preserve any per-therapy duration override from the original booking
+      // (e.g. a 90-min Float session) — reschedule must not silently revert
+      // it to the therapy's default duration.
+      const durationOverrides = {};
+      for (const t of (doc.therapies || [])) {
+        if (t?.slug && Number(t.durationMin) > 0) durationOverrides[t.slug] = Number(t.durationMin);
+      }
       // Booking-rules gate — reject reschedules that would violate lead time
       // or cutoff windows.
       {
@@ -946,9 +993,9 @@ async function handle(req, method, segs) {
         }
       }
       const { allocateJourney, suggestNextAvailableSlots } = await import('@/lib/scheduling');
-      const r = await allocateJourney({ therapySlugs, branchId: doc.branchId, startIso: newStart, excludeBookingId: bid, sessionMode });
+      const r = await allocateJourney({ therapySlugs, branchId: doc.branchId, startIso: newStart, excludeBookingId: bid, sessionMode, durationOverrides });
       if (!r.ok) {
-        const suggestions = await suggestNextAvailableSlots({ therapySlugs, branchId: doc.branchId, startIso: newStart, sessionMode, limit: 5 }).catch(() => []);
+        const suggestions = await suggestNextAvailableSlots({ therapySlugs, branchId: doc.branchId, startIso: newStart, sessionMode, durationOverrides, limit: 5 }).catch(() => []);
         return NextResponse.json({ error: 'slot_unavailable', reason: r.reason, suggestions }, { status: 409 });
       }
       await bookings.updateOne({ id: bid }, { $set: {

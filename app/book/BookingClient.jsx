@@ -343,7 +343,7 @@ function fmtVisit(mins) {
   return `${mins}m`;
 }
 
-function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSessionMode, onReorderTherapies }) {
+function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSessionMode, floatDurationMin, setFloatDurationMin, onReorderTherapies }) {
   const days = useMemo(() => {
     // Auto-rollover: if IST wall-clock is past 20:00 (branch close) we hide
     // "today" from the picker and default to tomorrow. TC-1 fix.
@@ -382,12 +382,13 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
     setLoading(true);
     const q = new URLSearchParams({ therapies: therapies.join(','), date });
     if (hasFloat && sessionMode) q.set('sessionMode', sessionMode);
+    if (hasFloat && floatDurationMin) q.set('floatDurationMin', String(floatDurationMin));
     fetch(`/api/scheduling/slots?${q}`)
       .then((r) => r.ok ? r.json() : null)
       .then((d) => { if (!cancelled) { setJourneyData(d); setLoading(false); } })
       .catch(() => { if (!cancelled) { setJourneyData(null); setLoading(false); } });
     return () => { cancelled = true; };
-  }, [therapies, date, sessionMode, hasFloat]);
+  }, [therapies, date, sessionMode, floatDurationMin, hasFloat]);
 
   // Fetch top-3 recommendations whenever inputs change.
   useEffect(() => {
@@ -399,6 +400,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
       date, preferred: preferredTime, limit: '3', offset: '0', window: '60',
     });
     if (hasFloat && sessionMode) q.set('sessionMode', sessionMode);
+    if (hasFloat && floatDurationMin) q.set('floatDurationMin', String(floatDurationMin));
     fetch(`/api/scheduling/recommendations?${q}`)
       .then((r) => r.ok ? r.json() : { recommendations: [] })
       .then((d) => {
@@ -407,7 +409,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
         setRecLoading(false);
       })
       .catch(() => { setRecommendations([]); setRecExpanded(false); setRecLoading(false); });
-  }, [therapies, date, preferredTime, sessionMode, hasFloat]);
+  }, [therapies, date, preferredTime, sessionMode, floatDurationMin, hasFloat]);
 
   const loadMore = async () => {
     setRecLoading(true);
@@ -417,6 +419,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
       date, preferred: preferredTime, limit: '3', offset: String(nextOffset), window: '60',
     });
     if (hasFloat && sessionMode) q.set('sessionMode', sessionMode);
+    if (hasFloat && floatDurationMin) q.set('floatDurationMin', String(floatDurationMin));
     try {
       const r = await fetch(`/api/scheduling/recommendations?${q}`);
       const d = await r.json();
@@ -522,7 +525,26 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
           <div className="mt-2 text-[11.5px] text-muted-foreground max-w-[520px] leading-[1.5]">
             {sessionMode === 'couple'
               ? 'Couple sessions use a couple-capable float tank for two people together. Fewer tanks support couple mode — book early.'
-              : 'Standard 60-minute float in a solo tank.'}
+              : 'Standard float in a solo tank.'}
+          </div>
+        </div>
+      )}
+
+      {/* Float duration toggle — only if float-therapy is in the journey */}
+      {hasFloat && (
+        <div className="mt-4">
+          <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold mb-2">Float duration</div>
+          <div className="inline-flex rounded-full border border-border p-0.5 bg-card">
+            <button type="button" onClick={() => { setFloatDurationMin(60); onChange(null); }}
+              className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
+                floatDurationMin === 60 ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground')}>
+              60 min
+            </button>
+            <button type="button" onClick={() => { setFloatDurationMin(90); onChange(null); }}
+              className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
+                floatDurationMin === 90 ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground')}>
+              90 min
+            </button>
           </div>
         </div>
       )}
@@ -1536,6 +1558,7 @@ export default function BookingClient({ initialOutcome }) {
   const [outcomeMap, setOutcomeMap] = useState(null); // admin-configured overrides
   const [therapyMeta, setTherapyMeta] = useState({}); // slug → {name, durationMin, ...} from DB
   const [sessionMode, setSessionMode] = useState('single'); // float-therapy: single | couple
+  const [floatDurationMin, setFloatDurationMin] = useState(60); // float-therapy: 60 | 90
   const [coupon, setCoupon] = useState(null);              // { code, discountInr, applied } | null
   // Suggestions surfaced when the confirm step receives a 409 slot_unavailable
   const [slotConflict, setSlotConflict] = useState(null); // { reason, suggestions:[{...}] }
@@ -1573,14 +1596,23 @@ export default function BookingClient({ initialOutcome }) {
     // hasn't been priced in the catalog yet.
     const basePrice = parsePrice(o?.pricing?.single?.price);
     const sum = selected.reduce((s, t) => {
-      const dbPrice = Number(therapyMeta[t.slug]?.defaultPrice) || 0;
+      const meta = therapyMeta[t.slug];
+      // Float Tank (and any future therapy with a durationOptions matrix)
+      // prices off the selected duration + session mode, not a flat default.
+      const options = Array.isArray(meta?.durationOptions) ? meta.durationOptions : null;
+      if (options?.length && String(t.slug).includes('float')) {
+        const opt = options.find((o2) => Number(o2.durationMin) === Number(floatDurationMin)) || options[0];
+        const p = sessionMode === 'couple' ? opt.priceCouple : opt.priceSingle;
+        if (p != null) return s + Number(p);
+      }
+      const dbPrice = Number(meta?.defaultPrice) || 0;
       if (dbPrice > 0) return s + dbPrice;
       const role = String(t.role || '').toLowerCase();
       const mult = PRICE_MULTIPLIER[role] ?? 0.5;
       return s + Math.round(basePrice * mult);
     }, 0);
     return sum || basePrice || 0;
-  }, [outcome, outcomeMap, therapies, therapyMeta]);
+  }, [outcome, outcomeMap, therapies, therapyMeta, sessionMode, floatDurationMin]);
 
   // Load therapy metadata once (for the journey summary in step 3).
   useEffect(() => {
@@ -1884,6 +1916,7 @@ export default function BookingClient({ initialOutcome }) {
           therapyLabel: primary?.label || null,
           therapies: selected.map((t) => ({ slug: t.slug, label: t.label, role: t.role })),
           sessionMode: therapies.some((s) => String(s).includes('float')) ? sessionMode : null,
+          floatDurationMin: therapies.some((s) => String(s).includes('float')) ? floatDurationMin : null,
           slotDate: slot.date, slotTime: slot.time,
           startAt: slot.startIso || null,
           plan: slot.plan || null,
@@ -1974,6 +2007,7 @@ export default function BookingClient({ initialOutcome }) {
         {stepId === 'outcome' && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); }} />}
         {stepId === 'therapy' && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} therapyMeta={therapyMeta} isDirectMode={isDirectTherapyMode} />}
         {stepId === 'slot'    && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode} setSessionMode={setSessionMode}
+          floatDurationMin={floatDurationMin} setFloatDurationMin={setFloatDurationMin}
           onReorderTherapies={(idx, dir) => {
             const arr = [...therapies];
             const j = idx + dir;
