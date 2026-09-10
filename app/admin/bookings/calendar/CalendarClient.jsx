@@ -33,20 +33,24 @@ function istHHmm(iso) {
   return `${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}`;
 }
 
-/** Round HH:mm down to the nearest SLOT_MIN (used for column bucketing). */
-function alignToSlot(hhmm) {
-  if (!hhmm) return null;
-  const [h, m] = hhmm.split(':').map(Number);
-  const total = h * 60 + Math.floor(m / SLOT_MIN) * SLOT_MIN;
-  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
-}
-
 /** Duration in slot-columns for an ISO from/to pair. */
 function slotsBetween(fromIso, toIso) {
   if (!fromIso || !toIso) return 1;
   const mins = Math.max(SLOT_MIN, Math.round((new Date(toIso) - new Date(fromIso)) / 60000));
   return Math.max(1, Math.round(mins / SLOT_MIN));
 }
+
+/** Column index (0-based, into SLOTS) for an ISO instant. Null if outside the visible day range. */
+function colIndexForIso(iso) {
+  const hhmm = istHHmm(iso);
+  if (!hhmm) return null;
+  const [h, m] = hhmm.split(':').map(Number);
+  const idx = Math.floor((h * 60 + m - START_HOUR * 60) / SLOT_MIN);
+  return idx;
+}
+
+const LANE_HEIGHT = 28;   // px per concurrent booking "lane" within a resource row
+const BADGE_STRIP = 16;   // px reserved at the top of a cell for the occupancy badge
 
 async function fetchCalendar(fromISO, toISO) {
   const res = await fetch(`/api/admin/bookings/calendar?from=${fromISO}&to=${toISO}`);
@@ -82,10 +86,15 @@ export default function CalendarClient({ user }) {
     queryFn: () => fetchResources(),
   });
 
-  // Bucket bookings by resource + slot-column. For journey bookings that traverse
-  // multiple resources we walk `schedule[]` — each step lives on its own row.
-  const grid = useMemo(() => {
-    const map = {};
+  // Bucket bookings by resource, then lane-assign overlapping ones (classic
+  // interval-partitioning) so simultaneous bookings on a multi-capacity
+  // resource (e.g. Salt Cave — up to 7 independent bookings at once) render
+  // as separate side-by-side cards instead of stacking on top of each other.
+  // Also computes per-column occupancy (sum of guests active in that slot)
+  // for the capacity badge. For journey bookings that traverse multiple
+  // resources we walk `schedule[]` — each step lives on its own row.
+  const resourceLayout = useMemo(() => {
+    const byResource = {};
     for (const b of bookings) {
       const steps = Array.isArray(b.schedule) && b.schedule.length > 0
         ? b.schedule.map((s) => ({
@@ -104,14 +113,35 @@ export default function CalendarClient({ user }) {
           }];
       for (const step of steps) {
         if (!step.resourceId || !step.from) continue;
-        const hhmm  = istHHmm(step.from);
-        const align = alignToSlot(hhmm);
-        if (!align) continue;
-        const key = `${step.resourceId}__${align}`;
-        (map[key] = map[key] || []).push({ booking: b, step });
+        const colStart = colIndexForIso(step.from);
+        if (colStart == null || colStart < 0 || colStart >= SLOTS.length) continue;
+        const span = slotsBetween(step.from, step.to);
+        const colEnd = Math.min(SLOTS.length, colStart + span); // exclusive
+        const guests = Math.max(1, Number(b.guests) || 1);
+        (byResource[step.resourceId] = byResource[step.resourceId] || [])
+          .push({ booking: b, step, colStart, colEnd, guests });
       }
     }
-    return map;
+
+    const layout = {};
+    for (const [resourceId, items] of Object.entries(byResource)) {
+      items.sort((a, b2) => a.colStart - b2.colStart);
+      // Greedy lane assignment: place each item in the first lane whose last
+      // item already ended by this item's start; otherwise open a new lane.
+      const laneEnds = [];
+      for (const item of items) {
+        let lane = laneEnds.findIndex((end) => end <= item.colStart);
+        if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
+        item.lane = lane;
+        laneEnds[lane] = item.colEnd;
+      }
+      const occupancy = new Array(SLOTS.length).fill(0);
+      for (const item of items) {
+        for (let c = item.colStart; c < item.colEnd; c++) occupancy[c] += item.guests;
+      }
+      layout[resourceId] = { items, laneCount: Math.max(1, laneEnds.length), occupancy };
+    }
+    return layout;
   }, [bookings]);
 
   const shift = (delta) => { const d = new Date(date); d.setDate(d.getDate() + delta); setDate(d); };
@@ -161,7 +191,7 @@ export default function CalendarClient({ user }) {
                 )}>{s}</div>
               ))}
               {resources.map((r) => (
-                <FragmentRow key={r.id} r={r} grid={grid} />
+                <FragmentRow key={r.id} r={r} layout={resourceLayout[r.id]} />
               ))}
             </div>
           </div>
@@ -183,27 +213,62 @@ export default function CalendarClient({ user }) {
 /* Row + status                                                       */
 /* ------------------------------------------------------------------ */
 
-function FragmentRow({ r, grid }) {
+function FragmentRow({ r, layout }) {
+  const capacity = Number(r.capacity) || 1;
+  const showBadges = capacity > 1;
+  const laneCount = Math.max(1, layout?.laneCount || 1);
+  const cellHeight = showBadges
+    ? BADGE_STRIP + laneCount * LANE_HEIGHT + 4
+    : Math.max(56, laneCount * LANE_HEIGHT + 4);
+  const itemsByStartCol = useMemo(() => {
+    const m = {};
+    for (const item of layout?.items || []) (m[item.colStart] = m[item.colStart] || []).push(item);
+    return m;
+  }, [layout]);
+
   return (
     <>
-      <div className="sticky left-0 z-10 bg-card border-r border-b border-border px-3 py-3 text-[12.5px] font-medium truncate">{r.name}</div>
-      {SLOTS.map((s) => {
-        const cellKey = `${r.id}__${s}`;
-        const cellItems = grid[cellKey] || [];
+      <div className="sticky left-0 z-10 bg-card border-r border-b border-border px-3 py-3 text-[12.5px] font-medium truncate flex items-center gap-1"
+        style={{ height: cellHeight }}>
+        {r.name}
+        {showBadges && <span className="text-[10px] text-muted-foreground font-mono">cap {capacity}</span>}
+      </div>
+      {SLOTS.map((s, colIdx) => {
+        const cellItems = itemsByStartCol[colIdx] || [];
+        const occ = layout?.occupancy?.[colIdx] || 0;
         return (
-          <div key={cellKey} className="border-b border-l border-border h-14 relative">
-            {cellItems.map(({ booking: b, step }, i) => {
-              const span = slotsBetween(step.from, step.to);
-              // Absolute overlay stretches across `span` columns using inline style.
+          <div key={s} className="border-b border-l border-border relative" style={{ height: cellHeight }}>
+            {showBadges && occ > 0 && (
+              <div className={cn(
+                'absolute top-0.5 left-0.5 right-0.5 rounded px-1 text-[9px] font-mono font-semibold text-center leading-tight z-20',
+                occ >= capacity ? 'bg-red-500/15 text-red-700 dark:text-red-300'
+                  : occ >= capacity * 0.7 ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                  : 'bg-muted text-muted-foreground',
+              )}>
+                {occ}/{capacity}
+              </div>
+            )}
+            {cellItems.map(({ booking: b, step, colEnd, lane, guests }, i) => {
+              const span = colEnd - colIdx;
+              const top = (showBadges ? BADGE_STRIP : 2) + lane * LANE_HEIGHT;
+              // Single-lane resources (the common case — everything except Salt
+              // Cave) fill the whole cell like before; multi-lane rows keep each
+              // card compact so several fit without overlapping.
+              const itemHeight = laneCount === 1 ? cellHeight - top - 2 : LANE_HEIGHT - 4;
+              // Absolute overlay stretches across `span` columns using inline style;
+              // `top` keeps simultaneous bookings on separate lanes instead of overlapping.
               return (
                 <Link key={b.id + '-' + i} href={`/admin/bookings/${b.id}`}
                   className={cn(
-                    'absolute inset-y-0.5 left-0.5 rounded-md px-1.5 py-1 text-[10.5px] leading-tight overflow-hidden z-10',
+                    'absolute left-0.5 rounded-md px-1.5 py-0.5 text-[10px] leading-tight overflow-hidden z-10',
                     statusClasses(b.status)
                   )}
-                  style={{ width: `calc(${span * 100}% - 4px)` }}
+                  style={{ width: `calc(${span * 100}% - 4px)`, top, height: itemHeight }}
+                  title={`${b.contact?.name || 'Guest'} \u00b7 ${step.therapyName || ''}${guests > 1 ? ` \u00b7 ${guests} guests` : ''}`}
                 >
-                  <div className="font-semibold truncate">{b.contact?.name || 'Guest'}</div>
+                  <div className="font-semibold truncate">
+                    {b.contact?.name || 'Guest'}{guests > 1 && <span className="opacity-70"> {'\u00d7'}{guests}</span>}
+                  </div>
                   <div className="opacity-80 truncate">{step.therapyName || '\u2014'}</div>
                 </Link>
               );
