@@ -89,13 +89,13 @@ export function InlineSignIn({ onSignedIn, onGoogleStart, title = 'Sign in to co
       {mode === 'choice' && (
         <div className="mt-3 space-y-2">
           <button type="button" onClick={onGoogleStart}
-            className="w-full h-10 rounded-lg bg-foreground text-background hover:bg-foreground/90 transition-colors text-[13px] font-semibold inline-flex items-center justify-center gap-2">
-            <GoogleIcon /> Continue with Google
+            className="w-full min-h-10 px-3 py-2.5 rounded-lg bg-foreground text-background hover:bg-foreground/90 transition-colors text-[13px] font-semibold flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 text-center leading-snug">
+            <GoogleIcon className="shrink-0" /> <span>Continue with Google</span>
           </button>
           {WHATSAPP_LOGIN_ENABLED && (
             <button type="button" onClick={() => setMode('phone')}
-              className="w-full h-10 rounded-lg border border-border bg-background hover:bg-muted transition-colors text-[13px] font-medium inline-flex items-center justify-center gap-2">
-              <MessageCircle className="h-3.5 w-3.5" /> Continue with WhatsApp
+              className="w-full min-h-10 px-3 py-2.5 rounded-lg border border-border bg-background hover:bg-muted transition-colors text-[13px] font-medium flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 text-center leading-snug">
+              <MessageCircle className="h-3.5 w-3.5 shrink-0" /> <span>Continue with WhatsApp</span>
             </button>
           )}
         </div>
@@ -114,8 +114,8 @@ export function InlineSignIn({ onSignedIn, onGoogleStart, title = 'Sign in to co
           </div>
           {err && <div className="text-[11.5px] text-destructive">{err}</div>}
           <button type="button" onClick={requestOtp} disabled={loading || !phone}
-            className="w-full h-10 rounded-lg bg-foreground text-background text-[13px] font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-foreground/90 transition-colors">
-            {loading ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending…</> : <>Send code</>}
+            className="w-full h-10 px-3 rounded-lg bg-foreground text-background text-[13px] font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-foreground/90 transition-colors whitespace-nowrap">
+            {loading ? <><Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" /> Sending…</> : <>Send code</>}
           </button>
           <button type="button" onClick={() => { setMode('choice'); setErr(null); }} className="w-full h-8 text-[11.5px] text-muted-foreground hover:text-foreground transition-colors">
             Back
@@ -142,8 +142,8 @@ export function InlineSignIn({ onSignedIn, onGoogleStart, title = 'Sign in to co
           )}
           {err && <div className="text-[11.5px] text-destructive">{err}</div>}
           <button type="button" onClick={submitOtp} disabled={loading || otp.length !== 6}
-            className="w-full h-10 rounded-lg bg-foreground text-background text-[13px] font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-foreground/90 transition-colors">
-            {loading ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Verifying…</> : <><KeyRound className="h-3.5 w-3.5" /> Sign in</>}
+            className="w-full h-10 px-3 rounded-lg bg-foreground text-background text-[13px] font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-foreground/90 transition-colors whitespace-nowrap">
+            {loading ? <><Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" /> Verifying…</> : <><KeyRound className="h-3.5 w-3.5 shrink-0" /> Sign in</>}
           </button>
           <button type="button" onClick={() => { setMode('phone'); setOtp(''); setDevOtp(null); setErr(null); }} className="w-full h-8 text-[11.5px] text-muted-foreground hover:text-foreground transition-colors">
             Use a different number
