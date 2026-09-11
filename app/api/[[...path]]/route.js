@@ -664,15 +664,19 @@ async function handle(req, method, segs) {
           }, { status: 400 });
         }
       }
-      // Guest-count cap — e.g. Red Light/IR Sauna max 2, Cold Plunge max 5.
-      // Takes the STRICTEST cap across selected therapies (mirrors lead-time
-      // and last-slot gating below).
+      // Guest-count cap — e.g. Salt Cave max 7, Kids Salt max 3. Takes the
+      // STRICTEST cap across only the SHARED-capacity therapies selected
+      // (max_capacity > 1) — private, exclusive-lock therapies (capacity 1:
+      // Sauna, Red Light, Cold Plunge, Float) don't consult guests in their
+      // own availability check (see isResourceFree in lib/scheduling.js), so
+      // a Salt Cave + Red Light combo should still allow up to 7 guests for
+      // the Salt Cave leg rather than being capped at 1 by the private room.
       const requestedGuests = Math.max(1, Number(body.guests) || 1);
       if (therapySlugs.length > 0 && requestedGuests > 1) {
         const { data: capDocs } = await supabase.from('therapies').select('slug, max_capacity').in('slug', therapySlugs);
         const strictestCap = (capDocs || []).reduce((min, t) => {
           const cap = Number(t.max_capacity);
-          return cap > 0 ? Math.min(min, cap) : min;
+          return cap > 1 ? Math.min(min, cap) : min;
         }, Infinity);
         if (Number.isFinite(strictestCap) && requestedGuests > strictestCap) {
           return NextResponse.json({

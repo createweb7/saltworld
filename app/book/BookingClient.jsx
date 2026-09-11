@@ -471,12 +471,17 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
 
   // Shared-capacity resources (e.g. the Salt Cave, capacity 7) host multiple
   // independent guests per time slot rather than locking exclusively per
-  // booking. Take the STRICTEST (minimum) capacity across every selected
-  // therapy — mirroring the server's guest-cap check — so a combo journey
-  // that mixes the Salt Cave with a private, exclusive-lock room (capacity 1)
-  // correctly caps at 1, not the loosest therapy in the mix.
-  const sharedCapacity = therapies.length > 0
-    ? Math.min(...therapies.map((slug) => Number(therapyMeta?.[slug]?.maxCapacity) || 1))
+  // booking. Private, exclusive-lock therapies (capacity 1 — Sauna, Red
+  // Light, Cold Plunge, Float) are booked one party at a time regardless of
+  // headcount and don't consult `guests` in their availability check at all
+  // (see isResourceFree in lib/scheduling.js), so they're excluded here —
+  // a Salt Cave + Red Light combo should still offer up to 7 guests for the
+  // Salt Cave leg. Take the STRICTEST (minimum) cap across only the
+  // therapies that ARE shared-capacity, so a Salt Cave + Kids Salt combo
+  // still correctly caps at 3.
+  const sharedCapTherapies = therapies.filter((slug) => (Number(therapyMeta?.[slug]?.maxCapacity) || 1) > 1);
+  const sharedCapacity = sharedCapTherapies.length > 0
+    ? Math.min(...sharedCapTherapies.map((slug) => Number(therapyMeta[slug].maxCapacity)))
     : 0;
 
   // Keep `guests` in range as the selected therapies change — e.g. switching
