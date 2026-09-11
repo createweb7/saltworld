@@ -1300,7 +1300,7 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
       )}
 
       <div className="mt-8 grid md:grid-cols-2 gap-8">
-        <form onSubmit={(e) => { e.preventDefault(); onSubmit(); }} className="space-y-4">
+        <form noValidate onSubmit={(e) => { e.preventDefault(); onSubmit(); }} className="space-y-4">
           {needsLoginGate ? (
             <>
               <InlineSignIn onSignedIn={onSignedIn} onGoogleStart={onGoogleStart} />
@@ -1351,20 +1351,34 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
                 {bookingFor === 'other' ? 'Guest\u2019s full name' : 'Full name'}
                 <span className="text-destructive ml-0.5">*</span>
               </label>
-              <input id="name" type="text" required minLength={2}
-                value={contact.name || ''} onChange={(e) => setContact({ ...contact, name: e.target.value })}
+              <input id="name" type="text"
+                value={contact.name || ''} onChange={(e) => setContact({ ...contact, name: e.target.value, _nameValid: undefined })}
+                onBlur={(e) => setContact((c) => ({ ...c, _nameValid: e.target.value.trim().length >= 2 }))}
                 placeholder={bookingFor === 'other' ? 'e.g. Ananya Iyer' : undefined}
-                className="w-full h-11 px-3.5 rounded-xl border border-border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-brand/40" />
+                className={cn(
+                  'w-full h-11 px-3.5 rounded-xl border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-brand/40',
+                  contact._nameValid === false ? 'border-destructive' : 'border-border',
+                )} />
+              {contact._nameValid === false && (
+                <div className="mt-1 text-[11px] text-destructive">Please enter your name.</div>
+              )}
             </div>
             <div>
               <label htmlFor="phone" className="block text-[12px] font-medium mb-1.5">
                 {bookingFor === 'other' ? 'Guest\u2019s phone' : 'Phone'}
                 <span className="text-destructive ml-0.5">*</span>
               </label>
-              <input id="phone" type="tel" required pattern="^[0-9+\-\s]{7,15}$"
-                value={contact.phone || ''} onChange={(e) => setContact({ ...contact, phone: e.target.value })}
+              <input id="phone" type="tel"
+                value={contact.phone || ''} onChange={(e) => setContact({ ...contact, phone: e.target.value, _phoneValid: undefined })}
+                onBlur={(e) => setContact((c) => ({ ...c, _phoneValid: /^[0-9+\-\s]{7,15}$/.test(e.target.value.trim()) }))}
                 placeholder={'+91 \u2026'}
-                className="w-full h-11 px-3.5 rounded-xl border border-border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-brand/40" />
+                className={cn(
+                  'w-full h-11 px-3.5 rounded-xl border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-brand/40',
+                  contact._phoneValid === false ? 'border-destructive' : 'border-border',
+                )} />
+              {contact._phoneValid === false && (
+                <div className="mt-1 text-[11px] text-destructive">Please enter a valid phone number.</div>
+              )}
             </div>
           </div>
           <div>
@@ -1372,11 +1386,11 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
               {bookingFor === 'other' ? 'Guest\u2019s email' : 'Email'}
               <span className="text-destructive ml-0.5">*</span>
             </label>
-            <input id="email" type="email" required
+            <input id="email" type="email"
               value={contact.email || ''} onChange={(e) => setContact({ ...contact, email: e.target.value })}
               onBlur={(e) => {
                 const v = e.target.value.trim();
-                if (!v) return;
+                if (!v) { setContact((c) => ({ ...c, _emailValid: false })); return; }
                 const re = /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,}$/;
                 setContact((c) => ({ ...c, _emailValid: !/\.\./.test(v) && !/\s/.test(v) && re.test(v) }));
               }}
@@ -2230,17 +2244,21 @@ export default function BookingClient({ initialOutcome }) {
 
   const submit = async () => {
     setError(null);
-    if (!contact.name || !contact.phone) { setError('Name and phone are required.'); return; }
-    if (therapies.length === 0) { setError('Please pick at least one therapy.'); return; }
-    // Strict email format guard — the backend enforces the SAME rule.
-    if (contact.email) {
-      const re = /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,}$/;
-      const ok = !/\.\./.test(contact.email) && !/\s/.test(contact.email) && re.test(contact.email.trim());
-      if (!ok) {
-        setError('Please enter a valid email address with a domain extension (e.g., name@example.com).');
-        return;
-      }
+    // Inline field validation — mirrors each field's own onBlur check, so a
+    // field the customer never focused (tabbed past, pasted into the form
+    // via autofill, etc.) still gets flagged with the same red-border +
+    // message treatment instead of relying on the browser's native popup.
+    const nameOk  = (contact.name  || '').trim().length >= 2;
+    const phoneOk = /^[0-9+\-\s]{7,15}$/.test((contact.phone || '').trim());
+    const emailRe = /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,}$/;
+    const emailV  = (contact.email || '').trim();
+    const emailOk = !!emailV && !/\.\./.test(emailV) && !/\s/.test(emailV) && emailRe.test(emailV);
+    if (!nameOk || !phoneOk || !emailOk) {
+      setContact((c) => ({ ...c, _nameValid: nameOk, _phoneValid: phoneOk, _emailValid: emailOk }));
+      setError('Please fix the highlighted fields above.');
+      return;
     }
+    if (therapies.length === 0) { setError('Please pick at least one therapy.'); return; }
     setSubmitting(true);
     try {
       const o = getOutcome(outcome);
