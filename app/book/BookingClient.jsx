@@ -523,10 +523,47 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
             {therapies.map((slug) => {
               const meta = therapyMeta?.[slug];
               if (!meta) return null;
+              const therapyIsShared = (Number(meta.maxCapacity) || 1) > 1;
               return (
-                <div key={slug} className="flex items-center justify-between text-[14px]">
-                  <div className="flex items-center gap-2"><Check className="h-3.5 w-3.5 text-brand" /><span className="font-medium">{meta.name}</span></div>
-                  <div className="text-[12.5px] text-muted-foreground font-mono">{meta.durationMin} min</div>
+                <div key={slug}>
+                  <div className="flex items-center justify-between text-[14px]">
+                    <div className="flex items-center gap-2"><Check className="h-3.5 w-3.5 text-brand" /><span className="font-medium">{meta.name}</span></div>
+                    <div className="text-[12.5px] text-muted-foreground font-mono">{meta.durationMin} min</div>
+                  </div>
+                  {/* Guest-count control lives right under ITS OWN therapy — not
+                      as a shared control for the whole journey — since it only
+                      ever applies to this specific shared-capacity resource
+                      (e.g. Salt Cave). Other therapies in the same journey
+                      (Float, Sauna, etc.) set their own headcount separately
+                      via their solo/couple toggle below. */}
+                  {therapyIsShared && (
+                    <div className="mt-2 mb-1 ml-6 pl-3 border-l-2 border-brand/20">
+                      <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
+                        <Users className="h-3.5 w-3.5 text-brand shrink-0" />
+                        <span>Capacity: 1&ndash;{sharedCapacity} people per time slot &mdash; you may share with other guests.</span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between gap-3">
+                        <div className="text-[12.5px] font-medium">How many people for {meta.name}?</div>
+                        <div className="inline-flex items-center rounded-full border border-border bg-card">
+                          <button
+                            type="button"
+                            aria-label="Fewer guests"
+                            disabled={guests <= 1}
+                            onClick={() => { setGuests(Math.max(1, guests - 1)); onChange(null); }}
+                            className="h-8 w-8 rounded-full inline-flex items-center justify-center text-[15px] font-medium text-foreground disabled:opacity-30 disabled:cursor-not-allowed hover:bg-muted transition-colors"
+                          >&minus;</button>
+                          <span className="w-8 text-center font-mono text-[13.5px] font-semibold">{guests}</span>
+                          <button
+                            type="button"
+                            aria-label="More guests"
+                            disabled={guests >= sharedCapacity}
+                            onClick={() => { setGuests(Math.min(sharedCapacity, guests + 1)); onChange(null); }}
+                            className="h-8 w-8 rounded-full inline-flex items-center justify-center text-[15px] font-medium text-foreground disabled:opacity-30 disabled:cursor-not-allowed hover:bg-muted transition-colors"
+                          >+</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -556,34 +593,6 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
               )}
             </div>
           </div>
-          {sharedCapacity > 1 && (
-            <div className="mt-3 pt-3 border-t border-border">
-              <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-                <Users className="h-3.5 w-3.5 text-brand shrink-0" />
-                <span>Capacity: 1&ndash;{sharedCapacity} people per time slot &mdash; you may share the session with other guests.</span>
-              </div>
-              <div className="mt-3 flex items-center justify-between gap-3">
-                <div className="text-[12.5px] font-medium">How many people are booking?</div>
-                <div className="inline-flex items-center rounded-full border border-border bg-card">
-                  <button
-                    type="button"
-                    aria-label="Fewer guests"
-                    disabled={guests <= 1}
-                    onClick={() => { setGuests(Math.max(1, guests - 1)); onChange(null); }}
-                    className="h-8 w-8 rounded-full inline-flex items-center justify-center text-[15px] font-medium text-foreground disabled:opacity-30 disabled:cursor-not-allowed hover:bg-muted transition-colors"
-                  >&minus;</button>
-                  <span className="w-8 text-center font-mono text-[13.5px] font-semibold">{guests}</span>
-                  <button
-                    type="button"
-                    aria-label="More guests"
-                    disabled={guests >= sharedCapacity}
-                    onClick={() => { setGuests(Math.min(sharedCapacity, guests + 1)); onChange(null); }}
-                    className="h-8 w-8 rounded-full inline-flex items-center justify-center text-[15px] font-medium text-foreground disabled:opacity-30 disabled:cursor-not-allowed hover:bg-muted transition-colors"
-                  >+</button>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
