@@ -60,7 +60,7 @@ export default function BookingsClient({ user }) {
 
   const exportCsv = () => {
     const rows = [
-      ['Ref', 'Customer', 'Phone', 'Email', 'Date', 'Time', 'Outcome', 'Therapy', 'Total (INR)', 'Status', 'Created'],
+      ['Ref', 'Customer', 'Phone', 'Email', 'Date', 'Time', 'Outcome', 'Therapy', 'Total (INR)', 'Payment', 'Status', 'Created'],
       ...data.map((b) => [
         b.ref || '',
         b.contact?.name  || '',
@@ -71,6 +71,7 @@ export default function BookingsClient({ user }) {
         b.outcomeLabel || b.outcome || '',
         b.therapyLabel || b.therapy || '',
         b.total || 0,
+        b.payment === 'online' ? (b.paymentStatus === 'paid' ? 'Paid online' : 'Payment incomplete') : b.payment === 'membership' ? 'Membership' : 'Pay at visit',
         b.status || '',
         formatDate(b.createdAt),
       ]),
@@ -162,16 +163,17 @@ export default function BookingsClient({ user }) {
                 <th className="px-4 py-2.5">When</th>
                 <th className="px-4 py-2.5">Therapy / Outcome</th>
                 <th className="px-4 py-2.5">Total</th>
+                <th className="px-4 py-2.5">Payment</th>
                 <th className="px-4 py-2.5">Status</th>
                 <th className="px-4 py-2.5"></th>
               </tr>
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={7} className="px-4 py-10 text-center"><Loader2 className="h-4 w-4 mx-auto animate-spin text-muted-foreground" /></td></tr>
+                <tr><td colSpan={8} className="px-4 py-10 text-center"><Loader2 className="h-4 w-4 mx-auto animate-spin text-muted-foreground" /></td></tr>
               )}
               {!isLoading && data.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-16 text-center text-[12.5px] text-muted-foreground">No bookings match this filter.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-16 text-center text-[12.5px] text-muted-foreground">No bookings match this filter.</td></tr>
               )}
               {data.map((b) => (
                 <tr key={b.id || b.ref} className="border-t border-border hover:bg-muted/30 transition-colors">
@@ -189,6 +191,7 @@ export default function BookingsClient({ user }) {
                     {b.resourceName && <div className="text-[11px] text-muted-foreground mt-0.5">{b.resourceName}</div>}
                   </td>
                   <td className="px-4 py-3 font-mono text-[12.5px]">{b.total ? '₹' + b.total.toLocaleString('en-IN') : '—'}</td>
+                  <td className="px-4 py-3"><PaymentPill booking={b} /></td>
                   <td className="px-4 py-3"><StatusPill status={b.status} /></td>
                   <td className="px-4 py-3 text-right">
                     <Link href={`/admin/bookings/${b.id || b.ref}`} className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground">
@@ -216,5 +219,25 @@ function StatusPill({ status }) {
     cancelled:   ['Cancelled', 'bg-muted text-muted-foreground'],
   };
   const [label, cls] = map[status] || ['—', 'bg-muted text-muted-foreground'];
+  return <span className={cn('inline-flex items-center h-5 px-2 rounded-full text-[10.5px] font-semibold', cls)}>{label}</span>;
+}
+
+// Distinguishes a genuinely settled payment from a booking record that
+// exists but was never actually paid for — e.g. a customer who started
+// Razorpay checkout (creating the booking) and then abandoned the payment
+// modal. The booking row itself looks identical to a paid one without this.
+function PaymentPill({ booking: b }) {
+  let label, cls;
+  if (b.payment === 'membership') {
+    [label, cls] = ['Membership', 'bg-blue-500/10 text-blue-700 dark:text-blue-400'];
+  } else if (b.payment === 'online') {
+    [label, cls] = b.paymentStatus === 'paid'
+      ? ['Paid online', 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400']
+      : ['Payment incomplete', 'bg-red-500/10 text-red-600 dark:text-red-400'];
+  } else if (b.payment === 'at-visit') {
+    [label, cls] = ['Pay at visit', 'bg-muted text-muted-foreground'];
+  } else {
+    [label, cls] = ['—', 'bg-muted text-muted-foreground'];
+  }
   return <span className={cn('inline-flex items-center h-5 px-2 rounded-full text-[10.5px] font-semibold', cls)}>{label}</span>;
 }

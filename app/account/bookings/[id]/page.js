@@ -21,8 +21,15 @@ function fmtTimeRange(fromIso, toIso) {
 
 async function loadBooking(id, customer) {
   const supabase = getSupabase();
-  const { data: row } = await supabase.from('bookings').select('*').eq('id', id)
-    .or(`customer_id.eq.${customer.id},contact_phone.eq.${customer.phone}`).maybeSingle();
+  // Only widen the ownership check to contact_phone when the customer
+  // actually has one on file — a Google-only sign-in has no phone, and an
+  // empty string would match any booking that ALSO has a blank
+  // contact_phone, letting someone view a booking that isn't theirs.
+  let query = supabase.from('bookings').select('*').eq('id', id);
+  query = customer.phone
+    ? query.or(`customer_id.eq.${customer.id},contact_phone.eq.${customer.phone}`)
+    : query.eq('customer_id', customer.id);
+  const { data: row } = await query.maybeSingle();
   if (!row) return null;
   const booking = await toBookingFull(supabase, row);
   const { data: invRow } = await supabase.from('invoices').select('*').eq('booking_id', row.id).maybeSingle();

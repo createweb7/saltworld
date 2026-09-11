@@ -14,7 +14,19 @@ export const dynamic = 'force-dynamic';
 async function loadDashboard(customerId, phone) {
   const supabase = getSupabase();
   let bookingQuery = supabase.from('bookings').select('*').order('created_at', { ascending: false }).limit(20);
-  bookingQuery = customerId ? bookingQuery.or(`customer_id.eq.${customerId},contact_phone.eq.${phone}`) : bookingQuery.eq('contact_phone', phone);
+  // Only widen the match to contact_phone when phone is actually set — a
+  // Google-only sign-in has no phone on file, and an empty string would
+  // match every booking that ALSO has a blank contact_phone (a lot of old
+  // guest/test records), leaking unrelated bookings into this account.
+  if (customerId && phone) {
+    bookingQuery = bookingQuery.or(`customer_id.eq.${customerId},contact_phone.eq.${phone}`);
+  } else if (customerId) {
+    bookingQuery = bookingQuery.eq('customer_id', customerId);
+  } else if (phone) {
+    bookingQuery = bookingQuery.eq('contact_phone', phone);
+  } else {
+    bookingQuery = bookingQuery.eq('id', '00000000-0000-0000-0000-000000000000'); // no identity to match on
+  }
   const [{ data: bookingRows }, { data: subRows }, recentTxs] = await Promise.all([
     bookingQuery,
     customerId ? supabase.from('member_subscriptions').select('*').eq('customer_id', customerId).eq('status', 'active') : Promise.resolve({ data: [] }),
@@ -30,7 +42,14 @@ async function loadDashboard(customerId, phone) {
 export default async function AccountHome() {
   const customer = await getCurrentCustomer();
   if (!customer) redirect('/account/login');
-  const { bookings, activeSubs, recentTxs } = await loadDashboard(customer.id, customer.phone);
+  const { bookings: allBookings, activeSubs, recentTxs } = await loadDashboard(customer.id, customer.phone);
+
+  // Only show bookings that are genuinely settled — a booking record is
+  // created up front for online payments, BEFORE the Razorpay checkout
+  // actually completes, so an abandoned/failed payment otherwise leaves a
+  // "confirmed"-looking booking with nothing actually paid. Membership and
+  // pay-at-visit bookings don't go through that gap, so they're unaffected.
+  const bookings = allBookings.filter((b) => b.status !== 'cancelled' && (b.payment !== 'online' || b.paymentStatus === 'paid'));
 
   const today = new Date(new Date().toDateString());
   const upcoming = bookings.filter((b) => b.startAt && new Date(b.startAt) >= today).slice(0, 5);
@@ -151,6 +170,7 @@ function BalanceCard({ label, value, icon: Icon, href, hint }) {
 function BookingRow({ b, muted }) {
   const isoDate = b.startAt ? formatDate(b.startAt) : '';
   const slotTime = b.startAt ? new Date(b.startAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : '';
+  const paymentLabel = b.payment === 'online' ? 'Paid online via Razorpay' : b.payment === 'membership' ? 'Covered by membership' : 'Pay at visit';
   return (
     <Link href={`/account/bookings/${b.id}`} className={`rounded-xl border border-border p-4 md:p-5 flex items-center gap-4 flex-wrap hover:border-foreground/30 transition-colors ${muted ? 'bg-muted/30' : 'bg-card'}`}>
       <div className="flex-1 min-w-0">
@@ -159,6 +179,7 @@ function BookingRow({ b, muted }) {
           {b.outcomeLabel || b.therapyLabel || b.therapy || 'Salt World session'}
         </div>
         <div className="mt-1 text-[12.5px] text-muted-foreground">{isoDate}{slotTime ? ` · ${slotTime}` : ''}{b.schedule?.length > 1 ? ` · ${b.schedule.length} therapies` : ''}</div>
+        <div className="mt-1 text-[11.5px] text-muted-foreground">{paymentLabel}{b.paymentId ? ` · ${b.paymentId}` : ''}</div>
       </div>
       <div className="flex items-center gap-3 ml-auto">
         {b.total > 0 && <div className="font-mono text-[14px] font-semibold">₹{Number(b.total).toLocaleString('en-IN')}</div>}
