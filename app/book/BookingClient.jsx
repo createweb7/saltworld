@@ -1232,6 +1232,12 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
   const o = getOutcome(outcome);
   const th = o?.protocol?.therapies?.find((x) => x.slug === therapy);
   const isMulti = therapies.length > 1 && slot?.plan?.length > 1;
+  // Paying online requires an account (receipts, refunds, and wallet credit
+  // all need to attach to a real customer record) — pay-at-visit (staff
+  // only) stays guest-friendly. Gate BEFORE asking for name/phone/email:
+  // once signed in, those prefill from the account instead of being typed
+  // twice, rather than collecting them first and then hitting a login wall.
+  const needsLoginGate = payment === 'online' && !customerId && !isStaff && !selectedMembershipId;
   return (
     <div>
       <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-semibold">{isDirectMode ? 'Step 3 of 3' : 'Step 4 of 4'}</div>
@@ -1268,6 +1274,15 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
 
       <div className="mt-8 grid md:grid-cols-2 gap-8">
         <form onSubmit={(e) => { e.preventDefault(); onSubmit(); }} className="space-y-4">
+          {needsLoginGate ? (
+            <>
+              <InlineSignIn onSignedIn={onSignedIn} onGoogleStart={onGoogleStart} />
+              <div className="text-[11.5px] text-muted-foreground text-center">
+                By confirming, you agree to our <Link href="/legal/terms" className="underline underline-offset-2">terms</Link> &amp; <Link href="/legal/refunds" className="underline underline-offset-2">refund policy</Link>.
+              </div>
+            </>
+          ) : (
+          <>
           {/* Book-for-self / Book-for-others toggle. Only shown when we have
               known-customer data to fall back on. */}
           {showBookingForToggle && (
@@ -1492,26 +1507,19 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
 
           {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 text-destructive text-[13px] px-3 py-2">{error}</div>}
 
-          {/* Paying online requires an account (receipts, refunds, and wallet
-              credit all need to attach to a real customer record) \u2014 pay-at-
-              visit stays guest-friendly. Sign-in happens in place via
-              WhatsApp OTP so nothing on this form is lost; Google still
-              redirects away, so the caller persists a resume draft first. */}
-          {payment === 'online' && !customerId && !isStaff && !selectedMembershipId ? (
-            <InlineSignIn onSignedIn={onSignedIn} onGoogleStart={onGoogleStart} />
-          ) : (
-            <button type="submit" disabled={submitting}
-              className="w-full inline-flex items-center justify-center gap-2 h-12 rounded-full bg-foreground text-background text-[14.5px] font-semibold hover:bg-foreground/90 disabled:opacity-60 transition-colors">
-              {submitting ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> {selectedMembershipId ? 'Confirming\u2026' : payment === 'online' ? 'Opening secure checkout\u2026' : 'Confirming\u2026'}</>
-              ) : (
-                <>{selectedMembershipId ? 'Use membership & confirm' : payment === 'online' ? 'Pay & confirm booking' : 'Confirm booking'} <ArrowRight className="h-4 w-4" /></>
-              )}
-            </button>
-          )}
+          <button type="submit" disabled={submitting}
+            className="w-full inline-flex items-center justify-center gap-2 h-12 rounded-full bg-foreground text-background text-[14.5px] font-semibold hover:bg-foreground/90 disabled:opacity-60 transition-colors">
+            {submitting ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> {selectedMembershipId ? 'Confirming\u2026' : payment === 'online' ? 'Opening secure checkout\u2026' : 'Confirming\u2026'}</>
+            ) : (
+              <>{selectedMembershipId ? 'Use membership & confirm' : payment === 'online' ? 'Pay & confirm booking' : 'Confirm booking'} <ArrowRight className="h-4 w-4" /></>
+            )}
+          </button>
           <div className="text-[11.5px] text-muted-foreground text-center">
             By confirming, you agree to our <Link href="/legal/terms" className="underline underline-offset-2">terms</Link> &amp; <Link href="/legal/refunds" className="underline underline-offset-2">refund policy</Link>.
           </div>
+          </>
+          )}
         </form>
 
         {/* Summary card */}
