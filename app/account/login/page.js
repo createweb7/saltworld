@@ -54,7 +54,12 @@ export default function CustomerLoginPage() {
       if (j.devOtp) { setDevOtp(j.devOtp); toast.info(`Dev mode — OTP: ${j.devOtp}`); }
       else toast.success('Code sent via WhatsApp');
     } catch (err) {
-      toast.error(err.message === 'invalid_phone' ? 'Enter a valid phone number' : err.message === 'otp_throttled' ? 'Please wait a few minutes before requesting another code' : 'Could not send OTP');
+      toast.error(
+        err.message === 'invalid_phone' ? 'Enter a valid phone number' :
+        err.message === 'otp_throttled' ? 'Please wait a few minutes before requesting another code' :
+        err.message === 'otp_delivery_not_configured' ? 'WhatsApp sign-in isn’t set up yet. Please use Google instead.' :
+        'Could not send OTP',
+      );
     } finally { setLoading(false); }
   };
 

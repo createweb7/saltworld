@@ -491,7 +491,10 @@ async function handle(req, method, segs) {
       const body = await req.json().catch(() => ({}));
       try {
         const { phone, otp } = await issueOtp(body.phone);
-        // Try to send via WhatsApp; fall back to returning otp in dev when not configured.
+        // Try to send via WhatsApp; fall back to returning otp in LOCAL DEV
+        // ONLY when not configured. This must never happen in production —
+        // handing the code back in the API response lets anyone "verify"
+        // as any phone number without ever owning it.
         const waConfigured = await whatsappIsConfigured();
         if (waConfigured) {
           await sendWhatsappTemplate({
@@ -504,8 +507,10 @@ async function handle(req, method, segs) {
           }).catch(() => {});
           return NextResponse.json({ ok: true, sent: true });
         }
-        // Dev fallback so testing works without provider keys.
-        return NextResponse.json({ ok: true, sent: false, devOtp: otp });
+        if (process.env.NODE_ENV !== 'production') {
+          return NextResponse.json({ ok: true, sent: false, devOtp: otp });
+        }
+        return NextResponse.json({ error: 'otp_delivery_not_configured' }, { status: 503 });
       } catch (e) {
         return NextResponse.json({ error: String(e?.message || e) }, { status: 400 });
       }
