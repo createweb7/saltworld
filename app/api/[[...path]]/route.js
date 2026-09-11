@@ -167,6 +167,7 @@ async function handle(req, method, segs) {
       couponCode:               body.couponCode  || null,
       giftCardCode:             body.giftCardCode|| null,
       giftCardPin:              body.giftCardPin || null,
+      guests:                   Math.max(1, Number(body.guests) || 1),
     });
     return NextResponse.json(quote);
   }
@@ -354,12 +355,13 @@ async function handle(req, method, segs) {
     const date = u.searchParams.get('date');
     const sessionMode = u.searchParams.get('sessionMode') || null;
     const floatDurationMin = Number(u.searchParams.get('floatDurationMin')) || null;
+    const guests = Math.max(1, Number(u.searchParams.get('guests')) || 1);
     if (therapies.length === 0) return NextResponse.json({ error: 'therapies_required' }, { status: 400 });
     if (!date) return NextResponse.json({ error: 'date_required' }, { status: 400 });
     const durationOverrides = floatDurationMin && therapies.includes('float-therapy')
       ? { 'float-therapy': floatDurationMin } : null;
     const { availableJourneySlots } = await import('@/lib/scheduling');
-    const r = await availableJourneySlots({ therapySlugs: therapies, branchId, dateIso: date, sessionMode, durationOverrides });
+    const r = await availableJourneySlots({ therapySlugs: therapies, branchId, dateIso: date, sessionMode, durationOverrides, guests });
     return NextResponse.json(r || { groups: { morning: [], afternoon: [], evening: [] }, totalDurationMin: 0, totalVisitMin: 0 });
   }
 
@@ -389,12 +391,13 @@ async function handle(req, method, segs) {
     }
     const therapies = therapiesQ.split(',').map((s) => s.trim()).filter(Boolean);
     const floatDurationMin = Number(u.searchParams.get('floatDurationMin')) || null;
+    const guests = Math.max(1, Number(u.searchParams.get('guests')) || 1);
     const durationOverrides = floatDurationMin && therapies.includes('float-therapy')
       ? { 'float-therapy': floatDurationMin } : null;
     const { recommendJourneys } = await import('@/lib/scheduling');
     const r = await recommendJourneys({
       therapySlugs: therapies, branchId, dateIso: date,
-      preferredTime: preferred, windowMin, sessionMode, durationOverrides, limit, startOffset: offset,
+      preferredTime: preferred, windowMin, sessionMode, durationOverrides, guests, limit, startOffset: offset,
     });
     return NextResponse.json(r);
   }
@@ -728,7 +731,7 @@ async function handle(req, method, segs) {
         } catch (e) { console.error('assertCanBook failed', e); }
         try {
           const { allocateJourney, suggestNextAvailableSlots } = await import('@/lib/scheduling');
-          const r = await allocateJourney({ therapySlugs, branchId, startIso, sessionMode, durationOverrides });
+          const r = await allocateJourney({ therapySlugs, branchId, startIso, sessionMode, durationOverrides, guests: requestedGuests });
           if (r.ok) {
             resourceId   = r.resourceId;
             resourceName = r.resourceName;
@@ -739,7 +742,7 @@ async function handle(req, method, segs) {
             // Slot no longer available — do NOT create the booking. Suggest
             // alternatives so the customer can continue without restarting.
             const suggestions = await suggestNextAvailableSlots({
-              therapySlugs, branchId, startIso, sessionMode, durationOverrides, limit: 5,
+              therapySlugs, branchId, startIso, sessionMode, durationOverrides, guests: requestedGuests, limit: 5,
             }).catch(() => []);
             return NextResponse.json({
               error: 'slot_unavailable',
@@ -1036,9 +1039,10 @@ async function handle(req, method, segs) {
         }
       }
       const { allocateJourney, suggestNextAvailableSlots } = await import('@/lib/scheduling');
-      const r = await allocateJourney({ therapySlugs, branchId: doc.branchId, startIso: newStart, excludeBookingId: bid, sessionMode, durationOverrides });
+      const rescheduleGuests = Math.max(1, Number(doc.guests) || 1);
+      const r = await allocateJourney({ therapySlugs, branchId: doc.branchId, startIso: newStart, excludeBookingId: bid, sessionMode, durationOverrides, guests: rescheduleGuests });
       if (!r.ok) {
-        const suggestions = await suggestNextAvailableSlots({ therapySlugs, branchId: doc.branchId, startIso: newStart, sessionMode, durationOverrides, limit: 5 }).catch(() => []);
+        const suggestions = await suggestNextAvailableSlots({ therapySlugs, branchId: doc.branchId, startIso: newStart, sessionMode, durationOverrides, guests: rescheduleGuests, limit: 5 }).catch(() => []);
         return NextResponse.json({ error: 'slot_unavailable', reason: r.reason, suggestions }, { status: 409 });
       }
       await supabase.from('bookings').update({

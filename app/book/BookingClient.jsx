@@ -343,7 +343,7 @@ function fmtVisit(mins) {
   return `${mins}m`;
 }
 
-function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSessionMode, floatDurationMin, setFloatDurationMin, onReorderTherapies }) {
+function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSessionMode, floatDurationMin, setFloatDurationMin, guests, setGuests, onReorderTherapies }) {
   const days = useMemo(() => {
     // Auto-rollover: if IST wall-clock is past 20:00 (branch close) we hide
     // "today" from the picker and default to tomorrow. TC-1 fix.
@@ -383,12 +383,13 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
     const q = new URLSearchParams({ therapies: therapies.join(','), date });
     if (hasFloat && sessionMode) q.set('sessionMode', sessionMode);
     if (hasFloat && floatDurationMin) q.set('floatDurationMin', String(floatDurationMin));
+    if (guests > 1) q.set('guests', String(guests));
     fetch(`/api/scheduling/slots?${q}`)
       .then((r) => r.ok ? r.json() : null)
       .then((d) => { if (!cancelled) { setJourneyData(d); setLoading(false); } })
       .catch(() => { if (!cancelled) { setJourneyData(null); setLoading(false); } });
     return () => { cancelled = true; };
-  }, [therapies, date, sessionMode, floatDurationMin, hasFloat]);
+  }, [therapies, date, sessionMode, floatDurationMin, hasFloat, guests]);
 
   // Fetch top-3 recommendations whenever inputs change.
   useEffect(() => {
@@ -401,6 +402,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
     });
     if (hasFloat && sessionMode) q.set('sessionMode', sessionMode);
     if (hasFloat && floatDurationMin) q.set('floatDurationMin', String(floatDurationMin));
+    if (guests > 1) q.set('guests', String(guests));
     fetch(`/api/scheduling/recommendations?${q}`)
       .then((r) => r.ok ? r.json() : { recommendations: [] })
       .then((d) => {
@@ -409,7 +411,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
         setRecLoading(false);
       })
       .catch(() => { setRecommendations([]); setRecExpanded(false); setRecLoading(false); });
-  }, [therapies, date, preferredTime, sessionMode, floatDurationMin, hasFloat]);
+  }, [therapies, date, preferredTime, sessionMode, floatDurationMin, hasFloat, guests]);
 
   const loadMore = async () => {
     setRecLoading(true);
@@ -420,6 +422,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
     });
     if (hasFloat && sessionMode) q.set('sessionMode', sessionMode);
     if (hasFloat && floatDurationMin) q.set('floatDurationMin', String(floatDurationMin));
+    if (guests > 1) q.set('guests', String(guests));
     try {
       const r = await fetch(`/api/scheduling/recommendations?${q}`);
       const d = await r.json();
@@ -462,6 +465,14 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
   // guests per time slot rather than locking exclusively per booking — call
   // that out so customers don't assume a 1:1 room.
   const sharedCapacity = Math.max(0, ...therapies.map((slug) => Number(therapyMeta?.[slug]?.maxCapacity) || 0));
+
+  // Keep `guests` in range as the selected therapies change — e.g. switching
+  // away from a shared-capacity therapy should drop back to 1, and switching
+  // to one with a smaller cap (Kids Salt, max 3) should clamp down.
+  useEffect(() => {
+    if (sharedCapacity <= 1 && guests !== 1) setGuests(1);
+    else if (sharedCapacity > 1 && guests > sharedCapacity) setGuests(sharedCapacity);
+  }, [sharedCapacity, guests, setGuests]);
 
   // Precompute time-picker options: every 15 min from 06:00 to 20:00.
   const timeOptions = useMemo(() => {
@@ -520,9 +531,31 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
             </div>
           </div>
           {sharedCapacity > 1 && (
-            <div className="mt-3 pt-3 border-t border-border flex items-center gap-2 text-[12px] text-muted-foreground">
-              <Users className="h-3.5 w-3.5 text-brand shrink-0" />
-              <span>Capacity: 1&ndash;{sharedCapacity} people per time slot &mdash; you may share the session with other guests.</span>
+            <div className="mt-3 pt-3 border-t border-border">
+              <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+                <Users className="h-3.5 w-3.5 text-brand shrink-0" />
+                <span>Capacity: 1&ndash;{sharedCapacity} people per time slot &mdash; you may share the session with other guests.</span>
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <div className="text-[12.5px] font-medium">How many people are booking?</div>
+                <div className="inline-flex items-center rounded-full border border-border bg-card">
+                  <button
+                    type="button"
+                    aria-label="Fewer guests"
+                    disabled={guests <= 1}
+                    onClick={() => { setGuests(Math.max(1, guests - 1)); onChange(null); }}
+                    className="h-8 w-8 rounded-full inline-flex items-center justify-center text-[15px] font-medium text-foreground disabled:opacity-30 disabled:cursor-not-allowed hover:bg-muted transition-colors"
+                  >&minus;</button>
+                  <span className="w-8 text-center font-mono text-[13.5px] font-semibold">{guests}</span>
+                  <button
+                    type="button"
+                    aria-label="More guests"
+                    disabled={guests >= sharedCapacity}
+                    onClick={() => { setGuests(Math.min(sharedCapacity, guests + 1)); onChange(null); }}
+                    className="h-8 w-8 rounded-full inline-flex items-center justify-center text-[15px] font-medium text-foreground disabled:opacity-30 disabled:cursor-not-allowed hover:bg-muted transition-colors"
+                  >+</button>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -1026,7 +1059,7 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, on
 /* Step 4 — Contact & confirm                                         */
 /* ------------------------------------------------------------------ */
 
-function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, customerId, branchId, isStaff = false, isDirectMode = false, eligibleMemberships = [], selectedMembershipId = null, onSelectMembership = () => {}, bookingFor = 'self', onChangeBookingFor = () => {}, showBookingForToggle = false, quote = null, walletUseInr = 0, setWalletUseInr = () => {}, walletAvailableInr = 0, giftCardCode = '', setGiftCardCode = () => {}, giftCardPin = '', setGiftCardPin = () => {}, giftCardApplied = null }) {
+function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, guests = 1, customerId, branchId, isStaff = false, isDirectMode = false, eligibleMemberships = [], selectedMembershipId = null, onSelectMembership = () => {}, bookingFor = 'self', onChangeBookingFor = () => {}, showBookingForToggle = false, quote = null, walletUseInr = 0, setWalletUseInr = () => {}, walletAvailableInr = 0, giftCardCode = '', setGiftCardCode = () => {}, giftCardPin = '', setGiftCardPin = () => {}, giftCardApplied = null }) {
   const o = getOutcome(outcome);
   const th = o?.protocol?.therapies?.find((x) => x.slug === therapy);
   const isMulti = therapies.length > 1 && slot?.plan?.length > 1;
@@ -1324,6 +1357,7 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
                 <Row label="Date" value={slot ? new Date(slot.date + 'T00:00').toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long' }) : '—'} />
                 <Row label="Therapy time" value={`${(slot.plan||[]).reduce((s,p)=>s+(p.durationMin||therapyMeta[p.therapySlug]?.durationMin||0),0)} min`} />
                 <Row label="Estimated visit" value={slot.visitFromIso && slot.visitToIso ? `~${fmtVisit(Math.round((new Date(slot.visitToIso)-new Date(slot.visitFromIso))/60000))}` : '—'} />
+                {guests > 1 && <Row label="Guests" value={`${guests} people`} />}
                 <Row label="Branch" value="HSR Layout" />
               </div>
             </>
@@ -1334,6 +1368,7 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
               <Row label="Date"    value={slot ? new Date(slot.date + 'T00:00').toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long' }) : '—'} />
               <Row label="Time"    value={slot?.time || '—'} />
               <Row label="Duration" value={o?.protocol?.duration || (therapies[0] && therapyMeta[therapies[0]]?.durationMin ? `${therapyMeta[therapies[0]].durationMin} min` : '—')} />
+              {guests > 1 && <Row label="Guests" value={`${guests} people`} />}
             </div>
           )}
           <div className="mt-5 pt-4 border-t border-border">
@@ -1581,6 +1616,7 @@ export default function BookingClient({ initialOutcome }) {
   const [therapyMeta, setTherapyMeta] = useState({}); // slug → {name, durationMin, ...} from DB
   const [sessionMode, setSessionMode] = useState('single'); // float-therapy: single | couple
   const [floatDurationMin, setFloatDurationMin] = useState(60); // float-therapy: 60 | 90
+  const [guests, setGuests] = useState(1); // headcount for shared-capacity therapies (e.g. Salt Cave)
   const [coupon, setCoupon] = useState(null);              // { code, discountInr, applied } | null
   // Suggestions surfaced when the confirm step receives a 409 slot_unavailable
   const [slotConflict, setSlotConflict] = useState(null); // { reason, suggestions:[{...}] }
@@ -1617,24 +1653,28 @@ export default function BookingClient({ initialOutcome }) {
     // back to the outcome-level rate × role-multiplier only when the therapy
     // hasn't been priced in the catalog yet.
     const basePrice = parsePrice(o?.pricing?.single?.price);
+    // Shared-capacity therapies (e.g. Salt Cave, capacity 7) are booked per
+    // person — multiply that line by the headcount. Private/exclusive-lock
+    // therapies (capacity 1, e.g. Float Tank) are unaffected.
     const sum = selected.reduce((s, t) => {
       const meta = therapyMeta[t.slug];
+      const lineGuests = (Number(meta?.maxCapacity) || 1) > 1 ? guests : 1;
       // Float Tank (and any future therapy with a durationOptions matrix)
       // prices off the selected duration + session mode, not a flat default.
       const options = Array.isArray(meta?.durationOptions) ? meta.durationOptions : null;
       if (options?.length && String(t.slug).includes('float')) {
         const opt = options.find((o2) => Number(o2.durationMin) === Number(floatDurationMin)) || options[0];
         const p = sessionMode === 'couple' ? opt.priceCouple : opt.priceSingle;
-        if (p != null) return s + Number(p);
+        if (p != null) return s + Number(p) * lineGuests;
       }
       const dbPrice = Number(meta?.defaultPrice) || 0;
-      if (dbPrice > 0) return s + dbPrice;
+      if (dbPrice > 0) return s + dbPrice * lineGuests;
       const role = String(t.role || '').toLowerCase();
       const mult = PRICE_MULTIPLIER[role] ?? 0.5;
-      return s + Math.round(basePrice * mult);
+      return s + Math.round(basePrice * mult) * lineGuests;
     }, 0);
     return sum || basePrice || 0;
-  }, [outcome, outcomeMap, therapies, therapyMeta, sessionMode, floatDurationMin]);
+  }, [outcome, outcomeMap, therapies, therapyMeta, sessionMode, floatDurationMin, guests]);
 
   // Load therapy metadata once (for the journey summary in step 3).
   useEffect(() => {
@@ -1681,6 +1721,7 @@ export default function BookingClient({ initialOutcome }) {
           couponCode:   (coupon?.applied ? coupon.code : null),
           giftCardCode: giftCardCode || null,
           giftCardPin:  giftCardPin  || null,
+          guests: Number(guests) || 1,
         }),
       })
         .then((r) => r.ok ? r.json() : null)
@@ -1697,7 +1738,7 @@ export default function BookingClient({ initialOutcome }) {
         .catch(() => setQuote(null));
     }, 300);
     return () => clearTimeout(timer);
-  }, [therapies, customerId, contact?.phone, selectedMembershipId, walletUseInr, coupon, giftCardCode, giftCardPin]);
+  }, [therapies, customerId, contact?.phone, selectedMembershipId, walletUseInr, coupon, giftCardCode, giftCardPin, guests]);
 
 
   // Pre-fill contact from query params (used when staff launches "New booking" from
@@ -1955,6 +1996,7 @@ export default function BookingClient({ initialOutcome }) {
           walletUseInr: Number(walletUseInr) || 0,
           giftCardCode: giftCardCode || null,
           giftCardPin:  giftCardPin  || null,
+          guests: Number(guests) || 1,
           // Booked-for-other flag — useful for reception + record-keeping.
           // customerId still points at the booker/paying account.
           bookedForOther: bookingFor === 'other',
@@ -2029,7 +2071,7 @@ export default function BookingClient({ initialOutcome }) {
         {stepId === 'outcome' && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); }} />}
         {stepId === 'therapy' && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} therapyMeta={therapyMeta} isDirectMode={isDirectTherapyMode} />}
         {stepId === 'slot'    && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode} setSessionMode={setSessionMode}
-          floatDurationMin={floatDurationMin} setFloatDurationMin={setFloatDurationMin}
+          floatDurationMin={floatDurationMin} setFloatDurationMin={setFloatDurationMin} guests={guests} setGuests={setGuests}
           onReorderTherapies={(idx, dir) => {
             const arr = [...therapies];
             const j = idx + dir;
@@ -2052,6 +2094,7 @@ export default function BookingClient({ initialOutcome }) {
             slotConflict={slotConflict}
             coupon={coupon} setCoupon={setCoupon}
             subtotalInr={totalRupees}
+            guests={guests}
             customerId={customerId}
             branchId={null}
             isStaff={isStaff}
