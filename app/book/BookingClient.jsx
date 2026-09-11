@@ -6,7 +6,7 @@ import Script from 'next/script';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, ArrowRight, Check, Loader2, Clock, Calendar as Cal,
-  MapPin, Phone, MessageCircle, Sparkles, ChevronUp, ChevronDown, Users,
+  MapPin, Phone, MessageCircle, Sparkles, ChevronUp, ChevronDown, Users, KeyRound, LogIn,
 } from 'lucide-react';
 import { cn } from '@/components/ss/utils';
 import { Wordmark } from '@/components/site/shell';
@@ -1096,10 +1096,139 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, on
 }
 
 /* ------------------------------------------------------------------ */
+/* Inline sign-in — used to require login before "Pay online" without */
+/* leaving the booking flow (WhatsApp OTP is fully same-page; Google  */
+/* still redirects away, so callers should persist a resume draft     */
+/* first — see saveResumeDraft/loadResumeDraft below).                */
+/* ------------------------------------------------------------------ */
+
+function InlineSignIn({ onSignedIn, onGoogleStart }) {
+  const [mode, setMode] = useState('choice'); // choice | phone | otp
+  const [phone, setPhone] = useState('');
+  const [otp, setOtp] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [devOtp, setDevOtp] = useState(null);
+  const [err, setErr] = useState(null);
+
+  // NOTE: deliberately <div>s, not <form>s — this whole component renders
+  // inside StepContact's outer <form onSubmit={onSubmit}> (the real booking
+  // submit). Nested <form> elements are invalid HTML; browsers merge the
+  // inner form's fields/buttons into the outer one, so an inner "submit"
+  // button would silently trigger the OUTER booking submit instead of these
+  // handlers. Buttons here are explicitly type="button" and call the
+  // handlers directly; Enter in the inputs is wired manually below.
+  const requestOtp = async () => {
+    if (loading || !phone) return;
+    setErr(null); setLoading(true);
+    try {
+      const res = await fetch('/api/customer/auth/request-otp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone }) });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || 'failed');
+      setMode('otp');
+      if (j.devOtp) setDevOtp(j.devOtp);
+    } catch (e2) {
+      setErr(e2.message === 'invalid_phone' ? 'Enter a valid phone number' : e2.message === 'otp_throttled' ? 'Please wait a few minutes before requesting another code' : 'Could not send OTP');
+    } finally { setLoading(false); }
+  };
+
+  const submitOtp = async () => {
+    if (loading || otp.length !== 6) return;
+    setErr(null); setLoading(true);
+    try {
+      const res = await fetch('/api/customer/auth/verify-otp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, otp }) });
+      const j = await res.json();
+      if (!res.ok || !j.ok) throw new Error(j.error || 'failed');
+      onSignedIn(j.customer);
+    } catch (e2) {
+      setErr(
+        e2.message === 'wrong_otp' ? 'Wrong code. Try again.' :
+        e2.message === 'otp_expired' ? 'Code expired. Please request a new one.' :
+        e2.message === 'account_disabled' ? 'This account has been disabled. Contact support.' :
+        'Could not sign in',
+      );
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="flex items-center gap-2 text-[13.5px] font-medium">
+        <LogIn className="h-4 w-4 text-brand" /> Sign in to pay online
+      </div>
+      <div className="mt-1 text-[12px] text-muted-foreground">
+        Online payments are tied to your account so we can email your receipt and track it against your bookings.
+      </div>
+
+      {mode === 'choice' && (
+        <div className="mt-3 space-y-2">
+          <button type="button" onClick={onGoogleStart}
+            className="w-full h-10 rounded-lg border border-border bg-background hover:bg-muted transition-colors text-[13px] font-medium inline-flex items-center justify-center gap-2">
+            Continue with Google
+          </button>
+          <button type="button" onClick={() => setMode('phone')}
+            className="w-full h-10 rounded-lg bg-foreground text-background hover:bg-foreground/90 transition-colors text-[13px] font-semibold inline-flex items-center justify-center gap-2">
+            <MessageCircle className="h-3.5 w-3.5" /> Continue with WhatsApp
+          </button>
+        </div>
+      )}
+
+      {mode === 'phone' && (
+        <div className="mt-3 space-y-2.5">
+          <div className="relative">
+            <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <input
+              autoFocus type="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); requestOtp(); } }}
+              placeholder="+91 76878 78793"
+              className="w-full h-10 pl-9 pr-3 rounded-lg border border-border bg-background text-[13.5px] focus:outline-none focus:border-foreground/40 transition-colors"
+            />
+          </div>
+          {err && <div className="text-[11.5px] text-destructive">{err}</div>}
+          <button type="button" onClick={requestOtp} disabled={loading || !phone}
+            className="w-full h-10 rounded-lg bg-foreground text-background text-[13px] font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-foreground/90 transition-colors">
+            {loading ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending…</> : <>Send code</>}
+          </button>
+          <button type="button" onClick={() => { setMode('choice'); setErr(null); }} className="w-full h-8 text-[11.5px] text-muted-foreground hover:text-foreground transition-colors">
+            Back
+          </button>
+        </div>
+      )}
+
+      {mode === 'otp' && (
+        <div className="mt-3 space-y-2.5">
+          <div className="text-[11.5px] text-muted-foreground">
+            Sent a six-digit code to <span className="font-mono">+{phone.replace(/^\+/, '')}</span>.
+          </div>
+          <input
+            autoFocus inputMode="numeric" pattern="[0-9]{6}" maxLength={6}
+            value={otp} onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, ''))}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submitOtp(); } }}
+            placeholder="• • • • • •"
+            className="w-full h-11 px-4 rounded-lg border border-border bg-background text-[18px] tracking-[0.35em] text-center font-mono focus:outline-none focus:border-foreground/40 transition-colors"
+          />
+          {devOtp && (
+            <div className="rounded-md bg-amber-500/10 border border-amber-500/30 px-2.5 py-2 text-[11px] text-amber-800 dark:text-amber-300">
+              Dev mode — OTP is <span className="font-mono font-semibold">{devOtp}</span>.
+            </div>
+          )}
+          {err && <div className="text-[11.5px] text-destructive">{err}</div>}
+          <button type="button" onClick={submitOtp} disabled={loading || otp.length !== 6}
+            className="w-full h-10 rounded-lg bg-foreground text-background text-[13px] font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-foreground/90 transition-colors">
+            {loading ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Verifying…</> : <><KeyRound className="h-3.5 w-3.5" /> Sign in</>}
+          </button>
+          <button type="button" onClick={() => { setMode('phone'); setOtp(''); setDevOtp(null); setErr(null); }} className="w-full h-8 text-[11.5px] text-muted-foreground hover:text-foreground transition-colors">
+            Use a different number
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Step 4 — Contact & confirm                                         */
 /* ------------------------------------------------------------------ */
 
-function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, guests = 1, customerId, branchId, isStaff = false, isDirectMode = false, eligibleMemberships = [], selectedMembershipId = null, onSelectMembership = () => {}, bookingFor = 'self', onChangeBookingFor = () => {}, showBookingForToggle = false, quote = null, walletUseInr = 0, setWalletUseInr = () => {}, walletAvailableInr = 0, giftCardCode = '', setGiftCardCode = () => {}, giftCardPin = '', setGiftCardPin = () => {}, giftCardApplied = null }) {
+function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, guests = 1, customerId, branchId, isStaff = false, isDirectMode = false, eligibleMemberships = [], selectedMembershipId = null, onSelectMembership = () => {}, bookingFor = 'self', onChangeBookingFor = () => {}, showBookingForToggle = false, quote = null, walletUseInr = 0, setWalletUseInr = () => {}, walletAvailableInr = 0, giftCardCode = '', setGiftCardCode = () => {}, giftCardPin = '', setGiftCardPin = () => {}, giftCardApplied = null, onSignedIn = () => {}, onGoogleStart = () => {} }) {
   const o = getOutcome(outcome);
   const th = o?.protocol?.therapies?.find((x) => x.slug === therapy);
   const isMulti = therapies.length > 1 && slot?.plan?.length > 1;
@@ -1363,14 +1492,23 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
 
           {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 text-destructive text-[13px] px-3 py-2">{error}</div>}
 
-          <button type="submit" disabled={submitting}
-            className="w-full inline-flex items-center justify-center gap-2 h-12 rounded-full bg-foreground text-background text-[14.5px] font-semibold hover:bg-foreground/90 disabled:opacity-60 transition-colors">
-            {submitting ? (
-              <><Loader2 className="h-4 w-4 animate-spin" /> {selectedMembershipId ? 'Confirming\u2026' : payment === 'online' ? 'Opening secure checkout\u2026' : 'Confirming\u2026'}</>
-            ) : (
-              <>{selectedMembershipId ? 'Use membership & confirm' : payment === 'online' ? 'Pay & confirm booking' : 'Confirm booking'} <ArrowRight className="h-4 w-4" /></>
-            )}
-          </button>
+          {/* Paying online requires an account (receipts, refunds, and wallet
+              credit all need to attach to a real customer record) \u2014 pay-at-
+              visit stays guest-friendly. Sign-in happens in place via
+              WhatsApp OTP so nothing on this form is lost; Google still
+              redirects away, so the caller persists a resume draft first. */}
+          {payment === 'online' && !customerId && !isStaff && !selectedMembershipId ? (
+            <InlineSignIn onSignedIn={onSignedIn} onGoogleStart={onGoogleStart} />
+          ) : (
+            <button type="submit" disabled={submitting}
+              className="w-full inline-flex items-center justify-center gap-2 h-12 rounded-full bg-foreground text-background text-[14.5px] font-semibold hover:bg-foreground/90 disabled:opacity-60 transition-colors">
+              {submitting ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> {selectedMembershipId ? 'Confirming\u2026' : payment === 'online' ? 'Opening secure checkout\u2026' : 'Confirming\u2026'}</>
+              ) : (
+                <>{selectedMembershipId ? 'Use membership & confirm' : payment === 'online' ? 'Pay & confirm booking' : 'Confirm booking'} <ArrowRight className="h-4 w-4" /></>
+              )}
+            </button>
+          )}
           <div className="text-[11.5px] text-muted-foreground text-center">
             By confirming, you agree to our <Link href="/legal/terms" className="underline underline-offset-2">terms</Link> &amp; <Link href="/legal/refunds" className="underline underline-offset-2">refund policy</Link>.
           </div>
@@ -1680,6 +1818,59 @@ export default function BookingClient({ initialOutcome }) {
   const [giftCardApplied, setGiftCardApplied] = useState(null); // { code, amountInr, balanceAfter } | { error }
   const [quote, setQuote] = useState(null);
   const therapy = therapies[0] || null; // convenience alias
+
+  // Restore the in-progress booking after a Google sign-in round trip (see
+  // onGoogleStart below) — the redirect to accounts.google.com and back is
+  // a full page load, so this is the one login path that can't stay fully
+  // in-place like the WhatsApp OTP flow does. Runs once on mount.
+  useEffect(() => {
+    if (searchParams.get('resume') !== '1') return;
+    let draft;
+    try {
+      const raw = sessionStorage.getItem('sw_booking_resume');
+      if (!raw) return;
+      draft = JSON.parse(raw);
+      sessionStorage.removeItem('sw_booking_resume');
+    } catch { return; }
+    if (!draft) return;
+    if (draft.outcome !== undefined) setOutcome(draft.outcome);
+    if (draft.therapies) setTherapies(draft.therapies);
+    if (draft.slot) setSlot(draft.slot);
+    if (draft.sessionMode) setSessionMode(draft.sessionMode);
+    if (draft.floatDurationMin) setFloatDurationMin(draft.floatDurationMin);
+    if (draft.guests) setGuests(draft.guests);
+    if (draft.contact) setContact(draft.contact);
+    if (draft.bookingFor) setBookingFor(draft.bookingFor);
+    if (draft.payment) setPayment(draft.payment);
+    if (draft.stepId) {
+      const idx = steps.findIndex((s) => s.id === draft.stepId);
+      if (idx >= 0) setStepIdx(idx);
+    }
+    window.history.replaceState(null, '', window.location.pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persists the in-progress booking to sessionStorage, then sends the
+  // customer to Google — used only from the "sign in to pay online" gate,
+  // since that's a real page navigation (unlike the inline WhatsApp OTP
+  // path, which never leaves this page).
+  const onGoogleStart = () => {
+    try {
+      sessionStorage.setItem('sw_booking_resume', JSON.stringify({
+        outcome, therapies, slot, sessionMode, floatDurationMin, guests, contact, bookingFor, payment, stepId,
+      }));
+    } catch { /* storage unavailable — Google flow will just land on /account instead */ }
+    const returnTo = `${window.location.pathname}?resume=1`;
+    window.location.href = `/api/customer/auth/google-start?return=${encodeURIComponent(returnTo)}`;
+  };
+
+  // Called by the inline WhatsApp-OTP sign-in once verify-otp succeeds —
+  // no navigation involved, so the rest of the form is untouched.
+  const onSignedIn = (customer) => {
+    setCustomerId(customer.id);
+    setSelfContact((prev) => ({ name: prev.name || customer.name || '', phone: prev.phone || customer.phone || '', email: prev.email || '' }));
+    setContact((prev) => ({ ...prev, name: prev.name || customer.name || '', phone: prev.phone || customer.phone || '' }));
+  };
 
   // Compute subtotal at component scope so both StepContact (for coupon preview)
   // and submit() can share the same value.
@@ -2077,6 +2268,8 @@ export default function BookingClient({ initialOutcome }) {
           setError(j.message || 'Please enter a valid email address with a domain extension (e.g., name@example.com).');
         } else if (j?.error === 'below_min_lead_time' || j?.error === 'same_day_late_cutoff' || j?.error === 'next_day_early_cutoff') {
           setError(j.message || 'This time is no longer available under our booking rules. Please pick another slot.');
+        } else if (j?.error === 'login_required_for_online_payment') {
+          setError('Please sign in to pay online.');
         } else {
           throw new Error(j?.error || 'Failed to create booking');
         }
@@ -2167,6 +2360,8 @@ export default function BookingClient({ initialOutcome }) {
             giftCardPin={giftCardPin}
             setGiftCardPin={setGiftCardPin}
             giftCardApplied={giftCardApplied}
+            onSignedIn={onSignedIn}
+            onGoogleStart={onGoogleStart}
             onPickSuggestion={(s) => {
               setSlot({
                 date: s.date,

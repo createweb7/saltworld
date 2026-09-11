@@ -540,8 +540,9 @@ async function handle(req, method, segs) {
     }
 
     // ---- Google Sign-In (standard OAuth 2.0 authorization-code flow) ----
-    // google-start: mint a CSRF `state`, stash it in a short-lived cookie,
-    // redirect to Google's consent screen.
+    // google-start: mint a CSRF `state`, stash it (plus an optional return
+    // path, e.g. mid-booking-flow) in short-lived cookies, redirect to
+    // Google's consent screen.
     if (segs[2] === 'google-start' && method === 'GET') {
       const { googleIsConfigured, buildGoogleAuthUrl } = await import('@/lib/google-auth');
       if (!googleIsConfigured()) {
@@ -553,6 +554,16 @@ async function handle(req, method, segs) {
       res.cookies.set('sw_g_state', state, {
         httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 300,
       });
+      // Optional return path (e.g. `/book?resume=1`) — only same-origin
+      // relative paths are honoured, to prevent this becoming an open
+      // redirect. google-callback reads this to bounce back to where the
+      // customer started instead of always landing on /account.
+      const returnTo = new URL(req.url).searchParams.get('return');
+      if (returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//')) {
+        res.cookies.set('sw_g_return', returnTo, {
+          httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 300,
+        });
+      }
       return res;
     }
 
@@ -565,9 +576,11 @@ async function handle(req, method, segs) {
       const code = url.searchParams.get('code');
       const state = url.searchParams.get('state');
       const expectedState = req.cookies.get('sw_g_state')?.value;
+      const returnTo = req.cookies.get('sw_g_return')?.value || '/account';
       const fail = (error) => {
         const res = NextResponse.redirect(new URL(`/account/login?error=${error}`, req.url));
         res.cookies.delete('sw_g_state');
+        res.cookies.delete('sw_g_return');
         return res;
       };
       if (url.searchParams.get('error')) return fail('google_denied');
@@ -583,8 +596,9 @@ async function handle(req, method, segs) {
         if (customer.disabled) return fail('account_disabled');
         const token = await signCustomerToken({ sub: customer.id, email: customer.email, phone: customer.phone });
         await setCustomerCookie(token);
-        const res = NextResponse.redirect(new URL('/account', req.url));
+        const res = NextResponse.redirect(new URL(returnTo, req.url));
         res.cookies.delete('sw_g_state');
+        res.cookies.delete('sw_g_return');
         return res;
       } catch (e) {
         console.error('google-callback failed', e);
@@ -610,6 +624,14 @@ async function handle(req, method, segs) {
   if (segs[0] === 'bookings') {
     if (segs.length === 1 && method === 'POST') {
       const body = await req.json();
+      // Online payment requires a signed-in customer — receipts, refunds and
+      // wallet credit all need to attach to a real account. The booking UI
+      // already gates this client-side; this is the server-side backstop
+      // against a direct API call bypassing it. Pay-at-visit stays guest-
+      // friendly (staff-created bookings only ever use pay-at-visit anyway).
+      if (body.payment === 'online' && !body.customerId) {
+        return NextResponse.json({ error: 'login_required_for_online_payment' }, { status: 401 });
+      }
       const now = new Date();
       const yy = String(now.getFullYear()).slice(2);
       const mm = String(now.getMonth() + 1).padStart(2, '0');
