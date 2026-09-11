@@ -365,6 +365,14 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
   const [journeyData, setJourneyData] = useState(null); // full journey response for summary
   const [loading, setLoading] = useState(false);
   const hasFloat = therapies.some((t) => String(t).includes('float'));
+  // Any therapy priced off a solo/couple durationOptions matrix (Float, or a
+  // single-duration private-room therapy like Sauna/Red Light/Cold Plunge)
+  // needs the session-mode toggle. Availability itself only changes for
+  // Float (couple-capable tanks are a distinct resource pool) — for the
+  // others sessionMode is a pure pricing input, so it's safe to compute this
+  // purely from therapyMeta rather than threading a new capability flag.
+  const sessionModeTherapies = therapies.filter((slug) => Array.isArray(therapyMeta?.[slug]?.durationOptions) && therapyMeta[slug].durationOptions.length > 0);
+  const hasSessionMode = sessionModeTherapies.length > 0;
 
   // Preferred-time concierge flow — the primary UX per Aug-05-2026 direction.
   const [preferredTime, setPreferredTime] = useState('08:00');
@@ -462,9 +470,14 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
   const visitStillLoading = loading && journeyData === null;
 
   // Shared-capacity resources (e.g. the Salt Cave, capacity 7) host multiple
-  // guests per time slot rather than locking exclusively per booking — call
-  // that out so customers don't assume a 1:1 room.
-  const sharedCapacity = Math.max(0, ...therapies.map((slug) => Number(therapyMeta?.[slug]?.maxCapacity) || 0));
+  // independent guests per time slot rather than locking exclusively per
+  // booking. Take the STRICTEST (minimum) capacity across every selected
+  // therapy — mirroring the server's guest-cap check — so a combo journey
+  // that mixes the Salt Cave with a private, exclusive-lock room (capacity 1)
+  // correctly caps at 1, not the loosest therapy in the mix.
+  const sharedCapacity = therapies.length > 0
+    ? Math.min(...therapies.map((slug) => Number(therapyMeta?.[slug]?.maxCapacity) || 1))
+    : 0;
 
   // Keep `guests` in range as the selected therapies change — e.g. switching
   // away from a shared-capacity therapy should drop back to 1, and switching
@@ -561,15 +574,18 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
         </div>
       )}
 
-      {/* Float session-mode toggle — only if float-therapy is in the journey */}
-      {hasFloat && (
+      {/* Session-mode (solo/couple) toggle — any therapy priced off a
+          durationOptions matrix (Float, Sauna, Red Light, Cold Plunge). */}
+      {hasSessionMode && (
         <div className="mt-6">
-          <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold mb-2">Float session type</div>
+          <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold mb-2">
+            {hasFloat ? 'Float session type' : sessionModeTherapies.length === 1 ? `${therapyMeta[sessionModeTherapies[0]]?.name || 'Session'} type` : 'Session type'}
+          </div>
           <div className="inline-flex rounded-full border border-border p-0.5 bg-card">
             <button type="button" onClick={() => { setSessionMode('single'); onChange(null); }}
               className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
                 sessionMode === 'single' ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground')}>
-              Single
+              Solo
             </button>
             <button type="button" onClick={() => { setSessionMode('couple'); onChange(null); }}
               className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
@@ -578,9 +594,11 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
             </button>
           </div>
           <div className="mt-2 text-[11.5px] text-muted-foreground max-w-[520px] leading-[1.5]">
-            {sessionMode === 'couple'
-              ? 'Couple sessions use a couple-capable float tank for two people together. Fewer tanks support couple mode — book early.'
-              : 'Standard float in a solo tank.'}
+            {hasFloat
+              ? (sessionMode === 'couple'
+                  ? 'Couple sessions use a couple-capable float tank for two people together. Fewer tanks support couple mode — book early.'
+                  : 'Standard float in a solo tank.')
+              : (sessionMode === 'couple' ? 'Two people, together in the same room.' : 'One person.')}
           </div>
         </div>
       )}
@@ -1653,25 +1671,34 @@ export default function BookingClient({ initialOutcome }) {
     // back to the outcome-level rate × role-multiplier only when the therapy
     // hasn't been priced in the catalog yet.
     const basePrice = parsePrice(o?.pricing?.single?.price);
-    // Shared-capacity therapies (e.g. Salt Cave, capacity 7) are booked per
-    // person — multiply that line by the headcount. Private/exclusive-lock
-    // therapies (capacity 1, e.g. Float Tank) are unaffected.
+    // Shared-capacity therapies (e.g. Salt Cave, capacity 7) use a tiered
+    // per-person group rate — the solo price applies only to a single guest;
+    // the moment there's more than 1, EVERY guest pays the lower per-person
+    // rate (Salt Therapy: 1 guest = ₹1,600 flat; 3 guests = 3×₹1,200).
+    // Private/exclusive-lock therapies (capacity 1, e.g. Float Tank, Sauna)
+    // are unaffected — `guests` is always 1 for those.
     const sum = selected.reduce((s, t) => {
       const meta = therapyMeta[t.slug];
-      const lineGuests = (Number(meta?.maxCapacity) || 1) > 1 ? guests : 1;
-      // Float Tank (and any future therapy with a durationOptions matrix)
-      // prices off the selected duration + session mode, not a flat default.
+      const isShared = (Number(meta?.maxCapacity) || 1) > 1;
+      const tieredRate = meta?.additionalGuestPriceInr;
+      // Any therapy with a durationOptions matrix (Float's 60/90 min, or a
+      // single-duration solo/couple therapy like Sauna/Red Light/Cold
+      // Plunge) prices off the selected duration + session mode.
       const options = Array.isArray(meta?.durationOptions) ? meta.durationOptions : null;
-      if (options?.length && String(t.slug).includes('float')) {
-        const opt = options.find((o2) => Number(o2.durationMin) === Number(floatDurationMin)) || options[0];
+      if (options?.length && !isShared) {
+        const wantDur = String(t.slug).includes('float') ? Number(floatDurationMin) : Number(meta?.durationMin);
+        const opt = options.find((o2) => Number(o2.durationMin) === wantDur) || options[0];
         const p = sessionMode === 'couple' ? opt.priceCouple : opt.priceSingle;
-        if (p != null) return s + Number(p) * lineGuests;
+        if (p != null) return s + Number(p);
       }
       const dbPrice = Number(meta?.defaultPrice) || 0;
-      if (dbPrice > 0) return s + dbPrice * lineGuests;
+      if (isShared && guests > 1) {
+        return s + (tieredRate != null ? Number(tieredRate) * guests : dbPrice * guests);
+      }
+      if (dbPrice > 0) return s + dbPrice;
       const role = String(t.role || '').toLowerCase();
       const mult = PRICE_MULTIPLIER[role] ?? 0.5;
-      return s + Math.round(basePrice * mult) * lineGuests;
+      return s + Math.round(basePrice * mult);
     }, 0);
     return sum || basePrice || 0;
   }, [outcome, outcomeMap, therapies, therapyMeta, sessionMode, floatDurationMin, guests]);
@@ -1712,7 +1739,11 @@ export default function BookingClient({ initialOutcome }) {
       fetch('/api/pricing/quote', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          therapies: therapies.map((slug) => ({ slug })),
+          therapies: therapies.map((slug) => ({
+            slug,
+            sessionMode: Array.isArray(therapyMeta[slug]?.durationOptions) && therapyMeta[slug].durationOptions.length > 0 ? sessionMode : undefined,
+            durationMin: String(slug).includes('float') ? floatDurationMin : undefined,
+          })),
           customerId,
           phone: contact?.phone || null,
           branchId: null,
@@ -1738,7 +1769,7 @@ export default function BookingClient({ initialOutcome }) {
         .catch(() => setQuote(null));
     }, 300);
     return () => clearTimeout(timer);
-  }, [therapies, customerId, contact?.phone, selectedMembershipId, walletUseInr, coupon, giftCardCode, giftCardPin, guests]);
+  }, [therapies, customerId, contact?.phone, selectedMembershipId, walletUseInr, coupon, giftCardCode, giftCardPin, guests, sessionMode, floatDurationMin, therapyMeta]);
 
 
   // Pre-fill contact from query params (used when staff launches "New booking" from
@@ -1978,7 +2009,7 @@ export default function BookingClient({ initialOutcome }) {
           therapy: primary?.slug || null,
           therapyLabel: primary?.label || null,
           therapies: selected.map((t) => ({ slug: t.slug, label: t.label, role: t.role })),
-          sessionMode: therapies.some((s) => String(s).includes('float')) ? sessionMode : null,
+          sessionMode: therapies.some((s) => Array.isArray(therapyMeta[s]?.durationOptions) && therapyMeta[s].durationOptions.length > 0) ? sessionMode : null,
           floatDurationMin: therapies.some((s) => String(s).includes('float')) ? floatDurationMin : null,
           slotDate: slot.date, slotTime: slot.time,
           startAt: slot.startIso || null,
