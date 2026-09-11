@@ -95,9 +95,7 @@ export default function CustomerLoginPage() {
         />
         <div className="absolute inset-0 bg-gradient-to-br from-black/40 via-black/20 to-black/50" />
         <div className="relative z-10 flex flex-col justify-between p-12 xl:p-16 text-white">
-          <Link href="/" className="inline-flex items-center gap-2 group">
-            <Wordmark inverted />
-          </Link>
+          <Wordmark inverted />
           <div className="max-w-[420px]">
             <div className="text-[10.5px] uppercase tracking-[0.24em] font-semibold text-white/80">Your sanctuary</div>
             <h1 className="mt-3 font-serif text-[40px] xl:text-[54px] leading-[1.05] tracking-tight text-white text-balance">
