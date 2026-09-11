@@ -343,7 +343,7 @@ function fmtVisit(mins) {
   return `${mins}m`;
 }
 
-function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSessionMode, floatDurationMin, setFloatDurationMin, guests, setGuests, onReorderTherapies }) {
+function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSessionMode, floatDurationMin, setFloatDurationMin, guests, setGuests, totalRupees = 0, onReorderTherapies }) {
   const days = useMemo(() => {
     // Auto-rollover: if IST wall-clock is past 20:00 (branch close) we hide
     // "today" from the picker and default to tomorrow. TC-1 fix.
@@ -530,6 +530,14 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
                 </div>
               );
             })}
+          </div>
+          <div className="mt-4 pt-3 border-t border-border flex items-baseline justify-between flex-wrap gap-1">
+            <span className="text-[12.5px] text-muted-foreground">
+              Total price{guests > 1 ? ` for ${guests} people` : ''}
+            </span>
+            <span className="font-serif text-[26px] leading-none tracking-tight">
+              &#x20B9;{Number(totalRupees || 0).toLocaleString('en-IN')}
+            </span>
           </div>
           <div className="mt-4 pt-3 border-t border-border grid grid-cols-2 gap-3 text-[12.5px]">
             <div>
@@ -2107,7 +2115,7 @@ export default function BookingClient({ initialOutcome }) {
         {stepId === 'outcome' && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); }} />}
         {stepId === 'therapy' && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} therapyMeta={therapyMeta} isDirectMode={isDirectTherapyMode} />}
         {stepId === 'slot'    && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode} setSessionMode={setSessionMode}
-          floatDurationMin={floatDurationMin} setFloatDurationMin={setFloatDurationMin} guests={guests} setGuests={setGuests}
+          floatDurationMin={floatDurationMin} setFloatDurationMin={setFloatDurationMin} guests={guests} setGuests={setGuests} totalRupees={totalRupees}
           onReorderTherapies={(idx, dir) => {
             const arr = [...therapies];
             const j = idx + dir;
