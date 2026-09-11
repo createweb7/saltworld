@@ -6,7 +6,7 @@ import Script from 'next/script';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, ArrowRight, Check, Loader2, Clock, Calendar as Cal,
-  MapPin, Phone, MessageCircle, Sparkles, ChevronUp, ChevronDown,
+  MapPin, Phone, MessageCircle, Sparkles, ChevronUp, ChevronDown, Users,
 } from 'lucide-react';
 import { cn } from '@/components/ss/utils';
 import { Wordmark } from '@/components/site/shell';
@@ -448,8 +448,20 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
     });
   };
 
-  const totalDurationMin = journeyData?.totalDurationMin || 0;
+  // Instant fallback for "Therapy time" from the (already-loaded) therapy
+  // metadata, so the card never flashes "0 min" while the slower
+  // /api/scheduling/slots call (buffers + availability) is still in flight —
+  // it matches the real total in the common no-duration-override case and is
+  // replaced the moment journeyData resolves.
+  const metaDurationSum = therapies.reduce((sum, slug) => sum + (Number(therapyMeta?.[slug]?.durationMin) || 0), 0);
+  const totalDurationMin = journeyData?.totalDurationMin ?? metaDurationSum;
   const totalVisitMin    = journeyData?.totalVisitMin    || 0;
+  const visitStillLoading = loading && journeyData === null;
+
+  // Shared-capacity resources (e.g. the Salt Cave, capacity 7) host multiple
+  // guests per time slot rather than locking exclusively per booking — call
+  // that out so customers don't assume a 1:1 room.
+  const sharedCapacity = Math.max(0, ...therapies.map((slug) => Number(therapyMeta?.[slug]?.maxCapacity) || 0));
 
   // Precompute time-picker options: every 15 min from 06:00 to 20:00.
   const timeOptions = useMemo(() => {
@@ -497,12 +509,22 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
             </div>
             <div>
               <div className="text-muted-foreground">Estimated visit</div>
-              <div className="font-mono font-semibold text-[15px] mt-0.5">
-                ~{fmtVisit(totalVisitMin)}
-                <span className="ml-1.5 text-[10.5px] font-sans text-muted-foreground uppercase tracking-[0.14em]">incl. buffers</span>
-              </div>
+              {visitStillLoading ? (
+                <div className="h-[19px] mt-0.5 w-20 rounded bg-muted animate-pulse" />
+              ) : (
+                <div className="font-mono font-semibold text-[15px] mt-0.5">
+                  ~{fmtVisit(totalVisitMin)}
+                  <span className="ml-1.5 text-[10.5px] font-sans text-muted-foreground uppercase tracking-[0.14em]">incl. buffers</span>
+                </div>
+              )}
             </div>
           </div>
+          {sharedCapacity > 1 && (
+            <div className="mt-3 pt-3 border-t border-border flex items-center gap-2 text-[12px] text-muted-foreground">
+              <Users className="h-3.5 w-3.5 text-brand shrink-0" />
+              <span>Capacity: 1&ndash;{sharedCapacity} people per time slot &mdash; you may share the session with other guests.</span>
+            </div>
+          )}
         </div>
       )}
 
