@@ -102,6 +102,33 @@ async function handle(req, method, segs) {
     } });
   }
 
+  // PATCH /api/customer/me — self-service profile update (name/email), used
+  // by the membership purchase flow to collect invoice details inline
+  // instead of bouncing the customer to a separate account page.
+  if (segs[0] === 'customer' && segs[1] === 'me' && method === 'PATCH') {
+    const { getCurrentCustomer } = await import('@/lib/customer-auth');
+    const customer = await getCurrentCustomer();
+    if (!customer) return NextResponse.json({ error: 'not_signed_in' }, { status: 401 });
+    const body = await req.json().catch(() => ({}));
+    const name = typeof body.name === 'string' ? body.name.trim() : undefined;
+    const email = typeof body.email === 'string' ? body.email.trim() : undefined;
+    if (email !== undefined && email && !/^\S+@\S+\.\S+$/.test(email)) {
+      return NextResponse.json({ error: 'invalid_email' }, { status: 400 });
+    }
+    const patch = {};
+    if (name !== undefined) patch.name = name;
+    if (email !== undefined) patch.email = email;
+    if (Object.keys(patch).length > 0) {
+      await supabase.from('customers').update(patch).eq('id', customer.id);
+    }
+    const { data: after } = await supabase.from('customers').select('*').eq('id', customer.id).maybeSingle();
+    return NextResponse.json({ ok: true, customer: {
+      id: after.id, name: after.name || '', email: after.email || '',
+      phone: after.phone || '', picture: after.picture || '',
+      walletBalance: Number(after.wallet_balance) || 0,
+    } });
+  }
+
   // ------- Customer Gift Cards (claim / list) -------
   if (segs[0] === 'customer' && segs[1] === 'giftcards') {
     const { getCurrentCustomer } = await import('@/lib/customer-auth');
@@ -250,17 +277,63 @@ async function handle(req, method, segs) {
       }
       const body = await req.json().catch(() => ({}));
       if (!body.planId) return NextResponse.json({ error: 'plan_required' }, { status: 400 });
+      // Online purchases MUST prove a real, signature-verified Razorpay
+      // payment — never trust a bare "online" claim from the client, or
+      // anyone could grant themselves an active (unpaid) membership.
+      let paymentRef = null;
+      if (body.paymentMethod === 'online') {
+        const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = body;
+        if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+          return NextResponse.json({ error: 'payment_proof_required' }, { status: 400 });
+        }
+        const valid = await rpVerifySignature({ orderId: razorpay_order_id, paymentId: razorpay_payment_id, signature: razorpay_signature });
+        if (!valid) return NextResponse.json({ error: 'signature_mismatch' }, { status: 400 });
+        paymentRef = razorpay_payment_id;
+      }
       try {
         const { grantSubscription } = await import('@/lib/memberships');
         const sub = await grantSubscription({
           customerId: customer.id,
           planId: body.planId,
-          payment: { method: body.paymentMethod || 'online', ref: body.razorpayPaymentId || null },
+          payment: { method: body.paymentMethod || 'offline', ref: paymentRef },
         });
         return NextResponse.json({ ok: true, subscription: sub });
       } catch (e) {
         return NextResponse.json({ error: e.message || 'purchase_failed' }, { status: 400 });
       }
+    }
+  }
+
+  // POST /api/payments/create-membership-order → { planId }
+  // Mints a Razorpay order for a membership plan's price, for the client to
+  // open Checkout against. On success, /api/memberships/purchase is called
+  // with the resulting razorpay_order_id/payment_id/signature, which are
+  // verified server-side before the subscription is actually activated.
+  if (segs[0] === 'payments' && segs[1] === 'create-membership-order' && method === 'POST') {
+    const { getCurrentCustomer } = await import('@/lib/customer-auth');
+    const customer = await getCurrentCustomer();
+    if (!customer) return NextResponse.json({ error: 'not_signed_in' }, { status: 401 });
+    const body = await req.json().catch(() => ({}));
+    if (!body.planId) return NextResponse.json({ error: 'plan_required' }, { status: 400 });
+    if (!(await razorpayIsConfigured())) {
+      return NextResponse.json({ error: 'razorpay_not_configured' }, { status: 503 });
+    }
+    const { data: planRow } = await supabase.from('memberships').select('*').eq('id', body.planId).maybeSingle();
+    if (!planRow) return NextResponse.json({ error: 'plan_not_found' }, { status: 404 });
+    const price = Number(planRow.plan?.price) || 0;
+    if (price <= 0) return NextResponse.json({ error: 'invalid_plan_price' }, { status: 400 });
+    try {
+      const order = await rpCreateOrder({
+        amountPaise: Math.round(price * 100),
+        currency: 'INR',
+        receipt: `MEM-${String(body.planId).slice(0, 24)}`,
+        notes: { planId: body.planId, planName: planRow.name, customerId: customer.id },
+      });
+      const keyId = await getPublicKeyId();
+      return NextResponse.json({ order: { id: order.id, amount: order.amount, currency: order.currency }, keyId });
+    } catch (e) {
+      console.error('razorpay membership order create failed', e);
+      return NextResponse.json({ error: 'razorpay_error', details: String(e?.message || e) }, { status: 502 });
     }
   }
 
