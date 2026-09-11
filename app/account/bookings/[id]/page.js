@@ -101,13 +101,34 @@ export default async function BookingDetailPage({ params }) {
                 <div className="mt-3 pt-3 border-t border-border text-[12.5px] text-muted-foreground leading-relaxed whitespace-pre-line">{booking.contact.notes}</div>
               )}
             </div>
+
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold mb-3">Payment</div>
+              <div className="space-y-2 text-[13px]">
+                <Row label="Method" value={
+                  booking.payment === 'online' ? 'Online via Razorpay'
+                    : booking.payment === 'membership' ? 'Covered by membership'
+                    : 'Pay at visit'
+                } />
+                {booking.payment === 'online' && (
+                  <Row label="Status" value={booking.paymentStatus === 'paid' ? 'Paid' : 'Incomplete'} valueClass={booking.paymentStatus === 'paid' ? 'text-emerald-700 dark:text-emerald-400' : 'text-destructive'} />
+                )}
+                {booking.paymentId && <Row label="Payment ID" value={booking.paymentId} mono />}
+                {booking.paymentProvider && <Row label="Provider" value={booking.paymentProvider} className="capitalize" />}
+                {booking.paymentVerifiedAt && <Row label="Paid on" value={new Date(booking.paymentVerifiedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })} />}
+                <Row label="Amount" value={`₹${Number(booking.total || 0).toLocaleString('en-IN')}`} />
+                {invoice && <Row label="Invoice" value={invoice.number} />}
+              </div>
+            </div>
           </div>
 
           <aside className="rounded-2xl border border-border bg-card p-5 h-fit md:sticky md:top-24 space-y-4">
             <div>
               <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold">Total</div>
               <div className="font-serif text-[32px] tracking-tight mt-1">₹{Number(booking.total || 0).toLocaleString('en-IN')}</div>
-              <div className="text-[11.5px] text-muted-foreground mt-1 capitalize">{booking.payment === 'online' ? 'Paid online' : 'Pay at visit'}</div>
+              <div className="text-[11.5px] text-muted-foreground mt-1">
+                {booking.payment === 'online' ? (booking.paymentStatus === 'paid' ? 'Paid online' : 'Payment incomplete') : booking.payment === 'membership' ? 'Covered by membership' : 'Pay at visit'}
+              </div>
             </div>
             <div className="pt-3 border-t border-border flex items-start gap-2 text-[12px] text-muted-foreground">
               <MapPin className="h-3 w-3 mt-0.5 shrink-0" />
@@ -127,6 +148,15 @@ export default async function BookingDetailPage({ params }) {
       </section>
 
       <SiteFooter />
+    </div>
+  );
+}
+
+function Row({ label, value, mono, valueClass, className }) {
+  return (
+    <div className={`flex items-start justify-between gap-3 ${className || ''}`}>
+      <span className="text-muted-foreground shrink-0">{label}</span>
+      <span className={`text-right break-all ${mono ? 'font-mono text-[12px]' : ''} ${valueClass || ''}`}>{value}</span>
     </div>
   );
 }
