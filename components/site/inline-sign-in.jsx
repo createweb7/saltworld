@@ -34,7 +34,10 @@ export const GoogleIcon = (props) => (
   </svg>
 );
 
-export function InlineSignIn({ onSignedIn, onGoogleStart, title = 'Sign in to continue', subtitle = 'Signing in lets us email your receipt and track this against your account.' }) {
+// `bare` drops the outer card chrome (border/background/padding) for callers
+// that already render this inside their own bordered card — avoids a
+// card-inside-a-card look.
+export function InlineSignIn({ onSignedIn, onGoogleStart, title = 'Sign in to continue', subtitle = 'Signing in lets us email your receipt and track this against your account.', bare = false }) {
   const [mode, setMode] = useState('choice'); // choice | phone | otp
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
@@ -80,7 +83,7 @@ export function InlineSignIn({ onSignedIn, onGoogleStart, title = 'Sign in to co
   };
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
+    <div className={bare ? '' : 'rounded-xl border border-border bg-card p-4'}>
       <div className="flex items-center gap-2 text-[13.5px] font-medium">
         <LogIn className="h-4 w-4 text-brand" /> {title}
       </div>

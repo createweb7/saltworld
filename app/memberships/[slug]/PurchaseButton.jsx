@@ -102,6 +102,7 @@ export default function PurchaseButton({ plan, initialCustomer }) {
   if (!customer) {
     return (
       <InlineSignIn
+        bare
         onSignedIn={onSignedIn}
         onGoogleStart={onGoogleStart}
         title="Sign in to purchase"
@@ -112,7 +113,7 @@ export default function PurchaseButton({ plan, initialCustomer }) {
 
   if (!hasCompleteProfile) {
     return (
-      <div className="rounded-xl border border-border bg-card p-4">
+      <div>
         <div className="flex items-center gap-2 text-[13.5px] font-medium">
           <UserPlus className="h-4 w-4 text-brand" /> Complete your profile
         </div>

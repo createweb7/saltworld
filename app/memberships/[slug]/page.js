@@ -41,7 +41,7 @@ export default async function PlanDetailPage({ params }) {
       <TopNav transparentHero={false} />
 
       <section className="pt-32 md:pt-36 pb-10">
-        <div className="max-w-[720px] mx-auto px-5 md:px-8">
+        <div className="max-w-[880px] mx-auto px-5 md:px-8">
           <Link href="/memberships" className="inline-flex items-center gap-1.5 text-[12.5px] text-muted-foreground hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> All memberships</Link>
           <div className="mt-4 flex items-center gap-2">
             <span className="inline-flex items-center h-5 px-2 rounded-full text-[10.5px] font-semibold bg-brand/10 text-brand uppercase tracking-[0.14em]">{p.type === 'unlimited' ? 'Unlimited' : 'Session pack'}</span>
@@ -52,8 +52,8 @@ export default async function PlanDetailPage({ params }) {
       </section>
 
       <section className="pb-14">
-        <div className="max-w-[720px] mx-auto px-5 md:px-8 grid md:grid-cols-3 gap-8">
-          <div className="md:col-span-2 space-y-6">
+        <div className="max-w-[880px] mx-auto px-5 md:px-8 grid md:grid-cols-[1fr_320px] gap-8">
+          <div className="space-y-6">
             <div>
               <h2 className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-semibold mb-3">Included</h2>
               <ul className="space-y-2 text-[14.5px] leading-7">
@@ -91,7 +91,7 @@ export default async function PlanDetailPage({ params }) {
             <div className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground">Total</div>
             <div className="mt-1 font-serif text-[36px] leading-none tracking-tight">{inr(p.price)}</div>
             <div className="text-[11.5px] text-muted-foreground mt-1">Includes {p.gstPercent}% GST</div>
-            <div className="mt-5">
+            <div className="mt-5 pt-5 border-t border-border">
               <PurchaseButton
                 plan={{ id: p.id, name: p.name, price: p.price }}
                 initialCustomer={customer ? { id: customer.id, name: customer.name || '', email: customer.email || '', phone: customer.phone || '' } : null}
