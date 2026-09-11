@@ -30,6 +30,12 @@ const STEPS_DIRECT = [
   { id: 'contact',  label: 'Confirm' },
 ];
 
+// WhatsApp OTP sign-in needs a real provider (Meta WhatsApp Cloud API —
+// business verification + an approved OTP template) that isn't set up yet.
+// Flip this back on once WHATSAPP_CLOUD_API_TOKEN / WHATSAPP_PHONE_NUMBER_ID
+// are configured — see lib/whatsapp.js.
+const WHATSAPP_LOGIN_ENABLED = false;
+
 const GoogleIcon = (props) => (
   <svg viewBox="0 0 48 48" width="16" height="16" {...props}>
     <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
@@ -1176,13 +1182,19 @@ function InlineSignIn({ onSignedIn, onGoogleStart }) {
       {mode === 'choice' && (
         <div className="mt-3 space-y-2">
           <button type="button" onClick={onGoogleStart}
-            className="w-full h-10 rounded-lg border border-border bg-background hover:bg-muted transition-colors text-[13px] font-medium inline-flex items-center justify-center gap-2">
+            className="w-full h-10 rounded-lg bg-foreground text-background hover:bg-foreground/90 transition-colors text-[13px] font-semibold inline-flex items-center justify-center gap-2">
             <GoogleIcon /> Continue with Google
           </button>
-          <button type="button" onClick={() => setMode('phone')}
-            className="w-full h-10 rounded-lg bg-foreground text-background hover:bg-foreground/90 transition-colors text-[13px] font-semibold inline-flex items-center justify-center gap-2">
-            <MessageCircle className="h-3.5 w-3.5" /> Continue with WhatsApp
-          </button>
+          {/* WhatsApp OTP sign-in hidden until a real provider (Meta Cloud
+              API) is configured — see lib/whatsapp.js. Flip WHATSAPP_LOGIN_ENABLED
+              back on once WHATSAPP_CLOUD_API_TOKEN / WHATSAPP_PHONE_NUMBER_ID
+              are set and an OTP template is approved. */}
+          {WHATSAPP_LOGIN_ENABLED && (
+            <button type="button" onClick={() => setMode('phone')}
+              className="w-full h-10 rounded-lg border border-border bg-background hover:bg-muted transition-colors text-[13px] font-medium inline-flex items-center justify-center gap-2">
+              <MessageCircle className="h-3.5 w-3.5" /> Continue with WhatsApp
+            </button>
+          )}
         </div>
       )}
 

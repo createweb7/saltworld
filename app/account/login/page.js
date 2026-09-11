@@ -10,6 +10,12 @@ import { Wordmark } from '@/components/site/shell';
 
 const HERO_IMAGE = 'https://images.pexels.com/photos/1559192/pexels-photo-1559192.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=1400&w=940';
 
+// WhatsApp OTP sign-in needs a real provider (Meta WhatsApp Cloud API —
+// business verification + an approved OTP template) that isn't set up yet.
+// Flip this back on once WHATSAPP_CLOUD_API_TOKEN / WHATSAPP_PHONE_NUMBER_ID
+// are configured — see lib/whatsapp.js.
+const WHATSAPP_LOGIN_ENABLED = false;
+
 const GoogleIcon = (props) => (
   <svg viewBox="0 0 48 48" width="18" height="18" {...props}>
     <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
@@ -148,13 +154,15 @@ export default function CustomerLoginPage() {
             {mode === 'choice' && (
               <div className="mt-8 space-y-3">
                 <button onClick={startGoogle}
-                  className="w-full h-12 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-[14px] font-medium inline-flex items-center justify-center gap-3">
+                  className="w-full h-12 rounded-xl bg-foreground text-background hover:bg-foreground/90 transition-colors text-[14px] font-semibold inline-flex items-center justify-center gap-3">
                   <GoogleIcon /> Continue with Google
                 </button>
-                <button onClick={() => setMode('phone')}
-                  className="w-full h-12 rounded-xl bg-foreground text-background hover:bg-foreground/90 transition-colors text-[14px] font-semibold inline-flex items-center justify-center gap-2">
-                  <MessageCircle className="h-4 w-4" /> Continue with WhatsApp
-                </button>
+                {WHATSAPP_LOGIN_ENABLED && (
+                  <button onClick={() => setMode('phone')}
+                    className="w-full h-12 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-[14px] font-medium inline-flex items-center justify-center gap-2">
+                    <MessageCircle className="h-4 w-4" /> Continue with WhatsApp
+                  </button>
+                )}
                 <button disabled title="Coming soon"
                   className="w-full h-12 rounded-xl border border-border bg-muted/40 text-muted-foreground text-[14px] font-medium inline-flex items-center justify-center gap-2 cursor-not-allowed">
                   <Apple className="h-4 w-4" /> Continue with Apple
