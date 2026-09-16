@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   LogIn, Play, Check, XCircle, IndianRupee, Loader2, Phone, MessageCircle,
-  ClipboardList, ArrowRight,
+  ClipboardList, ArrowRight, CheckCircle2,
 } from 'lucide-react';
 import AdminShell, { PageHeader, AdminSection } from '@/components/admin/shell';
 import { cn } from '@/components/ss/utils';
@@ -83,15 +83,24 @@ export default function ReceptionClient({ user }) {
                     <div className="font-serif text-[30px] leading-none tracking-tight">₹{(selected.total || 0).toLocaleString('en-IN')}</div>
                     <div className="text-[11.5px] text-muted-foreground">total</div>
                   </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    {['Cash', 'UPI', 'Card', 'Wallet'].map((m) => (
-                      <button key={m} className="h-9 rounded-md border border-border text-[12.5px] font-medium hover:bg-muted">{m}</button>
-                    ))}
-                  </div>
-                  <button className="mt-3 w-full h-10 rounded-md bg-foreground text-background text-[13px] font-semibold inline-flex items-center justify-center gap-1.5">
-                    <IndianRupee className="h-3.5 w-3.5" /> Collect &amp; issue invoice
-                  </button>
-                  <div className="mt-3 text-[11px] text-muted-foreground">Split payment, membership redemption and gift-card redeem arrive in Phase 3.2.</div>
+                  {selected.payment === 'online' || selected.paymentStatus === 'paid' ? (
+                    <div className="mt-3 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 flex items-center gap-2 text-[12.5px] font-medium text-emerald-700 dark:text-emerald-400">
+                      <CheckCircle2 className="h-4 w-4 shrink-0" />
+                      Paid via Razorpay{selected.paymentId ? ` · ${selected.paymentId}` : ''}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        {['Cash', 'UPI', 'Card', 'Wallet'].map((m) => (
+                          <button key={m} className="h-9 rounded-md border border-border text-[12.5px] font-medium hover:bg-muted">{m}</button>
+                        ))}
+                      </div>
+                      <button className="mt-3 w-full h-10 rounded-md bg-foreground text-background text-[13px] font-semibold inline-flex items-center justify-center gap-1.5">
+                        <IndianRupee className="h-3.5 w-3.5" /> Collect &amp; issue invoice
+                      </button>
+                      <div className="mt-3 text-[11px] text-muted-foreground">Split payment, membership redemption and gift-card redeem arrive in Phase 3.2.</div>
+                    </>
+                  )}
                 </div>
 
                 {selected.contact?.phone && (

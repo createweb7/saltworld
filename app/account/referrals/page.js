@@ -78,7 +78,7 @@ export default async function ReferralsPage() {
               <li><span className="font-semibold">1.</span> Share your unique code with a friend.</li>
               <li><span className="font-semibold">2.</span> They enter it when booking their first session.</li>
               <li><span className="font-semibold">3.</span> The moment their booking confirms, both wallets are credited.</li>
-              <li><span className="font-semibold">4.</span> Redeem points on any future booking — up to 50% of the total.</li>
+              <li><span className="font-semibold">4.</span> Redeem points in full on any future booking.</li>
             </ol>
           </div>
         </div>

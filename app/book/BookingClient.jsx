@@ -1476,7 +1476,7 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
                 <button type="button" onClick={() => setWalletUseInr(walletAvailableInr)}
                   className="h-10 px-3 rounded-md border border-border text-[11.5px] font-medium hover:bg-muted/40">Use max</button>
               </div>
-              <div className="mt-1 text-[11px] text-muted-foreground">Up to 50% of the total may be paid from wallet.</div>
+              <div className="mt-1 text-[11px] text-muted-foreground">Wallet balance can be redeemed in full toward this booking.</div>
             </div>
           )}
 

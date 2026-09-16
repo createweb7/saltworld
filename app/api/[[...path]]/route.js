@@ -805,13 +805,28 @@ async function handle(req, method, segs) {
         // same-day 7PM cutoff. Same engine the frontend recommender uses.
         try {
           const { assertCanBook, assertCrossServiceBuffer } = await import('@/lib/booking-rules');
-          const rulesCheck = await assertCanBook({ therapies: therapySlugs, startIso });
-          if (!rulesCheck.ok) {
-            return NextResponse.json({
-              error: rulesCheck.code || 'booking_rule_violation',
-              message: rulesCheck.message,
-              meta: rulesCheck.meta || null,
-            }, { status: 400 });
+          // A multi-therapy visit can have each leg land at its OWN
+          // independent start time (manual mode lets the customer pick
+          // non-contiguous slots per therapy — e.g. Infrared Sauna at 12:30,
+          // Float at 16:00). Check lead-time/cutoff rules per leg against
+          // that leg's own therapy and start, instead of taking the
+          // strictest lead time across every selected therapy and checking
+          // it only against the first leg's start (which would, e.g., hold
+          // a 12:30 Infrared Sauna start to Float Therapy's 90-min lead).
+          const planSteps = Array.isArray(body.plan) && body.plan.length > 0
+            ? body.plan
+            : [{ therapySlug: therapySlugs[0], from: startIso }];
+          for (const step of planSteps) {
+            const stepSlug = step.therapySlug || step.slug;
+            if (!stepSlug || !step.from) continue;
+            const stepCheck = await assertCanBook({ therapies: [stepSlug], startIso: step.from });
+            if (!stepCheck.ok) {
+              return NextResponse.json({
+                error: stepCheck.code || 'booking_rule_violation',
+                message: stepCheck.message,
+                meta: stepCheck.meta || null,
+              }, { status: 400 });
+            }
           }
           // Cross-service transition buffer — enforce when this customer
           // already has another booking on the same IST day.
