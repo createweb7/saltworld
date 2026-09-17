@@ -16,6 +16,19 @@ import { sendWhatsappTemplate, whatsappIsConfigured } from '@/lib/whatsapp';
 const slugify = (s) => (s || 'page').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'page';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// The `next dev --hostname 0.0.0.0` bind address can leak into
+// `req.url`'s origin instead of the Host header the browser actually
+// sent, which breaks anything (like Google OAuth redirect_uri) that
+// must match what's in front of the user. Trust the Host header first.
+function requestOrigin(req) {
+  const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
+  if (host) {
+    const proto = req.headers.get('x-forwarded-proto') || (host.startsWith('localhost') || host.startsWith('0.0.0.0') ? 'http' : 'https');
+    return `${proto}://${host}`;
+  }
+  return new URL(req.url).origin;
+}
+
 async function uniqueSlug(supabase, base) {
   let slug = base, i = 1;
   // eslint-disable-next-line no-constant-condition
@@ -623,10 +636,10 @@ async function handle(req, method, segs) {
     // Google's consent screen.
     if (segs[2] === 'google-start' && method === 'GET') {
       const { googleIsConfigured, buildGoogleAuthUrl } = await import('@/lib/google-auth');
+      const origin = requestOrigin(req);
       if (!googleIsConfigured()) {
-        return NextResponse.redirect(new URL('/account/login?error=google_not_configured', req.url));
+        return NextResponse.redirect(new URL('/account/login?error=google_not_configured', origin));
       }
-      const origin = new URL(req.url).origin;
       const state = randomUUID();
       const res = NextResponse.redirect(buildGoogleAuthUrl({ origin, state }));
       res.cookies.set('sw_g_state', state, {
@@ -651,12 +664,13 @@ async function handle(req, method, segs) {
     // OTP flow issues.
     if (segs[2] === 'google-callback' && method === 'GET') {
       const url = new URL(req.url);
+      const origin = requestOrigin(req);
       const code = url.searchParams.get('code');
       const state = url.searchParams.get('state');
       const expectedState = req.cookies.get('sw_g_state')?.value;
       const returnTo = req.cookies.get('sw_g_return')?.value || '/account';
       const fail = (error) => {
-        const res = NextResponse.redirect(new URL(`/account/login?error=${error}`, req.url));
+        const res = NextResponse.redirect(new URL(`/account/login?error=${error}`, origin));
         res.cookies.delete('sw_g_state');
         res.cookies.delete('sw_g_return');
         return res;
@@ -665,7 +679,7 @@ async function handle(req, method, segs) {
       if (!code || !state || !expectedState || state !== expectedState) return fail('google_state_mismatch');
       try {
         const { exchangeGoogleCode } = await import('@/lib/google-auth');
-        const profile = await exchangeGoogleCode({ code, origin: url.origin });
+        const profile = await exchangeGoogleCode({ code, origin });
         const customer = await upsertCustomerByEmail(profile.email, {
           name: profile.name,
           picture: profile.picture,
@@ -674,7 +688,7 @@ async function handle(req, method, segs) {
         if (customer.disabled) return fail('account_disabled');
         const token = await signCustomerToken({ sub: customer.id, email: customer.email, phone: customer.phone });
         await setCustomerCookie(token);
-        const res = NextResponse.redirect(new URL(returnTo, req.url));
+        const res = NextResponse.redirect(new URL(returnTo, origin));
         res.cookies.delete('sw_g_state');
         res.cookies.delete('sw_g_return');
         return res;
@@ -850,7 +864,8 @@ async function handle(req, method, segs) {
         } catch (e) { console.error('assertCanBook failed', e); }
         try {
           const { allocateJourney, suggestNextAvailableSlots } = await import('@/lib/scheduling');
-          const r = await allocateJourney({ therapySlugs, branchId, startIso, sessionMode, durationOverrides, guests: requestedGuests });
+          const suppliedPlan = Array.isArray(body.plan) && body.plan.length > 0 ? body.plan : null;
+          const r = await allocateJourney({ therapySlugs, branchId, startIso, sessionMode, durationOverrides, guests: requestedGuests, plan: suppliedPlan });
           if (r.ok) {
             resourceId   = r.resourceId;
             resourceName = r.resourceName;
