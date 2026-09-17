@@ -13,6 +13,13 @@ const nextConfig = {
     maxInactiveAge: 10000,
     pagesBufferLength: 2,
   },
+  async redirects() {
+    // Better Sleep + Mental Wellness were merged into one outcome page.
+    return [
+      { source: '/outcomes/better-sleep',   destination: '/outcomes/sleep-mental-clarity', permanent: true },
+      { source: '/outcomes/mental-wellness', destination: '/outcomes/sleep-mental-clarity', permanent: true },
+    ];
+  },
   async headers() {
     const baseHeaders = [
       { key: "X-Frame-Options", value: "SAMEORIGIN" },

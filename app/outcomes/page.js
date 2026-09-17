@@ -6,7 +6,7 @@ import { OUTCOMES } from '@/lib/outcomes';
 export const metadata = {
   title: 'Outcomes · Salt World',
   description:
-    'We sell outcomes, not therapies. Ten protocols across sleep, stress, recovery, longevity, skin, and mental wellness.',
+    'We sell outcomes, not therapies. Eleven protocols across sleep, stress, recovery, longevity, skin, detox, and more.',
   alternates: { canonical: `${process.env.NEXT_PUBLIC_BASE_URL || ''}/outcomes` },
 };
 
@@ -24,7 +24,7 @@ export default function OutcomesIndex() {
             Choose the outcome. <span className="italic">We’ll choose the therapies.</span>
           </h1>
           <p className="mt-5 text-[16px] md:text-[18px] leading-[1.55] text-muted-foreground max-w-[640px]">
-            Ten distinct protocols, each engineered around a measurable outcome.
+            Eleven distinct protocols, each engineered around a measurable outcome.
             Book once, and we sequence the therapies for you.
           </p>
         </div>

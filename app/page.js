@@ -26,14 +26,16 @@ const IMG = {
 };
 
 const OUTCOMES = [
-  { slug: 'stress-relief',       icon: Wind,         title: 'Stress Relief',       line: 'Forty-five quiet minutes back to yourself.', dur: '45 min', from: 1499, cadence: '2×/wk · 4 wks' },
-  { slug: 'better-sleep',        icon: Moon,         title: 'Better Sleep',        line: 'Deeper, more consistent nights.',           dur: '60 min', from: 1999, cadence: '2×/wk · 4 wks' },
-  { slug: 'muscle-recovery',     icon: Dumbbell,     title: 'Muscle Recovery',     line: 'Faster reset for athletes and weekenders.',  dur: '90 min', from: 2499, cadence: '1–2×/wk' },
-  { slug: 'pain-relief',         icon: Activity,     title: 'Pain Relief',         line: 'Gentle, drug-free relief for chronic pain.', dur: '75 min', from: 2199, cadence: '2×/wk · 6 wks' },
-  { slug: 'couple-activities',   icon: Heart,        title: 'Couple Activities',   line: 'A shared wellness date, done right.',        dur: '90 min', from: 2999, cadence: 'On request' },
-  { slug: 'longevity',           icon: InfinityIcon, title: 'Longevity',           line: 'Small habits, compounded over years.',       dur: '75 min', from: 1999, cadence: '1–2×/wk' },
-  { slug: 'skin-rejuvenation',   icon: Sun,          title: 'Skin Rejuvenation',   line: 'Red-light protocols for glow and repair.',   dur: '60 min', from: 1799, cadence: '2×/wk · 6 wks' },
-  { slug: 'corporate-wellness',  icon: Users,        title: 'Corporate Wellness',  line: 'Programmes for teams that ship.',            dur: 'Custom', from: null, cadence: 'Cohort' },
+  { slug: 'stress-relief',        icon: Wind,         title: 'Stress Relief',        line: 'Forty-five quiet minutes back to yourself.', dur: '45 min', from: 1499, cadence: '2×/wk · 4 wks' },
+  { slug: 'sleep-mental-clarity', icon: Moon,         title: 'Sleep & Clarity',      line: 'Deeper nights, a quieter mind.',             dur: '60 min', from: 1999, cadence: '1–2×/wk · 4 wks' },
+  { slug: 'muscle-recovery',      icon: Dumbbell,     title: 'Performance & Recovery', line: 'Faster reset for athletes and weekenders.', dur: '90 min', from: 2499, cadence: '1–2×/wk' },
+  { slug: 'pain-relief',          icon: Activity,     title: 'Pain Relief',           line: 'Gentle, drug-free relief for chronic pain.', dur: '75 min', from: 2199, cadence: '2×/wk · 6 wks' },
+  { slug: 'couple-activities',    icon: Heart,        title: 'Couple Activities',    line: 'A shared wellness date, done right.',        dur: '90 min', from: 2999, cadence: 'On request' },
+  { slug: 'longevity',            icon: InfinityIcon, title: 'Longevity',            line: 'Small habits, compounded over years.',       dur: '75 min', from: 1999, cadence: '1–2×/wk' },
+  { slug: 'skin-rejuvenation',    icon: Sun,          title: 'Skin & Glow',          line: 'Red-light protocols for glow and repair.',   dur: '60 min', from: 1799, cadence: '2×/wk · 6 wks' },
+  { slug: 'detox-circulation',    icon: Droplets,     title: 'Detox & Circulation',  line: 'Sweat it out, flow it forward.',             dur: '75 min', from: 1799, cadence: '1–2×/wk' },
+  { slug: 'unique-experience',    icon: Sparkles,     title: 'Just Curious',         line: 'All five therapies, one guided journey.',    dur: '2.5–3 hr', from: 2499, cadence: 'One-time' },
+  { slug: 'corporate-wellness',   icon: Users,        title: 'Corporate Wellness',   line: 'Programmes for teams that ship.',            dur: 'Custom', from: null, cadence: 'Cohort' },
 ];
 
 const REVIEWS = [
@@ -131,7 +133,7 @@ function Hero() {
               <div className="mt-8 flex flex-wrap gap-2.5">
                 {[
                   { label: 'I\u2019m stressed',      href: '/outcomes/stress-relief' },
-                  { label: 'I want better sleep',    href: '/outcomes/better-sleep' },
+                  { label: 'I want better sleep',    href: '/outcomes/sleep-mental-clarity' },
                   { label: 'I need recovery',         href: '/outcomes/muscle-recovery' },
                   { label: 'Gift someone',            href: '/gifts' },
                 ].map((chip) => (
@@ -408,7 +410,7 @@ function FeaturedExperience() {
             <Link href="/book?therapy=float-therapy" className="inline-flex items-center gap-1.5 h-11 px-5 rounded-full bg-foreground text-background text-[14px] font-semibold hover:bg-foreground/90 transition-colors">
               Book a float <ArrowRight className="h-3.5 w-3.5" />
             </Link>
-            <Link href="/outcomes/better-sleep" className="inline-flex items-center gap-1.5 h-11 px-5 rounded-full border border-border text-foreground text-[14px] font-medium hover:bg-muted transition-colors">
+            <Link href="/outcomes/sleep-mental-clarity" className="inline-flex items-center gap-1.5 h-11 px-5 rounded-full border border-border text-foreground text-[14px] font-medium hover:bg-muted transition-colors">
               How floating works
             </Link>
           </div>

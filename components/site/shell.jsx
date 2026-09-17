@@ -269,7 +269,7 @@ export function SiteFooter() {
           </address>
         </div>
         {[
-          { h: 'Outcomes', l: [['Stress Relief','/outcomes/stress-relief'],['Better Sleep','/outcomes/better-sleep'],['Muscle Recovery','/outcomes/muscle-recovery'],['Couple Activities','/outcomes/couple-activities'],['Skin Rejuvenation','/outcomes/skin-rejuvenation']] },
+          { h: 'Outcomes', l: [['Stress Relief','/outcomes/stress-relief'],['Sleep & Clarity','/outcomes/sleep-mental-clarity'],['Performance & Recovery','/outcomes/muscle-recovery'],['Couple Activities','/outcomes/couple-activities'],['Skin & Glow','/outcomes/skin-rejuvenation']] },
           { h: 'Therapies', l: [['All therapies','/therapies'],['Memberships','/memberships'],['Gift cards','/gifts'],['Book a session','/book']] },
           { h: 'Company', l: [['Journal','/journal'],['Gifts','/gifts'],['For teams','/for-teams'],['Contact','/contact']] },
         ].map((col) => (
