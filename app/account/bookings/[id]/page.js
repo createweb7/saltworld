@@ -45,6 +45,9 @@ export default async function BookingDetailPage({ params }) {
   const { booking, invoice } = data;
   const isMulti = Array.isArray(booking.schedule) && booking.schedule.length > 1;
   const slotTime = booking.startAt ? new Date(new Date(booking.startAt).getTime() + 330 * 60000).toISOString().slice(11, 16) : null;
+  const [statusLabel, statusCls] = booking.status === 'payment_pending'
+    ? ['Awaiting payment', 'bg-orange-500/10 text-orange-700 dark:text-orange-400']
+    : [booking.status || 'confirmed', 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'];
 
   return (
     <div className="min-h-screen bg-background">
@@ -59,7 +62,7 @@ export default async function BookingDetailPage({ params }) {
               <h1 className="mt-1 font-serif text-[32px] md:text-[42px] leading-none tracking-tight">{booking.outcomeLabel || 'Wellness journey'}</h1>
               <div className="mt-2 text-[14px] text-muted-foreground">{booking.startAt && formatDate(booking.startAt)}{slotTime ? ` · ${slotTime}` : ''}</div>
             </div>
-            <span className="inline-flex items-center h-7 px-3 rounded-full text-[11px] font-semibold uppercase tracking-[0.14em] bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">{booking.status || 'confirmed'}</span>
+            <span className={`inline-flex items-center h-7 px-3 rounded-full text-[11px] font-semibold uppercase tracking-[0.14em] ${statusCls}`}>{statusLabel}</span>
           </div>
         </div>
       </section>

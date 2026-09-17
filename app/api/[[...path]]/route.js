@@ -818,7 +818,10 @@ async function handle(req, method, segs) {
         // Booking Rules gate — per-therapy lead time, next-day 9PM cutoff,
         // same-day 7PM cutoff. Same engine the frontend recommender uses.
         try {
-          const { assertCanBook, assertCrossServiceBuffer } = await import('@/lib/booking-rules');
+          const { assertCanBook, assertCrossServiceBuffer, expireStalePendingBookings } = await import('@/lib/booking-rules');
+          // Free up any resource/time slots still held by abandoned online
+          // checkouts before checking this new attempt against them.
+          await expireStalePendingBookings().catch(() => {});
           // A multi-therapy visit can have each leg land at its OWN
           // independent start time (manual mode lets the customer pick
           // non-contiguous slots per therapy — e.g. Infrared Sauna at 12:30,
@@ -910,7 +913,9 @@ async function handle(req, method, segs) {
         total:      body.total      || 0,
         pricingBreakdown: null,
         couponCode: null, couponId: null, couponDiscount: 0,
-        status:     'confirmed',
+        // Finalized below, once the pricing engine has settled `payment`/`total`
+        // (membership or wallet coverage can zero out an "online" payment).
+        status:     'payment_pending',
         createdAt:  now.toISOString(),
       };
       const therapyLines = bodyTherapies.length > 0 ? bodyTherapies : (body.therapy ? [{ slug: body.therapy, label: body.therapyLabel, role: 'Primary' }] : []);
@@ -930,6 +935,7 @@ async function handle(req, method, segs) {
             phone:      doc.contact?.phone || null,
             branchId,
             atIso:      startIso,
+            guests:     requestedGuests,
             membershipSubscriptionId: body.membershipSubscriptionId || null,
             walletUseInr:             Number(body.walletUseInr) || 0,
             couponCode:               body.couponCode  || null,
@@ -989,6 +995,14 @@ async function handle(req, method, segs) {
           console.error('pricing quote failed', e);
         }
       }
+
+      // A booking only stays unconfirmed while it's actually waiting on a real
+      // Razorpay charge. Cash/at-visit, membership-covered, and wallet-covered
+      // (total zeroed out) bookings never go through checkout, so they're
+      // confirmed immediately — nothing will ever "verify" them otherwise.
+      doc.status = (doc.payment === 'online' && doc.total > 0 && await razorpayIsConfigured())
+        ? 'payment_pending'
+        : 'confirmed';
 
       const usedKeys = ['id','ref','outcome','outcomeLabel','therapy','therapyLabel','sessionMode','slotDate','slotTime',
         'startAt','guests','contact','customerId','bookedForOther','branchId','resourceId','resourceName','blockedFrom',
@@ -1296,6 +1310,7 @@ async function handle(req, method, segs) {
       const { data: bookingRow } = await supabase.from('bookings').select('data').eq('id', bookingId).maybeSingle();
       await supabase.from('bookings').update({
         payment: 'online',
+        status: 'confirmed',
         data: { ...bookingRow?.data, paymentStatus: 'paid', paymentProvider: 'razorpay', paymentId: razorpay_payment_id, paymentVerifiedAt: nowIso },
       }).eq('id', bookingId);
       return NextResponse.json({ success: true });
@@ -1320,8 +1335,9 @@ async function handle(req, method, segs) {
             raw: { ...rec.raw, capturedAt: new Date().toISOString() }, updated_at: new Date().toISOString(),
           }).eq('id', rec.id);
           if (rec.booking_id) {
-            const { data: bookingRow } = await supabase.from('bookings').select('data').eq('id', rec.booking_id).maybeSingle();
+            const { data: bookingRow } = await supabase.from('bookings').select('data, status').eq('id', rec.booking_id).maybeSingle();
             await supabase.from('bookings').update({
+              status: bookingRow?.status === 'payment_pending' ? 'confirmed' : bookingRow?.status,
               data: { ...bookingRow?.data, paymentStatus: 'captured' },
             }).eq('id', rec.booking_id);
           }

@@ -9,7 +9,8 @@ import { cn } from '@/components/ss/utils';
 import { formatDate, formatTime, rangeFromChip } from '@/lib/date';
 
 const STATUSES = [
-  { key: '',            label: 'All'         },
+  { key: '',                label: 'All'             },
+  { key: 'payment_pending',  label: 'Awaiting payment'},
   { key: 'confirmed',   label: 'Confirmed'   },
   { key: 'checked_in',  label: 'Checked in'  },
   { key: 'in_session',  label: 'In session'  },
@@ -210,6 +211,7 @@ export default function BookingsClient({ user }) {
 
 function StatusPill({ status }) {
   const map = {
+    payment_pending: ['Awaiting payment', 'bg-orange-500/10 text-orange-700 dark:text-orange-400'],
     confirmed:   ['Confirmed', 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'],
     booked:      ['Booked',    'bg-blue-500/10 text-blue-700 dark:text-blue-400'],
     checked_in:  ['Checked in','bg-amber-500/10 text-amber-700 dark:text-amber-400'],

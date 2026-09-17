@@ -167,10 +167,16 @@ function BalanceCard({ label, value, icon: Icon, href, hint }) {
   );
 }
 
+const STATUS_BADGE = {
+  payment_pending: ['Awaiting payment', 'bg-orange-500/10 text-orange-700 dark:text-orange-400'],
+};
+
 function BookingRow({ b, muted }) {
   const isoDate = b.startAt ? formatDate(b.startAt) : '';
   const slotTime = b.startAt ? new Date(b.startAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : '';
-  const paymentLabel = b.payment === 'online' ? 'Paid online via Razorpay' : b.payment === 'membership' ? 'Covered by membership' : 'Pay at visit';
+  const paymentLabel = b.status === 'payment_pending' ? 'Payment not completed'
+    : b.payment === 'online' ? 'Paid online via Razorpay' : b.payment === 'membership' ? 'Covered by membership' : 'Pay at visit';
+  const [statusLabel, statusCls] = STATUS_BADGE[b.status] || [b.status || 'confirmed', 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'];
   return (
     <Link href={`/account/bookings/${b.id}`} className={`rounded-xl border border-border p-4 md:p-5 flex items-center gap-4 flex-wrap hover:border-foreground/30 transition-colors ${muted ? 'bg-muted/30' : 'bg-card'}`}>
       <div className="flex-1 min-w-0">
@@ -183,7 +189,7 @@ function BookingRow({ b, muted }) {
       </div>
       <div className="flex items-center gap-3 ml-auto">
         {b.total > 0 && <div className="font-mono text-[14px] font-semibold">₹{Number(b.total).toLocaleString('en-IN')}</div>}
-        <span className="inline-flex items-center h-6 px-2.5 rounded-full text-[10.5px] font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">{b.status || 'confirmed'}</span>
+        <span className={`inline-flex items-center h-6 px-2.5 rounded-full text-[10.5px] font-semibold ${statusCls}`}>{statusLabel}</span>
         <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
       </div>
     </Link>

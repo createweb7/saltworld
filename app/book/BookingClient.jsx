@@ -2173,7 +2173,7 @@ export default function BookingClient({ initialOutcome }) {
         } else if (j?.error === 'login_required_for_online_payment') {
           setError('Please sign in to pay online.');
         } else {
-          throw new Error(j?.error || 'Failed to create booking');
+          setError(j?.message || 'This time is no longer available under our booking rules. Please pick another slot.');
         }
         setSubmitting(false);
         return;
