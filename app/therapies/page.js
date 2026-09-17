@@ -16,9 +16,9 @@ const THERAPIES = [
     label: 'Halotherapy',
     tagline: 'Dry salt for lungs, skin and calm.',
     body:
-      'A pharmaceutical-grade halogenerator disperses ultra-fine dry salt into a heated micro-climate. Forty-five minutes of breathing this air soothes airways, calms the sympathetic nervous system, and clears the skin.',
+      'A pharmaceutical-grade halogenerator disperses ultra-fine dry salt into a heated micro-climate. Sixty minutes of breathing this air soothes airways, calms the sympathetic nervous system, and clears the skin.',
     icon: Wind,
-    duration: '45 minutes',
+    duration: '60 minutes',
     goodFor: ['Stress Relief', 'Respiratory Wellness', 'Skin Rejuvenation'],
   },
   {
@@ -28,7 +28,7 @@ const THERAPIES = [
     body:
       'Suspended in half a tonne of dissolved magnesium at body temperature, sensory input drops to almost nothing. The brain drifts into a theta state within twenty minutes. Deeper than the deepest meditation.',
     icon: Waves,
-    duration: '60 minutes',
+    duration: '60 / 90 minutes',
     goodFor: ['Mental Wellness', 'Muscle Recovery', 'Better Sleep'],
   },
   {
@@ -38,7 +38,7 @@ const THERAPIES = [
     body:
       'Far-infrared light warms tissue directly, without heating the air. Core temperature rises gently, heart rate follows, and the body cycles through a passive cardiovascular workout. Excellent for recovery and longevity protocols.',
     icon: Flame,
-    duration: '35 minutes',
+    duration: '30 minutes',
     goodFor: ['Muscle Recovery', 'Longevity', 'Detox'],
   },
   {
@@ -48,7 +48,7 @@ const THERAPIES = [
     body:
       'Cold exposure triggers a controlled adrenaline release, followed hours later by a durable mood-lift. Paired with sauna, it accelerates recovery, strengthens immunity, and re-calibrates stress response.',
     icon: Snowflake,
-    duration: '2 – 4 minutes',
+    duration: '30 minutes',
     goodFor: ['Muscle Recovery', 'Longevity', 'Pain Relief'],
   },
   {
@@ -58,7 +58,7 @@ const THERAPIES = [
     body:
       'Specific wavelengths of red and near-infrared light stimulate mitochondrial ATP production. Skin becomes brighter within weeks, and inflammation calms across joints and muscles.',
     icon: Sunrise,
-    duration: '20 minutes',
+    duration: '30 minutes',
     goodFor: ['Skin Rejuvenation', 'Pain Relief', 'Longevity'],
   },
 ];

@@ -965,7 +965,7 @@ function FinalCTA() {
 
 const App = () => (
   <div className="min-h-screen bg-background">
-    <AnnouncementBar />
+    {/* Inactive until the next offer — flip back on with <AnnouncementBar />. */}
     <TopNav transparentHero />
     <main>
       <Hero />
