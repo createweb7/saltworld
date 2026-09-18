@@ -3,7 +3,7 @@
 // Header "cart" affordance — always visible, like a normal e-commerce
 // cart icon, so it reads as a stable part of the nav rather than a
 // surprise. It only badges up when the signed-in customer has an unpaid
-// booking (status: payment_pending), making that 15-minute hold visible
+// booking (status: payment_pending), making that hold visible
 // instead of it silently sitting there and colliding with the customer's
 // next attempt as a confusing slot-conflict error — see the resume-
 // payment flow this dropdown drives (reuses the SAME booking id for

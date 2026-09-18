@@ -720,7 +720,7 @@ async function handle(req, method, segs) {
     // customer's next attempt with a confusing conflict error.
     if (segs[1] === 'pending' && segs.length === 2 && method === 'GET') {
       const { getCurrentCustomer } = await import('@/lib/customer-auth');
-      const { expireStalePendingBookings } = await import('@/lib/booking-rules');
+      const { expireStalePendingBookings, PAYMENT_PENDING_EXPIRY_MIN } = await import('@/lib/booking-rules');
       const customer = await getCurrentCustomer();
       if (!customer) return NextResponse.json({ booking: null });
       await expireStalePendingBookings().catch(() => {});
@@ -732,7 +732,7 @@ async function handle(req, method, segs) {
       return NextResponse.json({ booking: {
         id: full.id, ref: full.ref, outcomeLabel: full.outcomeLabel, therapyLabel: full.therapyLabel,
         slotDate: full.slotDate, slotTime: full.slotTime, total: full.total, contact: full.contact,
-        createdAt: full.createdAt, expiresAt: new Date(new Date(full.createdAt).getTime() + 15 * 60000).toISOString(),
+        createdAt: full.createdAt, expiresAt: new Date(new Date(full.createdAt).getTime() + PAYMENT_PENDING_EXPIRY_MIN * 60000).toISOString(),
       } });
     }
     if (segs.length === 1 && method === 'POST') {

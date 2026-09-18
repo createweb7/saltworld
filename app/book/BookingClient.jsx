@@ -2009,8 +2009,36 @@ export default function BookingClient({ initialOutcome }) {
     (stepId === 'slot'    && !!slot?.date && !!slot?.time) ||
     stepId === 'contact';
 
-  const next = () => setStepIdx((i) => Math.min(i + 1, steps.length - 1));
-  const back = () => setStepIdx((i) => Math.max(i - 1, 0));
+  // Give the browser's own back/forward buttons wizard-aware behaviour.
+  // Without this, the wizard never touches browser history, so pressing
+  // back after clicking through several steps just leaves the page
+  // entirely (e.g. back to the homepage) instead of undoing the last step.
+  // Each forward step pushes a history entry tagged with its stepIdx;
+  // back/forward then just replays those entries via popstate.
+  useEffect(() => {
+    if (typeof window !== 'undefined') window.history.replaceState({ stepIdx }, '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    const onPopState = (e) => {
+      const idx = e.state?.stepIdx;
+      if (typeof idx === 'number') setStepIdx(Math.max(0, Math.min(idx, steps.length - 1)));
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [steps.length]);
+
+  const next = () => setStepIdx((i) => {
+    const n = Math.min(i + 1, steps.length - 1);
+    if (typeof window !== 'undefined') window.history.pushState({ stepIdx: n }, '');
+    return n;
+  });
+  // Delegates to the browser's own back navigation so the wizard-step
+  // history stack (pushed in `next`) and actual browser back stay in sync
+  // instead of drifting apart. At step 0 this button isn't even rendered
+  // (see BookingHeader) — it's a plain Link to "/" instead.
+  const back = () => { if (typeof window !== 'undefined') window.history.back(); };
 
   // Toggle helper for the Book-for-self / Book-for-others switch.
   // Preserves whatever the user typed on either side of the toggle so they
