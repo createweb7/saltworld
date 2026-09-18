@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/components/ss/utils';
 import AuthWidget from '@/components/site/auth-widget';
+import CartWidget from '@/components/site/cart-widget';
 
 /* ------------------------------------------------------------------ */
 /* Announcement Bar — dismissible, persists in localStorage           */
@@ -193,6 +194,7 @@ export function TopNav({ transparentHero = true }) {
             <Link href="/gifts" className={cn('text-[13.5px] font-medium transition-colors',
               inverted ? 'text-white/80 hover:text-white' : 'text-foreground/70 hover:text-foreground'
             )}>Gift</Link>
+            <CartWidget inverted={inverted} />
             <AuthWidget inverted={inverted} />
             <Link href="/book" className={cn(
               'inline-flex items-center gap-1.5 h-9 px-4 rounded-full text-[13.5px] font-semibold transition-all',

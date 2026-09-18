@@ -714,6 +714,27 @@ async function handle(req, method, segs) {
 
   // ------- Bookings -------
   if (segs[0] === 'bookings') {
+    // GET /api/bookings/pending — the signed-in customer's own unpaid
+    // "cart" hold, if any. Powers the header cart badge so an abandoned
+    // checkout is visible and resumable instead of silently blocking the
+    // customer's next attempt with a confusing conflict error.
+    if (segs[1] === 'pending' && segs.length === 2 && method === 'GET') {
+      const { getCurrentCustomer } = await import('@/lib/customer-auth');
+      const { expireStalePendingBookings } = await import('@/lib/booking-rules');
+      const customer = await getCurrentCustomer();
+      if (!customer) return NextResponse.json({ booking: null });
+      await expireStalePendingBookings().catch(() => {});
+      const { data: row } = await supabase.from('bookings').select('*')
+        .eq('customer_id', customer.id).eq('status', 'payment_pending')
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (!row) return NextResponse.json({ booking: null });
+      const full = await toBookingFull(supabase, row);
+      return NextResponse.json({ booking: {
+        id: full.id, ref: full.ref, outcomeLabel: full.outcomeLabel, therapyLabel: full.therapyLabel,
+        slotDate: full.slotDate, slotTime: full.slotTime, total: full.total, contact: full.contact,
+        createdAt: full.createdAt, expiresAt: new Date(new Date(full.createdAt).getTime() + 15 * 60000).toISOString(),
+      } });
+    }
     if (segs.length === 1 && method === 'POST') {
       const body = await req.json();
       // Online payment requires a signed-in customer — receipts, refunds and
@@ -1127,11 +1148,16 @@ async function handle(req, method, segs) {
       if (['cancelled', 'completed', 'no_show', 'in_session'].includes(row.status)) {
         return NextResponse.json({ error: `already_${row.status}` }, { status: 400 });
       }
-      const { assertCustomerCanMutate } = await import('@/lib/booking-rules');
-      try {
-        await assertCustomerCanMutate(toBooking(row), 'cancel');
-      } catch (e) {
-        return NextResponse.json({ error: 'cutoff_passed', cutoff: e.cutoff, rules: e.rules }, { status: 403 });
+      // An unpaid "cart" hold was never a confirmed appointment, so the
+      // appointment cutoff window doesn't apply — the customer can always
+      // drop it immediately to free the slot.
+      if (row.status !== 'payment_pending') {
+        const { assertCustomerCanMutate } = await import('@/lib/booking-rules');
+        try {
+          await assertCustomerCanMutate(toBooking(row), 'cancel');
+        } catch (e) {
+          return NextResponse.json({ error: 'cutoff_passed', cutoff: e.cutoff, rules: e.rules }, { status: 403 });
+        }
       }
       const body = await req.json().catch(() => ({}));
       await supabase.from('bookings').update({
@@ -1248,8 +1274,22 @@ async function handle(req, method, segs) {
       if (!Number.isFinite(amt) || amt <= 0) {
         return NextResponse.json({ error: 'invalid_amount' }, { status: 400 });
       }
-      const { data: booking } = await supabase.from('bookings').select('id, ref').eq('id', bookingId).maybeSingle();
+      const { data: booking } = await supabase.from('bookings').select('id, ref, customer_id, status').eq('id', bookingId).maybeSingle();
       if (!booking) return NextResponse.json({ error: 'booking_not_found' }, { status: 404 });
+      // Only ever open checkout against a booking that's still actually
+      // awaiting payment — blocks re-ordering against someone else's
+      // booking, and against a booking that's already paid, cancelled, or
+      // auto-expired (e.g. a stale "resume payment" tab reopened late).
+      if (booking.status !== 'payment_pending') {
+        return NextResponse.json({ error: 'booking_not_payable' }, { status: 409 });
+      }
+      if (booking.customer_id) {
+        const { getCurrentCustomer } = await import('@/lib/customer-auth');
+        const customer = await getCurrentCustomer();
+        if (!customer || customer.id !== booking.customer_id) {
+          return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+        }
+      }
 
       if (!(await razorpayIsConfigured())) {
         return NextResponse.json({ error: 'razorpay_not_configured' }, { status: 503 });
