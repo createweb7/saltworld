@@ -53,6 +53,7 @@ export default function BookingDetailClient({ user, id }) {
                 ['Outcome', b.outcome],
                 ['Therapy', b.therapy],
                 ['Guests',  b.guests || 1],
+                ...(b.children > 0 ? [['Children', b.children]] : []),
                 ['Notes',   b.contact?.notes || '—'],
               ]} />
               <Card label="Payment" items={[

@@ -88,7 +88,12 @@ function BookingHeader({ stepIdx, onBack, summary, steps = STEPS }) {
         </div>
         <div className="w-9 md:hidden" />
       </div>
-      <div className="h-0.5 bg-muted overflow-hidden">
+      {/* `bg-muted` (93% lightness) sat almost indistinguishable from the
+          header's own background (94%) — the unfilled track was invisible,
+          so only the filled teal segment ever showed. `bg-border` (83%) is
+          actually visible against it, so the full-width track reads as a
+          track, with the fill showing real progress on top of it. */}
+      <div className="h-1 bg-border overflow-hidden">
         <div className="h-full bg-brand transition-all duration-500 ease-out" style={{ width: `${progress}%` }} />
       </div>
     </header>
@@ -344,7 +349,7 @@ function fmtVisit(mins) {
   return `${mins}m`;
 }
 
-function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSessionMode, floatDurationMin, setFloatDurationMin, guests, setGuests, totalRupees = 0, onReorderTherapies }) {
+function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSessionMode, floatDurationMin, setFloatDurationMin, guests, setGuests, children, setChildren, totalRupees = 0, onReorderTherapies }) {
   const days = useMemo(() => {
     // Auto-rollover: if IST wall-clock is past 20:00 (branch close) we hide
     // "today" from the picker and default to tomorrow. TC-1 fix.
@@ -393,12 +398,13 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
     if (hasFloat && sessionMode) q.set('sessionMode', sessionMode);
     if (hasFloat && floatDurationMin) q.set('floatDurationMin', String(floatDurationMin));
     if (guests > 1) q.set('guests', String(guests));
+    if (children > 0) q.set('children', String(children));
     fetch(`/api/scheduling/slots?${q}`)
       .then((r) => r.ok ? r.json() : null)
       .then((d) => { if (!cancelled) { setJourneyData(d); setLoading(false); } })
       .catch(() => { if (!cancelled) { setJourneyData(null); setLoading(false); } });
     return () => { cancelled = true; };
-  }, [therapies, date, sessionMode, floatDurationMin, hasFloat, guests]);
+  }, [therapies, date, sessionMode, floatDurationMin, hasFloat, guests, children]);
 
   // Fetch top-3 recommendations whenever inputs change.
   useEffect(() => {
@@ -412,6 +418,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
     if (hasFloat && sessionMode) q.set('sessionMode', sessionMode);
     if (hasFloat && floatDurationMin) q.set('floatDurationMin', String(floatDurationMin));
     if (guests > 1) q.set('guests', String(guests));
+    if (children > 0) q.set('children', String(children));
     fetch(`/api/scheduling/recommendations?${q}`)
       .then((r) => r.ok ? r.json() : { recommendations: [] })
       .then((d) => {
@@ -420,7 +427,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
         setRecLoading(false);
       })
       .catch(() => { setRecommendations([]); setRecExpanded(false); setRecLoading(false); });
-  }, [therapies, date, preferredTime, sessionMode, floatDurationMin, hasFloat, guests]);
+  }, [therapies, date, preferredTime, sessionMode, floatDurationMin, hasFloat, guests, children]);
 
   const loadMore = async () => {
     setRecLoading(true);
@@ -432,6 +439,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
     if (hasFloat && sessionMode) q.set('sessionMode', sessionMode);
     if (hasFloat && floatDurationMin) q.set('floatDurationMin', String(floatDurationMin));
     if (guests > 1) q.set('guests', String(guests));
+    if (children > 0) q.set('children', String(children));
     try {
       const r = await fetch(`/api/scheduling/recommendations?${q}`);
       const d = await r.json();
@@ -487,11 +495,21 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
 
   // Keep `guests` in range as the selected therapies change — e.g. switching
   // away from a shared-capacity therapy should drop back to 1, and switching
-  // to one with a smaller cap (Kids Salt, max 3) should clamp down.
+  // to one with a smaller cap should clamp down.
   useEffect(() => {
     if (sharedCapacity <= 1 && guests !== 1) setGuests(1);
     else if (sharedCapacity > 1 && guests > sharedCapacity) setGuests(sharedCapacity);
   }, [sharedCapacity, guests, setGuests]);
+
+  // Children: max 3, and adults + children must still fit the room (e.g.
+  // Salt Cave, 7). Drop to 0 entirely when there's no shared-capacity
+  // therapy in the journey.
+  const maxChildren = sharedCapacity > 1 ? Math.max(0, Math.min(3, sharedCapacity - 1)) : 0;
+  useEffect(() => {
+    if (maxChildren <= 0 && children !== 0) setChildren(0);
+    else if (children > maxChildren) setChildren(maxChildren);
+    else if (guests + children > sharedCapacity) setChildren(Math.max(0, sharedCapacity - guests));
+  }, [maxChildren, sharedCapacity, guests, children, setChildren]);
 
   // Precompute time-picker options: every 15 min from 06:00 to 20:00.
   const timeOptions = useMemo(() => {
@@ -544,7 +562,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
                         <span>Capacity: 1&ndash;{sharedCapacity} people per time slot &mdash; you may share with other guests.</span>
                       </div>
                       <div className="mt-2 flex items-center justify-between gap-3">
-                        <div className="text-[12.5px] font-medium">How many people for {meta.name}?</div>
+                        <div className="text-[12.5px] font-medium">How many adults for {meta.name}?</div>
                         <div className="inline-flex items-center rounded-full border border-border bg-card">
                           <button
                             type="button"
@@ -557,12 +575,37 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
                           <button
                             type="button"
                             aria-label="More guests"
-                            disabled={guests >= sharedCapacity}
-                            onClick={() => { setGuests(Math.min(sharedCapacity, guests + 1)); onChange(null); }}
+                            disabled={guests >= sharedCapacity - children}
+                            onClick={() => { setGuests(Math.min(sharedCapacity - children, guests + 1)); onChange(null); }}
                             className="h-8 w-8 rounded-full inline-flex items-center justify-center text-[15px] font-medium text-foreground disabled:opacity-30 disabled:cursor-not-allowed hover:bg-muted transition-colors"
                           >+</button>
                         </div>
                       </div>
+                      {maxChildren > 0 && (
+                        <div className="mt-2 flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-[12.5px] font-medium">Children joining?</div>
+                            <div className="text-[10.5px] text-muted-foreground">Up to 3 &middot; 1 accompanying adult free per child, child is charged</div>
+                          </div>
+                          <div className="inline-flex items-center rounded-full border border-border bg-card shrink-0">
+                            <button
+                              type="button"
+                              aria-label="Fewer children"
+                              disabled={children <= 0}
+                              onClick={() => { setChildren(Math.max(0, children - 1)); onChange(null); }}
+                              className="h-8 w-8 rounded-full inline-flex items-center justify-center text-[15px] font-medium text-foreground disabled:opacity-30 disabled:cursor-not-allowed hover:bg-muted transition-colors"
+                            >&minus;</button>
+                            <span className="w-8 text-center font-mono text-[13.5px] font-semibold">{children}</span>
+                            <button
+                              type="button"
+                              aria-label="More children"
+                              disabled={children >= maxChildren || guests + children >= sharedCapacity}
+                              onClick={() => { setChildren(Math.min(maxChildren, sharedCapacity - guests, children + 1)); onChange(null); }}
+                              className="h-8 w-8 rounded-full inline-flex items-center justify-center text-[15px] font-medium text-foreground disabled:opacity-30 disabled:cursor-not-allowed hover:bg-muted transition-colors"
+                            >+</button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -571,7 +614,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
           </div>
           <div className="mt-4 pt-3 border-t border-border flex items-baseline justify-between flex-wrap gap-1">
             <span className="text-[12.5px] text-muted-foreground">
-              Total price{guests > 1 ? ` for ${guests} people` : ''}
+              Total price{(guests > 1 || children > 0) ? ` for ${guests} adult${guests > 1 ? 's' : ''}${children > 0 ? ` + ${children} child${children > 1 ? 'ren' : ''}` : ''}` : ''}
             </span>
             <span className="font-serif text-[26px] leading-none tracking-tight">
               &#x20B9;{Number(totalRupees || 0).toLocaleString('en-IN')}
@@ -691,8 +734,8 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
 
           {/* Recommendations */}
           {recLoading && recommendations.length === 0 && (
-            <div className="mt-6 text-center py-10 text-muted-foreground text-[13px] flex items-center justify-center gap-2">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Building the best itineraries for you&hellip;
+            <div className="mt-6 flex items-center justify-center gap-2 rounded-xl border border-border bg-muted/60 py-10 text-[12.5px] text-muted-foreground">
+              <Clock className="h-3.5 w-3.5 animate-spin" /> Finding the best times for this date&hellip;
             </div>
           )}
 
@@ -707,12 +750,21 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
 
           {recommendations.length > 0 && (
             <>
+              {/* Stale-while-refreshing — the previous date's cards stay on
+                  screen (avoids a jarring blank flash) while a new date's
+                  recommendations load in the background, so this banner is
+                  the only signal that they're about to change. */}
+              {recLoading && (
+                <div className="mt-6 flex items-center justify-center gap-2 rounded-xl border border-border bg-muted/60 py-2.5 text-[12.5px] text-muted-foreground">
+                  <Clock className="h-3.5 w-3.5 animate-spin" /> Finding the best times for this date&hellip;
+                </div>
+              )}
               {recExpanded && (
                 <div className="mt-4 rounded-xl border border-amber-200/70 dark:border-amber-800/40 bg-amber-50/60 dark:bg-amber-500/5 px-4 py-3 text-[12.5px] text-amber-900 dark:text-amber-200 leading-[1.55]">
                   Nothing available around <span className="font-mono font-semibold">{preferredTime}</span> on this day — showing the closest available itineraries instead.
                 </div>
               )}
-              <div className="mt-6 grid gap-4">
+              <div className={cn('mt-6 grid gap-4 transition-opacity', recLoading && 'opacity-40 pointer-events-none')}>
                 {recommendations.map((r) => {
                   const isSel = value?.startIso === r.startIso;
                   return (
@@ -1100,7 +1152,7 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, on
 /* Step 4 — Contact & confirm                                         */
 /* ------------------------------------------------------------------ */
 
-function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, guests = 1, customerId, branchId, isStaff = false, isDirectMode = false, eligibleMemberships = [], selectedMembershipId = null, onSelectMembership = () => {}, bookingFor = 'self', onChangeBookingFor = () => {}, showBookingForToggle = false, quote = null, walletUseInr = 0, setWalletUseInr = () => {}, walletAvailableInr = 0, giftCardCode = '', setGiftCardCode = () => {}, giftCardPin = '', setGiftCardPin = () => {}, giftCardApplied = null, onSignedIn = () => {}, onGoogleStart = () => {} }) {
+function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot, contact, setContact, payment, setPayment, submitting, onSubmit, error, canPayOnline, slotConflict, onPickSuggestion, coupon, setCoupon, subtotalInr, guests = 1, children = 0, customerId, branchId, isStaff = false, isDirectMode = false, eligibleMemberships = [], selectedMembershipId = null, onSelectMembership = () => {}, bookingFor = 'self', onChangeBookingFor = () => {}, showBookingForToggle = false, quote = null, walletUseInr = 0, setWalletUseInr = () => {}, walletAvailableInr = 0, giftCardCode = '', setGiftCardCode = () => {}, giftCardPin = '', setGiftCardPin = () => {}, giftCardApplied = null, onSignedIn = () => {}, onGoogleStart = () => {} }) {
   const o = getOutcome(outcome);
   const th = o?.protocol?.therapies?.find((x) => x.slug === therapy);
   const isMulti = therapies.length > 1 && slot?.plan?.length > 1;
@@ -1433,7 +1485,7 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
                 <Row label="Date" value={slot ? new Date(slot.date + 'T00:00').toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long' }) : '—'} />
                 <Row label="Therapy time" value={`${(slot.plan||[]).reduce((s,p)=>s+(p.durationMin||therapyMeta[p.therapySlug]?.durationMin||0),0)} min`} />
                 <Row label="Estimated visit" value={slot.visitFromIso && slot.visitToIso ? `~${fmtVisit(Math.round((new Date(slot.visitToIso)-new Date(slot.visitFromIso))/60000))}` : '—'} />
-                {guests > 1 && <Row label="Guests" value={`${guests} people`} />}
+                {(guests > 1 || children > 0) && <Row label="Guests" value={`${guests} adult${guests > 1 ? 's' : ''}${children > 0 ? ` + ${children} child${children > 1 ? 'ren' : ''}` : ''}`} />}
                 <Row label="Branch" value="HSR Layout" />
               </div>
             </>
@@ -1444,7 +1496,7 @@ function StepContact({ outcome, therapy, therapies = [], therapyMeta = {}, slot,
               <Row label="Date"    value={slot ? new Date(slot.date + 'T00:00').toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long' }) : '—'} />
               <Row label="Time"    value={slot?.time || '—'} />
               <Row label="Duration" value={o?.protocol?.duration || (therapies[0] && therapyMeta[therapies[0]]?.durationMin ? `${therapyMeta[therapies[0]].durationMin} min` : '—')} />
-              {guests > 1 && <Row label="Guests" value={`${guests} people`} />}
+              {(guests > 1 || children > 0) && <Row label="Guests" value={`${guests} adult${guests > 1 ? 's' : ''}${children > 0 ? ` + ${children} child${children > 1 ? 'ren' : ''}` : ''}`} />}
             </div>
           )}
           <div className="mt-5 pt-4 border-t border-border">
@@ -1692,7 +1744,8 @@ export default function BookingClient({ initialOutcome }) {
   const [therapyMeta, setTherapyMeta] = useState({}); // slug → {name, durationMin, ...} from DB
   const [sessionMode, setSessionMode] = useState('single'); // float-therapy: single | couple
   const [floatDurationMin, setFloatDurationMin] = useState(60); // float-therapy: 60 | 90
-  const [guests, setGuests] = useState(1); // headcount for shared-capacity therapies (e.g. Salt Cave)
+  const [guests, setGuests] = useState(1); // adult headcount for shared-capacity therapies (e.g. Salt Cave)
+  const [children, setChildren] = useState(0); // charged children joining, max 3, 1 free accompanying adult each
   const [coupon, setCoupon] = useState(null);              // { code, discountInr, applied } | null
   // Suggestions surfaced when the confirm step receives a 409 slot_unavailable
   const [slotConflict, setSlotConflict] = useState(null); // { reason, suggestions:[{...}] }
@@ -1737,6 +1790,7 @@ export default function BookingClient({ initialOutcome }) {
     if (draft.sessionMode) setSessionMode(draft.sessionMode);
     if (draft.floatDurationMin) setFloatDurationMin(draft.floatDurationMin);
     if (draft.guests) setGuests(draft.guests);
+    if (draft.children) setChildren(draft.children);
     if (draft.contact) setContact(draft.contact);
     if (draft.bookingFor) setBookingFor(draft.bookingFor);
     if (draft.payment) setPayment(draft.payment);
@@ -1755,7 +1809,7 @@ export default function BookingClient({ initialOutcome }) {
   const onGoogleStart = () => {
     try {
       sessionStorage.setItem('sw_booking_resume', JSON.stringify({
-        outcome, therapies, slot, sessionMode, floatDurationMin, guests, contact, bookingFor, payment, stepId,
+        outcome, therapies, slot, sessionMode, floatDurationMin, guests, children, contact, bookingFor, payment, stepId,
       }));
     } catch { /* storage unavailable — Google flow will just land on /account instead */ }
     const returnTo = `${window.location.pathname}?resume=1`;
@@ -1803,8 +1857,15 @@ export default function BookingClient({ initialOutcome }) {
         if (p != null) return s + Number(p);
       }
       const dbPrice = Number(meta?.defaultPrice) || 0;
-      if (isShared && guests > 1) {
-        return s + (tieredRate != null ? Number(tieredRate) * guests : dbPrice * guests);
+      if (isShared && (guests > 1 || children > 0)) {
+        // Children waive 1 accompanying adult's charge each (up to however
+        // many adults are actually present) and are charged their own flat
+        // rate — mirrors the server-side formula in lib/pricing.js.
+        const adultUnitPrice = guests > 1 ? (tieredRate != null ? Number(tieredRate) : dbPrice) : dbPrice;
+        const childUnitPrice = meta?.childPriceInr != null ? Number(meta.childPriceInr) : adultUnitPrice;
+        const waivedAdults = Math.min(children, guests);
+        const chargeableAdults = guests - waivedAdults;
+        return s + (adultUnitPrice * chargeableAdults) + (childUnitPrice * children);
       }
       if (dbPrice > 0) return s + dbPrice;
       const role = String(t.role || '').toLowerCase();
@@ -1812,7 +1873,7 @@ export default function BookingClient({ initialOutcome }) {
       return s + Math.round(basePrice * mult);
     }, 0);
     return sum || basePrice || 0;
-  }, [outcome, outcomeMap, therapies, therapyMeta, sessionMode, floatDurationMin, guests]);
+  }, [outcome, outcomeMap, therapies, therapyMeta, sessionMode, floatDurationMin, guests, children]);
 
   // Load therapy metadata once (for the journey summary in step 3).
   useEffect(() => {
@@ -1864,6 +1925,7 @@ export default function BookingClient({ initialOutcome }) {
           giftCardCode: giftCardCode || null,
           giftCardPin:  giftCardPin  || null,
           guests: Number(guests) || 1,
+          children: Number(children) || 0,
         }),
       })
         .then((r) => r.ok ? r.json() : null)
@@ -1880,7 +1942,7 @@ export default function BookingClient({ initialOutcome }) {
         .catch(() => setQuote(null));
     }, 300);
     return () => clearTimeout(timer);
-  }, [therapies, customerId, contact?.phone, selectedMembershipId, walletUseInr, coupon, giftCardCode, giftCardPin, guests, sessionMode, floatDurationMin, therapyMeta]);
+  }, [therapies, customerId, contact?.phone, selectedMembershipId, walletUseInr, coupon, giftCardCode, giftCardPin, guests, children, sessionMode, floatDurationMin, therapyMeta]);
 
 
   // Pre-fill contact from query params (used when staff launches "New booking" from
@@ -2171,6 +2233,7 @@ export default function BookingClient({ initialOutcome }) {
           giftCardCode: giftCardCode || null,
           giftCardPin:  giftCardPin  || null,
           guests: Number(guests) || 1,
+          children: Number(children) || 0,
           // Booked-for-other flag — useful for reception + record-keeping.
           // customerId still points at the booker/paying account.
           bookedForOther: bookingFor === 'other',
@@ -2247,7 +2310,7 @@ export default function BookingClient({ initialOutcome }) {
         {stepId === 'outcome' && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); }} />}
         {stepId === 'therapy' && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} therapyMeta={therapyMeta} isDirectMode={isDirectTherapyMode} />}
         {stepId === 'slot'    && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode} setSessionMode={setSessionMode}
-          floatDurationMin={floatDurationMin} setFloatDurationMin={setFloatDurationMin} guests={guests} setGuests={setGuests} totalRupees={totalRupees}
+          floatDurationMin={floatDurationMin} setFloatDurationMin={setFloatDurationMin} guests={guests} setGuests={setGuests} children={children} setChildren={setChildren} totalRupees={totalRupees}
           onReorderTherapies={(idx, dir) => {
             const arr = [...therapies];
             const j = idx + dir;
@@ -2271,6 +2334,7 @@ export default function BookingClient({ initialOutcome }) {
             coupon={coupon} setCoupon={setCoupon}
             subtotalInr={totalRupees}
             guests={guests}
+            children={children}
             customerId={customerId}
             branchId={null}
             isStaff={isStaff}

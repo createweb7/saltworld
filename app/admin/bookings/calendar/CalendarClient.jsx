@@ -118,8 +118,9 @@ export default function CalendarClient({ user }) {
         const span = slotsBetween(step.from, step.to);
         const colEnd = Math.min(SLOTS.length, colStart + span); // exclusive
         const guests = Math.max(1, Number(b.guests) || 1);
+        const children = Math.max(0, Number(b.children) || 0);
         (byResource[step.resourceId] = byResource[step.resourceId] || [])
-          .push({ booking: b, step, colStart, colEnd, guests });
+          .push({ booking: b, step, colStart, colEnd, guests, children });
       }
     }
 
@@ -137,7 +138,7 @@ export default function CalendarClient({ user }) {
       }
       const occupancy = new Array(SLOTS.length).fill(0);
       for (const item of items) {
-        for (let c = item.colStart; c < item.colEnd; c++) occupancy[c] += item.guests;
+        for (let c = item.colStart; c < item.colEnd; c++) occupancy[c] += item.guests + item.children;
       }
       layout[resourceId] = { items, laneCount: Math.max(1, laneEnds.length), occupancy };
     }
@@ -248,7 +249,7 @@ function FragmentRow({ r, layout }) {
                 {occ}/{capacity}
               </div>
             )}
-            {cellItems.map(({ booking: b, step, colEnd, lane, guests }, i) => {
+            {cellItems.map(({ booking: b, step, colEnd, lane, guests, children }, i) => {
               const span = colEnd - colIdx;
               const top = (showBadges ? BADGE_STRIP : 2) + lane * LANE_HEIGHT;
               // Single-lane resources (the common case — everything except Salt
@@ -264,10 +265,10 @@ function FragmentRow({ r, layout }) {
                     statusClasses(b.status)
                   )}
                   style={{ width: `calc(${span * 100}% - 4px)`, top, height: itemHeight }}
-                  title={`${b.contact?.name || 'Guest'} \u00b7 ${step.therapyName || ''}${guests > 1 ? ` \u00b7 ${guests} guests` : ''}`}
+                  title={`${b.contact?.name || 'Guest'} \u00b7 ${step.therapyName || ''}${guests > 1 ? ` \u00b7 ${guests} guests` : ''}${children > 0 ? ` + ${children} child${children > 1 ? 'ren' : ''}` : ''}`}
                 >
                   <div className="font-semibold truncate">
-                    {b.contact?.name || 'Guest'}{guests > 1 && <span className="opacity-70"> {'\u00d7'}{guests}</span>}
+                    {b.contact?.name || 'Guest'}{(guests > 1 || children > 0) && <span className="opacity-70"> {'\u00d7'}{guests}{children > 0 ? `+${children}` : ''}</span>}
                   </div>
                   <div className="opacity-80 truncate">{step.therapyName || '\u2014'}</div>
                 </Link>

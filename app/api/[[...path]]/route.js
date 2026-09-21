@@ -208,6 +208,7 @@ async function handle(req, method, segs) {
       giftCardCode:             body.giftCardCode|| null,
       giftCardPin:              body.giftCardPin || null,
       guests:                   Math.max(1, Number(body.guests) || 1),
+      children:                 Math.max(0, Math.min(3, Number(body.children) || 0)),
     });
     return NextResponse.json(quote);
   }
@@ -442,12 +443,13 @@ async function handle(req, method, segs) {
     const sessionMode = u.searchParams.get('sessionMode') || null;
     const floatDurationMin = Number(u.searchParams.get('floatDurationMin')) || null;
     const guests = Math.max(1, Number(u.searchParams.get('guests')) || 1);
+    const children = Math.max(0, Math.min(3, Number(u.searchParams.get('children')) || 0));
     if (therapies.length === 0) return NextResponse.json({ error: 'therapies_required' }, { status: 400 });
     if (!date) return NextResponse.json({ error: 'date_required' }, { status: 400 });
     const durationOverrides = floatDurationMin && therapies.includes('float-therapy')
       ? { 'float-therapy': floatDurationMin } : null;
     const { availableJourneySlots } = await import('@/lib/scheduling');
-    const r = await availableJourneySlots({ therapySlugs: therapies, branchId, dateIso: date, sessionMode, durationOverrides, guests });
+    const r = await availableJourneySlots({ therapySlugs: therapies, branchId, dateIso: date, sessionMode, durationOverrides, guests, children });
     return NextResponse.json(r || { groups: { morning: [], afternoon: [], evening: [] }, totalDurationMin: 0, totalVisitMin: 0 });
   }
 
@@ -478,12 +480,13 @@ async function handle(req, method, segs) {
     const therapies = therapiesQ.split(',').map((s) => s.trim()).filter(Boolean);
     const floatDurationMin = Number(u.searchParams.get('floatDurationMin')) || null;
     const guests = Math.max(1, Number(u.searchParams.get('guests')) || 1);
+    const children = Math.max(0, Math.min(3, Number(u.searchParams.get('children')) || 0));
     const durationOverrides = floatDurationMin && therapies.includes('float-therapy')
       ? { 'float-therapy': floatDurationMin } : null;
     const { recommendJourneys } = await import('@/lib/scheduling');
     const r = await recommendJourneys({
       therapySlugs: therapies, branchId, dateIso: date,
-      preferredTime: preferred, windowMin, sessionMode, durationOverrides, guests, limit, startOffset: offset,
+      preferredTime: preferred, windowMin, sessionMode, durationOverrides, guests, children, limit, startOffset: offset,
     });
     return NextResponse.json(r);
   }
@@ -799,24 +802,36 @@ async function handle(req, method, segs) {
           }, { status: 400 });
         }
       }
-      // Guest-count cap — e.g. Salt Cave max 7, Kids Salt max 3. Takes the
-      // STRICTEST cap across only the SHARED-capacity therapies selected
-      // (max_capacity > 1) — private, exclusive-lock therapies (capacity 1:
-      // Sauna, Red Light, Cold Plunge, Float) don't consult guests in their
-      // own availability check (see isResourceFree in lib/scheduling.js), so
-      // a Salt Cave + Red Light combo should still allow up to 7 guests for
+      // Guest-count cap — e.g. Salt Cave max 7. Takes the STRICTEST cap
+      // across only the SHARED-capacity therapies selected (max_capacity >
+      // 1) — private, exclusive-lock therapies (capacity 1: Sauna, Red
+      // Light, Cold Plunge, Float) don't consult guests in their own
+      // availability check (see isResourceFree in lib/scheduling.js), so a
+      // Salt Cave + Red Light combo should still allow up to 7 guests for
       // the Salt Cave leg rather than being capped at 1 by the private room.
+      //
+      // Children ride along on the same shared-capacity leg: max 3, and they
+      // count toward the SAME total-heads cap as adults (e.g. 5 adults + 2
+      // children = 7 heads, right at the Salt Cave's limit).
       const requestedGuests = Math.max(1, Number(body.guests) || 1);
-      if (therapySlugs.length > 0 && requestedGuests > 1) {
+      const requestedChildren = Math.max(0, Number(body.children) || 0);
+      if (requestedChildren > 3) {
+        return NextResponse.json({
+          error: 'child_cap_exceeded',
+          message: 'Up to 3 children can be admitted per booking.',
+          meta: { maxChildren: 3 },
+        }, { status: 400 });
+      }
+      if (therapySlugs.length > 0 && (requestedGuests > 1 || requestedChildren > 0)) {
         const { data: capDocs } = await supabase.from('therapies').select('slug, max_capacity').in('slug', therapySlugs);
         const strictestCap = (capDocs || []).reduce((min, t) => {
           const cap = Number(t.max_capacity);
           return cap > 1 ? Math.min(min, cap) : min;
         }, Infinity);
-        if (Number.isFinite(strictestCap) && requestedGuests > strictestCap) {
+        if (Number.isFinite(strictestCap) && (requestedGuests + requestedChildren) > strictestCap) {
           return NextResponse.json({
             error: 'guest_cap_exceeded',
-            message: `This selection allows up to ${strictestCap} guest${strictestCap === 1 ? '' : 's'} per booking.`,
+            message: `This selection allows up to ${strictestCap} people (adults + children) per booking.`,
             meta: { maxGuests: strictestCap },
           }, { status: 400 });
         }
@@ -889,7 +904,7 @@ async function handle(req, method, segs) {
         try {
           const { allocateJourney, suggestNextAvailableSlots } = await import('@/lib/scheduling');
           const suppliedPlan = Array.isArray(body.plan) && body.plan.length > 0 ? body.plan : null;
-          const r = await allocateJourney({ therapySlugs, branchId, startIso, sessionMode, durationOverrides, guests: requestedGuests, plan: suppliedPlan });
+          const r = await allocateJourney({ therapySlugs, branchId, startIso, sessionMode, durationOverrides, guests: requestedGuests, children: requestedChildren, plan: suppliedPlan });
           if (r.ok) {
             resourceId   = r.resourceId;
             resourceName = r.resourceName;
@@ -900,7 +915,7 @@ async function handle(req, method, segs) {
             // Slot no longer available — do NOT create the booking. Suggest
             // alternatives so the customer can continue without restarting.
             const suggestions = await suggestNextAvailableSlots({
-              therapySlugs, branchId, startIso, sessionMode, durationOverrides, guests: requestedGuests, limit: 5,
+              therapySlugs, branchId, startIso, sessionMode, durationOverrides, guests: requestedGuests, children: requestedChildren, limit: 5,
             }).catch(() => []);
             return NextResponse.json({
               error: 'slot_unavailable',
@@ -924,6 +939,7 @@ async function handle(req, method, segs) {
         slotTime:   body.slotTime   || null,
         startAt:    startIso        || null,
         guests:     body.guests     || 1,
+        children:   requestedChildren,
         contact:    body.contact    || {},
         customerId: body.customerId || null,
         bookedForOther: !!body.bookedForOther,
@@ -957,6 +973,7 @@ async function handle(req, method, segs) {
             branchId,
             atIso:      startIso,
             guests:     requestedGuests,
+            children:   requestedChildren,
             membershipSubscriptionId: body.membershipSubscriptionId || null,
             walletUseInr:             Number(body.walletUseInr) || 0,
             couponCode:               body.couponCode  || null,
@@ -1214,9 +1231,10 @@ async function handle(req, method, segs) {
       }
       const { allocateJourney, suggestNextAvailableSlots } = await import('@/lib/scheduling');
       const rescheduleGuests = Math.max(1, Number(doc.guests) || 1);
-      const r = await allocateJourney({ therapySlugs, branchId: doc.branchId, startIso: newStart, excludeBookingId: bid, sessionMode, durationOverrides, guests: rescheduleGuests });
+      const rescheduleChildren = Math.max(0, Number(doc.children) || 0);
+      const r = await allocateJourney({ therapySlugs, branchId: doc.branchId, startIso: newStart, excludeBookingId: bid, sessionMode, durationOverrides, guests: rescheduleGuests, children: rescheduleChildren });
       if (!r.ok) {
-        const suggestions = await suggestNextAvailableSlots({ therapySlugs, branchId: doc.branchId, startIso: newStart, sessionMode, durationOverrides, guests: rescheduleGuests, limit: 5 }).catch(() => []);
+        const suggestions = await suggestNextAvailableSlots({ therapySlugs, branchId: doc.branchId, startIso: newStart, sessionMode, durationOverrides, guests: rescheduleGuests, children: rescheduleChildren, limit: 5 }).catch(() => []);
         return NextResponse.json({ error: 'slot_unavailable', reason: r.reason, suggestions }, { status: 409 });
       }
       await supabase.from('bookings').update({
