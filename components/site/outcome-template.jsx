@@ -4,7 +4,7 @@ import { useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowRight, ArrowUpRight, Check, Star, MessageCircle, ChevronDown,
-  Sparkles, Clock, Calendar,
+  Sparkles, Clock, Calendar, Gift,
 } from 'lucide-react';
 import { cn } from '@/components/ss/utils';
 import { TopNav, SiteFooter, StickyBookingBar, useRise } from './shell';
@@ -171,9 +171,14 @@ function Pricing({ outcome }) {
   return (
     <section className="py-24 md:py-32 bg-background">
       <div className="max-w-[1240px] mx-auto px-5 md:px-8">
-        <div className="max-w-[720px]">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-semibold">Choose your rhythm</div>
-          <h2 className="mt-3 font-serif text-[36px] md:text-[52px] leading-[1.02] tracking-tight text-balance">Simple, transparent pricing.</h2>
+        <div className="max-w-[720px] flex items-end justify-between gap-4 flex-wrap">
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-semibold">Choose your rhythm</div>
+            <h2 className="mt-3 font-serif text-[36px] md:text-[52px] leading-[1.02] tracking-tight text-balance">Simple, transparent pricing.</h2>
+          </div>
+          <Link href={`/gift/${outcome.slug}`} className="inline-flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground hover:text-foreground transition-colors">
+            <Gift className="h-3.5 w-3.5" /> Gift this experience instead
+          </Link>
         </div>
         <div className="mt-14 grid grid-cols-1 md:grid-cols-3 gap-4">
           {tiles.map((t, i) => (

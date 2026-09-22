@@ -7,7 +7,7 @@ import { useTheme } from 'next-themes';
 import { toast } from 'sonner';
 import {
   LayoutDashboard, Users, Calendar, CalendarOff, MessageSquareText, ClipboardList,
-  Waves, Sparkles, Gift, Package, IndianRupee, BarChart3, Megaphone, Ticket,
+  Waves, Sparkles, Gift, Package, Truck, IndianRupee, BarChart3, Megaphone, Ticket,
   FileText, BellDot, Bot, Settings, Search, Sun, Moon, LogOut,
   ChevronsLeft, ChevronsRight, Command, ChevronDown, User as UserIcon,
   CircleUser, Building2, MapPin, Check,
@@ -38,6 +38,7 @@ const NAV_GROUPS = [
       { href: '/admin/memberships', label: 'Memberships', icon: Sparkles },
       { href: '/admin/giftcards',   label: 'Gift cards',  icon: Gift },
       { href: '/admin/products',    label: 'Products',    icon: Package },
+      { href: '/admin/orders',      label: 'Orders',      icon: Truck },
       { href: '/admin/payments',    label: 'Payments',    icon: IndianRupee },
     ],
   },

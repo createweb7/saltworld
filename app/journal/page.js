@@ -12,13 +12,20 @@ export const metadata = {
 
 export const dynamic = 'force-dynamic';
 
-async function loadPublishedPosts() {
+const PAGE_SIZE = 15;
+
+async function loadPublishedPosts(page = 1) {
   try {
     const supabase = getSupabase();
-    const { data: rows } = await supabase.from('blog_posts').select('*').eq('status', 'published').order('created_at', { ascending: false }).limit(30);
-    return (rows || []).map((r) => ({ ...r.data, id: r.id, slug: r.slug, status: r.status, createdAt: r.created_at, updatedAt: r.updated_at }));
+    const from = (page - 1) * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    const { data: rows, count } = await supabase.from('blog_posts').select('*', { count: 'exact' }).eq('status', 'published').order('created_at', { ascending: false }).range(from, to);
+    return {
+      posts: (rows || []).map((r) => ({ ...r.data, id: r.id, slug: r.slug, status: r.status, createdAt: r.created_at, updatedAt: r.updated_at })),
+      total: count || 0,
+    };
   } catch {
-    return [];
+    return { posts: [], total: 0 };
   }
 }
 
@@ -31,8 +38,11 @@ function formatDate(iso) {
   }
 }
 
-export default async function JournalIndex() {
-  const posts = await loadPublishedPosts();
+export default async function JournalIndex({ searchParams }) {
+  const sp = await searchParams;
+  const page = Math.max(1, Number(sp?.page) || 1);
+  const { posts, total } = await loadPublishedPosts(page);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="min-h-screen bg-background">
@@ -121,6 +131,26 @@ export default async function JournalIndex() {
                 </article>
               ))}
             </div>
+          )}
+
+          {totalPages > 1 && (
+            <nav className="mt-14 md:mt-20 flex items-center justify-center gap-2" aria-label="Journal pagination">
+              <Link
+                href={page > 1 ? `/journal?page=${page - 1}` : '#'}
+                aria-disabled={page <= 1}
+                className={`h-9 px-4 rounded-full border border-border text-[13px] font-medium inline-flex items-center gap-1 transition-colors ${page <= 1 ? 'pointer-events-none opacity-40' : 'hover:bg-muted'}`}
+              >
+                Previous
+              </Link>
+              <span className="text-[12.5px] text-muted-foreground px-2">Page {page} of {totalPages}</span>
+              <Link
+                href={page < totalPages ? `/journal?page=${page + 1}` : '#'}
+                aria-disabled={page >= totalPages}
+                className={`h-9 px-4 rounded-full border border-border text-[13px] font-medium inline-flex items-center gap-1 transition-colors ${page >= totalPages ? 'pointer-events-none opacity-40' : 'hover:bg-muted'}`}
+              >
+                Next
+              </Link>
+            </nav>
           )}
         </div>
       </section>

@@ -34,8 +34,12 @@ export default function CustomerLoginPage() {
   const [loading, setLoading] = useState(false);
   const [devOtp, setDevOtp] = useState(null);
 
+  const [nextPath, setNextPath] = useState('/account');
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const next = params.get('next');
+    if (next && next.startsWith('/') && !next.startsWith('//')) setNextPath(next);
     const error = params.get('error');
     if (!error) return;
     const messages = {
@@ -77,7 +81,7 @@ export default function CustomerLoginPage() {
       const j = await res.json();
       if (!res.ok || !j.ok) throw new Error(j.error || 'failed');
       toast.success('Signed in');
-      window.location.assign('/account');
+      window.location.assign(nextPath);
     } catch (err) {
       toast.error(
         err.message === 'wrong_otp' ? 'Wrong code. Try again.' :
@@ -89,7 +93,7 @@ export default function CustomerLoginPage() {
   };
 
   const startGoogle = () => {
-    window.location.href = '/api/customer/auth/google-start';
+    window.location.href = `/api/customer/auth/google-start?return=${encodeURIComponent(nextPath)}`;
   };
 
   return (

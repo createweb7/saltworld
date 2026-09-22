@@ -8,6 +8,7 @@ import {
 import { cn } from '@/components/ss/utils';
 import AuthWidget from '@/components/site/auth-widget';
 import CartWidget from '@/components/site/cart-widget';
+import ProductCartWidget from '@/components/site/product-cart-widget';
 
 /* ------------------------------------------------------------------ */
 /* Announcement Bar — dismissible, persists in localStorage           */
@@ -160,6 +161,7 @@ const NAV_LINKS = [
   { href: '/outcomes',    label: 'Outcomes' },
   { href: '/therapies',   label: 'Therapies' },
   { href: '/memberships', label: 'Memberships' },
+  { href: '/products',    label: 'Shop' },
   { href: '/journal',     label: 'Journal' },
 ];
 
@@ -194,6 +196,7 @@ export function TopNav({ transparentHero = true }) {
             <Link href="/gifts" className={cn('text-[13.5px] font-medium transition-colors',
               inverted ? 'text-white/80 hover:text-white' : 'text-foreground/70 hover:text-foreground'
             )}>Gift</Link>
+            <ProductCartWidget inverted={inverted} />
             <CartWidget inverted={inverted} />
             <AuthWidget inverted={inverted} />
             <Link href="/book" className={cn(
@@ -233,6 +236,7 @@ export function TopNav({ transparentHero = true }) {
                 className="font-serif text-2xl tracking-tight text-foreground py-2">{l.label}</Link>
             ))}
             <Link href="/gifts" onClick={() => setOpen(false)} className="font-serif text-2xl tracking-tight text-foreground py-2">Gifts</Link>
+            <Link href="/cart" onClick={() => setOpen(false)} className="font-serif text-2xl tracking-tight text-foreground py-2">Cart</Link>
             <Link href="/for-teams" onClick={() => setOpen(false)} className="font-serif text-2xl tracking-tight text-foreground py-2">For teams</Link>
           </nav>
           <div className="mt-auto space-y-2">
@@ -273,7 +277,7 @@ export function SiteFooter() {
         {[
           { h: 'Outcomes', l: [['Stress Relief','/outcomes/stress-relief'],['Sleep & Clarity','/outcomes/sleep-mental-clarity'],['Performance & Recovery','/outcomes/muscle-recovery'],['Couple Activities','/outcomes/couple-activities'],['Skin & Glow','/outcomes/skin-rejuvenation']] },
           { h: 'Therapies', l: [['All therapies','/therapies'],['Memberships','/memberships'],['Gift cards','/gifts'],['Book a session','/book']] },
-          { h: 'Company', l: [['Journal','/journal'],['Gifts','/gifts'],['For teams','/for-teams'],['Contact','/contact']] },
+          { h: 'Company', l: [['Journal','/journal'],['Shop','/products'],['Gifts','/gifts'],['For teams','/for-teams'],['Contact','/contact']] },
         ].map((col) => (
           <div key={col.h} className="md:col-span-2">
             <div className="text-[11px] uppercase tracking-[0.18em] text-foreground font-semibold">{col.h}</div>

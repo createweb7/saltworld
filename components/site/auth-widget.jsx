@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { User, LogOut, Wallet, ClipboardList, Users, LogIn, ChevronDown } from 'lucide-react';
+import { User, LogOut, Wallet, ClipboardList, Users, LogIn, ChevronDown, Package, Gift } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function AuthWidget({ inverted = false }) {
@@ -45,8 +45,12 @@ export default function AuthWidget({ inverted = false }) {
   };
 
   if (!loaded) {
-    // Reserve space to avoid layout shift while /me resolves.
-    return <span className="w-16 h-8 opacity-0" aria-hidden />;
+    return (
+      <span className="inline-flex items-center gap-2 h-9 pl-1 pr-2.5" aria-hidden>
+        <span className={cn('h-7 w-7 rounded-full animate-pulse', inverted ? 'bg-white/20' : 'bg-muted')} />
+        <span className={cn('hidden lg:block h-3 w-16 rounded-full animate-pulse', inverted ? 'bg-white/20' : 'bg-muted')} />
+      </span>
+    );
   }
 
   if (!customer) {
@@ -97,6 +101,8 @@ export default function AuthWidget({ inverted = false }) {
           </div>
           <MenuItem href="/account"             icon={User}         label="My account" />
           <MenuItem href="/account/memberships" icon={ClipboardList} label="Memberships" />
+          <MenuItem href="/account/orders"      icon={Package}       label="My orders" />
+          <MenuItem href="/account/gifts"       icon={Gift}          label="Gifts sent" />
           <MenuItem href="/account/wallet"      icon={Wallet}        label="Wallet & credits" />
           <MenuItem href="/account/referrals"   icon={Users}         label="Refer friends" />
           <div className="border-t border-border">

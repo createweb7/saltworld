@@ -89,3 +89,7 @@ credentials.json
 *.key
 .credentials
 .env*
+
+# Local-disk fallback for admin/product image uploads when S3 isn't
+# configured (see lib/s3.js) — user-generated media, not repo content.
+public/uploads/

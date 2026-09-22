@@ -1,8 +1,11 @@
 'use client';
 
-import { getDesign, formatINR } from '@/lib/gift-designs';
+import { Cake, HeartHandshake, HandHeart, PartyPopper, Sparkles, Briefcase, Gift } from 'lucide-react';
+import { getDesign, getOccasionIcon, formatINR } from '@/lib/gift-designs';
 import { Logomark } from '@/components/site/shell';
 import { cn } from '@/components/ss/utils';
+
+const OCCASION_ICONS = { Cake, HeartHandshake, HandHeart, PartyPopper, Sparkles, Briefcase };
 
 /**
  * The single visual for a Salt World gift card. Used everywhere:
@@ -11,7 +14,7 @@ import { cn } from '@/components/ss/utils';
  * - Recipient redemption page
  * - Emails (once wired)
  *
- * Props: designId, amount, from, to, message, code, occasion, size ('sm' | 'md' | 'lg')
+ * Props: designId, amount, from, to, message, code, occasion, experienceTitle, includesLabel, size ('sm' | 'md' | 'lg')
  */
 export default function GiftCardPreview({
   designId = 'halite',
@@ -21,11 +24,14 @@ export default function GiftCardPreview({
   message = '',
   code = '',
   occasion = '',
+  experienceTitle = '',
+  includesLabel = '',
   size = 'md',
   className,
 }) {
   const d = getDesign(designId);
   const inverted = d.palette.ink === '#F5F1EA' || d.palette.ink === '#FFFFFF';
+  const OccasionIcon = OCCASION_ICONS[getOccasionIcon(occasion)] || Gift;
 
   const dims = {
     sm: { w: 'w-full max-w-[300px]', p: 'p-5',  headline: 'text-lg',  amt: 'text-2xl' },
@@ -46,6 +52,12 @@ export default function GiftCardPreview({
       {/* subtle overlay glow */}
       <div className="absolute -top-24 -right-24 h-64 w-64 rounded-full opacity-20 blur-3xl"
            style={{ background: d.palette.accent }} />
+      {/* Occasion watermark — large, faint, echoes the badge icon */}
+      <OccasionIcon
+        className="absolute -bottom-6 -right-6 opacity-[0.09] pointer-events-none"
+        style={{ color: d.palette.ink, width: size === 'lg' ? 140 : size === 'md' ? 110 : 84, height: size === 'lg' ? 140 : size === 'md' ? 110 : 84 }}
+        strokeWidth={1.2}
+      />
 
       <div className={cn('relative h-full w-full flex flex-col justify-between', dims.p)}>
         <div className="flex items-start justify-between">
@@ -56,20 +68,30 @@ export default function GiftCardPreview({
             </div>
           </div>
           <div
-            className="text-[10px] uppercase tracking-[0.22em] font-semibold px-2.5 py-1 rounded-full"
+            className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.22em] font-semibold px-2.5 py-1 rounded-full"
             style={{ background: 'rgba(255,255,255,0.15)', color: d.palette.ink }}
           >
+            <OccasionIcon className="h-3 w-3" strokeWidth={2} />
             {occasion || 'Gift Card'}
           </div>
         </div>
 
         <div>
           <div className="text-[10px] uppercase tracking-[0.28em] mb-1" style={{ color: d.palette.subInk }}>
-            Value
+            {experienceTitle ? 'Gift of' : 'Value'}
           </div>
-          <div className={cn('font-serif tracking-tight', dims.amt)}>
-            {formatINR(Number(amount) || 0)}
-          </div>
+          {experienceTitle ? (
+            <>
+              <div className={cn('font-serif tracking-tight leading-tight', dims.headline)}>{experienceTitle}</div>
+              {includesLabel && (
+                <div className="mt-1 text-[11px]" style={{ color: d.palette.subInk }}>Includes {includesLabel}</div>
+              )}
+            </>
+          ) : (
+            <div className={cn('font-serif tracking-tight', dims.amt)}>
+              {formatINR(Number(amount) || 0)}
+            </div>
+          )}
           {(to || from) && (
             <div className="mt-3 text-[12px] leading-5" style={{ color: d.palette.subInk }}>
               {to && <div>To — <span className="font-medium" style={{ color: d.palette.ink }}>{to}</span></div>}

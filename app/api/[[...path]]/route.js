@@ -1274,6 +1274,262 @@ async function handle(req, method, segs) {
     return NextResponse.json({ blocks });
   }
 
+  // ------- Products (public storefront catalog) -------
+  if (segs[0] === 'products' && method === 'GET') {
+    const { toProduct } = await import('@/lib/db-mappers');
+    if (segs.length === 1) {
+      const u = new URL(req.url);
+      const categoryId = u.searchParams.get('categoryId');
+      let query = supabase.from('products').select('*').eq('active', true).order('created_at', { ascending: true });
+      if (categoryId) query = query.eq('category_id', categoryId);
+      const { data: rows } = await query;
+      return NextResponse.json((rows || []).map(toProduct));
+    }
+    // Detail by slug (stored in data.slug — `products` has no slug column).
+    const slugOrId = segs[1];
+    let row = null;
+    if (UUID_RE.test(slugOrId)) {
+      ({ data: row } = await supabase.from('products').select('*').eq('id', slugOrId).eq('active', true).maybeSingle());
+    } else {
+      ({ data: row } = await supabase.from('products').select('*').eq('data->>slug', slugOrId).eq('active', true).maybeSingle());
+    }
+    if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+    return NextResponse.json(toProduct(row));
+  }
+
+  if (segs[0] === 'product-categories' && method === 'GET') {
+    const { toProductCategory } = await import('@/lib/db-mappers');
+    const { data: rows } = await supabase.from('product_categories').select('*').eq('active', true).order('created_at', { ascending: true });
+    return NextResponse.json((rows || []).map(toProductCategory));
+  }
+
+  // ------- Orders (product checkout) -------
+  if (segs[0] === 'orders') {
+    const { toOrder } = await import('@/lib/db-mappers');
+    const { getCurrentCustomer } = await import('@/lib/customer-auth');
+
+    // Signed-in customer's own order history — mirrors GET /api/bookings/mine.
+    if (segs[1] === 'mine' && method === 'GET') {
+      const customer = await getCurrentCustomer();
+      if (!customer) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+      const { data: rows } = await supabase.from('orders').select('*').eq('customer_id', customer.id).order('created_at', { ascending: false });
+      return NextResponse.json((rows || []).map(toOrder));
+    }
+
+    if (segs.length === 1 && method === 'POST') {
+      const customer = await getCurrentCustomer();
+      if (!customer) return NextResponse.json({ error: 'login_required' }, { status: 401 });
+
+      const body = await req.json().catch(() => ({}));
+      const items = Array.isArray(body.items) ? body.items : [];
+      if (items.length === 0) return NextResponse.json({ error: 'cart_empty' }, { status: 400 });
+      const shippingAddress = body.shippingAddress || {};
+      if (!shippingAddress.line1 || !shippingAddress.city || !shippingAddress.pincode) {
+        return NextResponse.json({ error: 'shipping_address_required' }, { status: 400 });
+      }
+
+      // Price and validate stock server-side — never trust client-sent prices.
+      const productIds = items.map((it) => it.productId).filter(Boolean);
+      const { data: productRows } = await supabase.from('products').select('*').in('id', productIds).eq('active', true);
+      const byId = Object.fromEntries((productRows || []).map((r) => [r.id, r]));
+      let subtotal = 0;
+      const lineItems = [];
+      for (const it of items) {
+        const p = byId[it.productId];
+        const qty = Math.max(1, Number(it.qty) || 1);
+        if (!p) return NextResponse.json({ error: 'product_unavailable', meta: { productId: it.productId } }, { status: 400 });
+        if (Number(p.stock) < qty) {
+          return NextResponse.json({ error: 'out_of_stock', message: `${p.name} — only ${p.stock} left`, meta: { productId: p.id, stock: p.stock } }, { status: 409 });
+        }
+        const price = Number(p.price) || 0;
+        subtotal += price * qty;
+        lineItems.push({ productId: p.id, name: p.name, price, qty });
+      }
+
+      const now = new Date();
+      const yy = String(now.getFullYear()).slice(2);
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+      const ref = `ORD-${yy}${mm}-${rand}`;
+      const id = randomUUID();
+      const discount = 0;
+      const shippingFee = 0; // free shipping for now — see route.js "Orders" section comment
+      const total = subtotal - discount + shippingFee;
+
+      const { error: orderInsertErr } = await supabase.from('orders').insert({
+        id, ref, customer_id: customer.id,
+        contact_name: body.contact?.name || customer.name || '',
+        contact_phone: body.contact?.phone || customer.phone || '',
+        contact_email: body.contact?.email || customer.email || '',
+        shipping_address: shippingAddress,
+        subtotal, discount, total, status: 'payment_pending',
+        data: {},
+        created_at: now.toISOString(), updated_at: now.toISOString(),
+      });
+      if (orderInsertErr) {
+        console.error('order insert failed', orderInsertErr);
+        return NextResponse.json({ error: 'order_create_failed' }, { status: 500 });
+      }
+      for (const li of lineItems) {
+        const { error: itemErr } = await supabase.from('order_items').insert({
+          id: randomUUID(), order_id: id, product_id: li.productId, name: li.name, price: li.price, qty: li.qty,
+          data: {}, created_at: now.toISOString(),
+        });
+        if (itemErr) {
+          console.error('order_items insert failed', itemErr);
+          await supabase.from('orders').delete().eq('id', id);
+          return NextResponse.json({ error: 'order_create_failed' }, { status: 500 });
+        }
+      }
+      // Reserve stock immediately so two customers can't both buy the last unit
+      // while this one is still on the payment screen. Only runs once the
+      // order + its items are confirmed persisted above.
+      for (const li of lineItems) {
+        await supabase.from('products').update({ stock: byId[li.productId].stock - li.qty }).eq('id', li.productId);
+      }
+
+      const { data: row } = await supabase.from('orders').select('*').eq('id', id).single();
+      const order = toOrder(row);
+      order.items = lineItems;
+      return NextResponse.json(order);
+    }
+
+    const oid = segs[1];
+    if (oid && segs.length === 2 && method === 'GET') {
+      const { data: row } = await supabase.from('orders').select('*').eq('id', oid).maybeSingle();
+      if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      const customer = await getCurrentCustomer();
+      if (!customer || customer.id !== row.customer_id) {
+        return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+      }
+      const { data: itemRows } = await supabase.from('order_items').select('*').eq('order_id', oid).order('created_at', { ascending: true });
+      const order = toOrder(row);
+      order.items = (itemRows || []).map((it) => ({ productId: it.product_id, name: it.name, price: Number(it.price), qty: it.qty }));
+      return NextResponse.json(order);
+    }
+
+    // Cancel a still-unpaid order — releases the reserved stock, same shape as
+    // the booking cart's "Remove" affordance.
+    if (oid && segs[2] === 'cancel' && method === 'POST') {
+      const customer = await getCurrentCustomer();
+      if (!customer) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+      const { data: row } = await supabase.from('orders').select('*').eq('id', oid).maybeSingle();
+      if (!row || row.customer_id !== customer.id) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      if (row.status !== 'payment_pending') return NextResponse.json({ error: 'order_not_cancellable' }, { status: 409 });
+      const { data: itemRows } = await supabase.from('order_items').select('*').eq('order_id', oid);
+      for (const it of itemRows || []) {
+        const { data: p } = await supabase.from('products').select('stock').eq('id', it.product_id).maybeSingle();
+        if (p) await supabase.from('products').update({ stock: p.stock + it.qty }).eq('id', it.product_id);
+      }
+      await supabase.from('orders').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', oid);
+      return NextResponse.json({ ok: true });
+    }
+  }
+
+  // ------- Gifts (experience or cash-amount gift cards, self-serve purchase) -------
+  if (segs[0] === 'gifts') {
+    const { toGiftcard } = await import('@/lib/db-mappers');
+    const { getCurrentCustomer } = await import('@/lib/customer-auth');
+    const genGiftCode = () => {
+      const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      const pick = (n) => Array.from({ length: n }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+      return `SW-${pick(4)}-${pick(4)}`;
+    };
+    const { MIN_GIFT_AMOUNT: MIN_CASH_AMOUNT } = await import('@/lib/gift-designs');
+
+    if (segs[1] === 'mine' && method === 'GET') {
+      const customer = await getCurrentCustomer();
+      if (!customer) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+      const { data: rows } = await supabase.from('giftcards').select('*').eq('data->>purchasedByCustomerId', customer.id).order('created_at', { ascending: false });
+      return NextResponse.json((rows || []).map(toGiftcard));
+    }
+
+    if (segs.length === 1 && method === 'POST') {
+      const customer = await getCurrentCustomer();
+      if (!customer) return NextResponse.json({ error: 'login_required' }, { status: 401 });
+      const body = await req.json().catch(() => ({}));
+      const kind = body.kind === 'cash' ? 'cash' : 'experience';
+      const from = { name: body.from?.name || customer.name || '', phone: body.from?.phone || customer.phone || '', email: body.from?.email || customer.email || '' };
+      const to = { name: body.to?.name || '', phone: body.to?.phone || '', email: body.to?.email || '' };
+      if (!from.name) return NextResponse.json({ error: 'sender_name_required' }, { status: 400 });
+
+      let amount, extra = {};
+      if (kind === 'experience') {
+        const { getOutcome } = await import('@/lib/outcomes');
+        const outcome = getOutcome(body.outcomeSlug);
+        if (!outcome) return NextResponse.json({ error: 'invalid_experience' }, { status: 400 });
+        // Same "pick one or several therapies" picker as /book — only allow
+        // slugs that actually belong to this outcome's protocol, and price
+        // it exactly like a real booking would be (same engine, same rules,
+        // e.g. shared-capacity guest pricing for Salt Cave).
+        const allowedSlugs = new Set((outcome.protocol?.therapies || []).map((t) => t.slug));
+        const requestedSlugs = Array.isArray(body.therapies) ? body.therapies.filter((s) => allowedSlugs.has(s)) : [];
+        if (requestedSlugs.length === 0) return NextResponse.json({ error: 'therapies_required' }, { status: 400 });
+        const guests = Math.max(1, Math.min(2, Number(body.guests) || 1));
+        const { computeQuote } = await import('@/lib/pricing');
+        const quote = await computeQuote({ therapies: requestedSlugs.map((slug) => ({ slug })), guests });
+        amount = Math.round(quote.payableInr);
+        if (!amount) return NextResponse.json({ error: 'experience_not_giftable' }, { status: 400 });
+        extra = {
+          outcomeSlug: outcome.slug, outcomeTitle: outcome.title || outcome.name || outcome.slug,
+          therapies: quote.lines.map((l) => ({ slug: l.slug, name: l.name })),
+          guests,
+        };
+      } else {
+        amount = Math.round(Number(body.amount));
+        if (!Number.isFinite(amount) || amount < MIN_CASH_AMOUNT) {
+          return NextResponse.json({ error: 'amount_too_low', message: `Minimum gift amount is ₹${MIN_CASH_AMOUNT}.`, meta: { min: MIN_CASH_AMOUNT } }, { status: 400 });
+        }
+      }
+
+      const id = randomUUID();
+      const code = genGiftCode();
+      const pin = String(Math.floor(100000 + Math.random() * 900000));
+      const now = new Date();
+      const expiresAt = new Date(now); expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+      const row = {
+        id, code, pin, balance: amount, status: 'payment_pending',
+        claimed_by_customer_id: null, claimed_at: null, expires_at: expiresAt.toISOString(),
+        created_at: now.toISOString(), updated_at: now.toISOString(),
+        data: {
+          kind, amount, from, to, message: body.message || '', designId: body.designId || 'halite', occasion: body.occasion || '',
+          purchasedByCustomerId: customer.id, ...extra,
+        },
+      };
+      const { error } = await supabase.from('giftcards').insert(row);
+      if (error) { console.error('giftcard insert failed', error); return NextResponse.json({ error: 'gift_create_failed' }, { status: 500 }); }
+      return NextResponse.json(toGiftcard(row));
+    }
+
+    const gid = segs[1];
+    if (gid && segs.length === 2 && method === 'GET') {
+      const { data: row } = await supabase.from('giftcards').select('*').eq('id', gid).maybeSingle();
+      if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      const customer = await getCurrentCustomer();
+      if (!customer || customer.id !== row.data?.purchasedByCustomerId) {
+        return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+      }
+      return NextResponse.json(toGiftcard(row));
+    }
+
+    // Sender can add/update recipient details any time after purchase — "buy
+    // now, surprise them later" per the product brief.
+    if (gid && segs.length === 2 && method === 'PATCH') {
+      const customer = await getCurrentCustomer();
+      if (!customer) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+      const { data: row } = await supabase.from('giftcards').select('*').eq('id', gid).maybeSingle();
+      if (!row || row.data?.purchasedByCustomerId !== customer.id) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      const body = await req.json().catch(() => ({}));
+      const to = { ...(row.data?.to || {}), ...(body.to || {}) };
+      const message = body.message !== undefined ? body.message : row.data?.message;
+      await supabase.from('giftcards').update({
+        data: { ...row.data, to, message }, updated_at: new Date().toISOString(),
+      }).eq('id', gid);
+      const { data: after } = await supabase.from('giftcards').select('*').eq('id', gid).single();
+      return NextResponse.json(toGiftcard(after));
+    }
+  }
+
   // ------- Payments (Razorpay) -------
   if (segs[0] === 'payments') {
     // Public status check for the checkout button.
@@ -1286,25 +1542,43 @@ async function handle(req, method, segs) {
     // Create Razorpay order. Body: { bookingId, amountPaise, notes? }
     if (segs[1] === 'create-order' && method === 'POST') {
       const body = await req.json().catch(() => ({}));
-      const { bookingId, amountPaise, notes } = body;
-      if (!bookingId) return NextResponse.json({ error: 'bookingId_required' }, { status: 400 });
+      const { bookingId, orderId, giftCardId, amountPaise, notes } = body;
+      if (!bookingId && !orderId && !giftCardId) return NextResponse.json({ error: 'bookingId_required' }, { status: 400 });
       const amt = Number(amountPaise);
       if (!Number.isFinite(amt) || amt <= 0) {
         return NextResponse.json({ error: 'invalid_amount' }, { status: 400 });
       }
-      const { data: booking } = await supabase.from('bookings').select('id, ref, customer_id, status').eq('id', bookingId).maybeSingle();
-      if (!booking) return NextResponse.json({ error: 'booking_not_found' }, { status: 404 });
-      // Only ever open checkout against a booking that's still actually
-      // awaiting payment — blocks re-ordering against someone else's
-      // booking, and against a booking that's already paid, cancelled, or
-      // auto-expired (e.g. a stale "resume payment" tab reopened late).
-      if (booking.status !== 'payment_pending') {
-        return NextResponse.json({ error: 'booking_not_payable' }, { status: 409 });
+
+      let receiptRef, notFoundError, notPayableError, ownerCustomerId, table, matchId;
+      if (giftCardId) {
+        table = 'giftcards'; matchId = giftCardId;
+        const { data: g } = await supabase.from('giftcards').select('id, code, status, data').eq('id', giftCardId).maybeSingle();
+        if (!g) return NextResponse.json({ error: 'gift_not_found' }, { status: 404 });
+        if (g.status !== 'payment_pending') return NextResponse.json({ error: 'gift_not_payable' }, { status: 409 });
+        receiptRef = g.code; ownerCustomerId = g.data?.purchasedByCustomerId;
+      } else if (orderId) {
+        table = 'orders'; matchId = orderId;
+        const { data: o } = await supabase.from('orders').select('id, ref, customer_id, status, data').eq('id', orderId).maybeSingle();
+        if (!o) return NextResponse.json({ error: 'order_not_found' }, { status: 404 });
+        if (o.status !== 'payment_pending') return NextResponse.json({ error: 'order_not_payable' }, { status: 409 });
+        receiptRef = o.ref; ownerCustomerId = o.customer_id;
+      } else {
+        table = 'bookings'; matchId = bookingId;
+        const { data: booking } = await supabase.from('bookings').select('id, ref, customer_id, status').eq('id', bookingId).maybeSingle();
+        if (!booking) return NextResponse.json({ error: 'booking_not_found' }, { status: 404 });
+        // Only ever open checkout against a booking that's still actually
+        // awaiting payment — blocks re-ordering against someone else's
+        // booking, and against a booking that's already paid, cancelled, or
+        // auto-expired (e.g. a stale "resume payment" tab reopened late).
+        if (booking.status !== 'payment_pending') {
+          return NextResponse.json({ error: 'booking_not_payable' }, { status: 409 });
+        }
+        receiptRef = booking.ref; ownerCustomerId = booking.customer_id;
       }
-      if (booking.customer_id) {
+      if (ownerCustomerId) {
         const { getCurrentCustomer } = await import('@/lib/customer-auth');
         const customer = await getCurrentCustomer();
-        if (!customer || customer.id !== booking.customer_id) {
+        if (!customer || customer.id !== ownerCustomerId) {
           return NextResponse.json({ error: 'forbidden' }, { status: 403 });
         }
       }
@@ -1313,36 +1587,127 @@ async function handle(req, method, segs) {
         return NextResponse.json({ error: 'razorpay_not_configured' }, { status: 503 });
       }
 
-      let order;
+      let rpOrder;
       try {
-        order = await rpCreateOrder({
+        rpOrder = await rpCreateOrder({
           amountPaise: Math.round(amt),
           currency: 'INR',
-          receipt: booking.ref || bookingId.slice(0, 24),
-          notes: { bookingId, ref: booking.ref, ...(notes || {}) },
+          receipt: receiptRef || matchId.slice(0, 24),
+          notes: { [giftCardId ? 'giftCardId' : orderId ? 'orderId' : 'bookingId']: matchId, ref: receiptRef, ...(notes || {}) },
         });
       } catch (e) {
         console.error('razorpay order create failed', e);
         return NextResponse.json({ error: 'razorpay_error', details: String(e?.message || e) }, { status: 502 });
       }
 
-      await supabase.from('booking_payments').insert({
-        id: randomUUID(), booking_id: bookingId, provider: 'razorpay', provider_order_id: order.id,
-        amount: order.amount, status: 'created', created_at: new Date().toISOString(),
-        raw: { currency: order.currency },
-      });
+      if (giftCardId) {
+        const { data: cur } = await supabase.from('giftcards').select('data').eq('id', giftCardId).single();
+        await supabase.from('giftcards').update({
+          data: { ...cur?.data, paymentAttempt: { razorpayOrderId: rpOrder.id, amount: rpOrder.amount, status: 'created', createdAt: new Date().toISOString() } },
+        }).eq('id', giftCardId);
+      } else if (orderId) {
+        // No dedicated `order_payments` audit table (kept schema-light) —
+        // the in-flight Razorpay order id lives on orders.data, checked
+        // back against on verify-signature below.
+        const { data: cur } = await supabase.from('orders').select('data').eq('id', orderId).single();
+        await supabase.from('orders').update({
+          data: { ...cur?.data, paymentAttempt: { razorpayOrderId: rpOrder.id, amount: rpOrder.amount, status: 'created', createdAt: new Date().toISOString() } },
+        }).eq('id', orderId);
+      } else {
+        await supabase.from('booking_payments').insert({
+          id: randomUUID(), booking_id: bookingId, provider: 'razorpay', provider_order_id: rpOrder.id,
+          amount: rpOrder.amount, status: 'created', created_at: new Date().toISOString(),
+          raw: { currency: rpOrder.currency },
+        });
+      }
 
       const keyId = await getPublicKeyId();
-      return NextResponse.json({ order: { id: order.id, amount: order.amount, currency: order.currency }, keyId });
+      return NextResponse.json({ order: { id: rpOrder.id, amount: rpOrder.amount, currency: rpOrder.currency }, keyId });
     }
 
     // Verify signature after Checkout success
     if (segs[1] === 'verify-signature' && method === 'POST') {
       const body = await req.json().catch(() => ({}));
-      const { bookingId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = body;
-      if (!bookingId || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      const { bookingId, orderId, giftCardId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = body;
+      if ((!bookingId && !orderId && !giftCardId) || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
         return NextResponse.json({ success: false, error: 'missing_fields' }, { status: 400 });
       }
+      const nowIso = new Date().toISOString();
+
+      if (giftCardId) {
+        const { data: giftRow } = await supabase.from('giftcards').select('*').eq('id', giftCardId).maybeSingle();
+        const attempt = giftRow?.data?.paymentAttempt;
+        if (!giftRow || !attempt || attempt.razorpayOrderId !== razorpay_order_id) {
+          return NextResponse.json({ success: false, error: 'payment_record_not_found' }, { status: 404 });
+        }
+        const valid = await rpVerifySignature({ orderId: razorpay_order_id, paymentId: razorpay_payment_id, signature: razorpay_signature });
+        if (!valid) {
+          await supabase.from('giftcards').update({
+            data: { ...giftRow.data, paymentAttempt: { ...attempt, status: 'signature_failed', verifiedAt: nowIso } },
+          }).eq('id', giftCardId);
+          return NextResponse.json({ success: false, error: 'signature_mismatch' }, { status: 400 });
+        }
+        await supabase.from('giftcards').update({
+          status: 'active',
+          data: { ...giftRow.data, paymentAttempt: { ...attempt, status: 'verified', verifiedAt: nowIso }, payment: { method: 'razorpay', paymentId: razorpay_payment_id, verifiedAt: nowIso } },
+          updated_at: nowIso,
+        }).eq('id', giftCardId);
+
+        const gd = giftRow.data || {};
+        const giftTitle = gd.kind === 'experience'
+          ? `${gd.outcomeTitle} — ${(gd.therapies || []).map((t) => t.name).join(' + ')}`
+          : 'Gift card';
+        import('@/lib/notifications').then(({ emit, NOTIFY_EVENTS }) =>
+          emit(NOTIFY_EVENTS.GIFT_CARD_PURCHASED, {
+            to: { email: gd.from?.email, phone: gd.from?.phone },
+            customerId: gd.purchasedByCustomerId || null,
+            context: {
+              name: gd.from?.name || 'there', toName: gd.to?.name || '',
+              giftTitle, amount: giftRow.balance, code: giftRow.code, pin: giftRow.pin, giftId: giftCardId,
+              expiresAt: giftRow.expires_at ? new Date(giftRow.expires_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '',
+            },
+          })
+        ).catch(() => {});
+
+        return NextResponse.json({ success: true });
+      }
+
+      if (orderId) {
+        const { data: orderRow } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+        const attempt = orderRow?.data?.paymentAttempt;
+        if (!orderRow || !attempt || attempt.razorpayOrderId !== razorpay_order_id) {
+          return NextResponse.json({ success: false, error: 'payment_record_not_found' }, { status: 404 });
+        }
+        const valid = await rpVerifySignature({ orderId: razorpay_order_id, paymentId: razorpay_payment_id, signature: razorpay_signature });
+        if (!valid) {
+          await supabase.from('orders').update({
+            data: { ...orderRow.data, paymentAttempt: { ...attempt, status: 'signature_failed', verifiedAt: nowIso } },
+          }).eq('id', orderId);
+          return NextResponse.json({ success: false, error: 'signature_mismatch' }, { status: 400 });
+        }
+        await supabase.from('orders').update({
+          status: 'paid',
+          payment: { method: 'razorpay', paymentId: razorpay_payment_id, verifiedAt: nowIso },
+          data: { ...orderRow.data, paymentAttempt: { ...attempt, status: 'verified', verifiedAt: nowIso } },
+          updated_at: nowIso,
+        }).eq('id', orderId);
+
+        const { data: orderItemRows } = await supabase.from('order_items').select('name, price, qty').eq('order_id', orderId);
+        import('@/lib/notifications').then(({ emit, NOTIFY_EVENTS }) =>
+          emit(NOTIFY_EVENTS.ORDER_CONFIRMATION, {
+            to: { email: orderRow.contact_email, phone: orderRow.contact_phone },
+            customerId: orderRow.customer_id,
+            context: {
+              name: orderRow.contact_name || 'there', ref: orderRow.ref, total: orderRow.total,
+              items: (orderItemRows || []).map((it) => ({ name: it.name, price: Number(it.price), qty: it.qty })),
+              orderId,
+            },
+          })
+        ).catch(() => {});
+
+        return NextResponse.json({ success: true });
+      }
+
       const { data: paymentRecord } = await supabase.from('booking_payments').select('*')
         .eq('booking_id', bookingId).eq('provider_order_id', razorpay_order_id).maybeSingle();
       if (!paymentRecord) {
@@ -1353,7 +1718,6 @@ async function handle(req, method, segs) {
         paymentId: razorpay_payment_id,
         signature: razorpay_signature,
       });
-      const nowIso = new Date().toISOString();
       if (!valid) {
         await supabase.from('booking_payments').update({
           status: 'signature_failed', provider_payment_id: razorpay_payment_id,
