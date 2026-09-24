@@ -119,7 +119,12 @@ export default function MembershipsClient({ user }) {
 
   const subColumns = [
     { key: 'planName', label: 'Plan', render: (r) => <div className="font-medium">{r.planName || r.planSnapshot?.name}</div> },
-    { key: 'customerId', label: 'Customer', render: (r) => <span className="font-mono text-[11px] text-muted-foreground">{(r.customerId || '').slice(0, 8)}\u2026</span> },
+    { key: 'customerId', label: 'Customer', render: (r) => (
+      <div>
+        <div className="text-[12.5px]">{r.customerEmail || r.customerName || '\u2014'}</div>
+        <div className="font-mono text-[11px] text-muted-foreground">{(r.customerId || '').slice(0, 8)}\u2026</div>
+      </div>
+    ) },
     { key: 'status', label: 'Status', render: (r) => <StatusChip active={r.status === 'active'} label={r.status} /> },
     { key: 'validity', label: 'Validity', render: (r) => (
       <div className="text-[12px]">

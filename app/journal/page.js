@@ -4,7 +4,7 @@ import { TopNav, SiteFooter, StickyBookingBar } from '@/components/site/shell';
 import { getSupabase } from '@/lib/supabase';
 
 export const metadata = {
-  title: 'Journal · Salt World',
+  title: 'Blog · Salt World',
   description:
     'Editorial notes on sleep, stress, longevity, floatation, salt therapy and the science of feeling better — from the Salt World team in Bengaluru.',
   alternates: { canonical: `${process.env.NEXT_PUBLIC_BASE_URL || ''}/journal` },
@@ -50,7 +50,7 @@ export default async function JournalIndex({ searchParams }) {
 
       <section className="pt-32 md:pt-40 pb-14 md:pb-16 border-b border-border">
         <div className="max-w-[1240px] mx-auto px-5 md:px-8">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-semibold">The Salt World Journal</div>
+          <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-semibold">The Salt World Blog</div>
           <h1 className="mt-3 font-serif text-[44px] md:text-[76px] leading-[1.02] tracking-tight text-balance max-w-[880px]">
             Notes on <span className="italic">sleep, stress, and feeling human again.</span>
           </h1>
@@ -70,7 +70,7 @@ export default async function JournalIndex({ searchParams }) {
                 First issue coming soon.
               </h3>
               <p className="mt-3 text-[14.5px] leading-[1.6] text-muted-foreground max-w-[520px] mx-auto">
-                We’re working on the launch of the Salt World Journal — essays on floatation, halotherapy,
+                We’re working on the launch of the Salt World Blog — essays on floatation, halotherapy,
                 circadian rhythm, and the science of stress. Join the letter to be first to read.
               </p>
               <form className="mt-7 max-w-md mx-auto flex gap-2" action="/api/leads" method="post">
@@ -82,7 +82,7 @@ export default async function JournalIndex({ searchParams }) {
                   className="flex-1 h-11 px-4 rounded-full border border-border bg-background text-[14px] focus:outline-none focus:ring-2 focus:ring-brand/40"
                 />
                 <input type="hidden" name="source" value="journal_notify" />
-                <input type="hidden" name="name" value="Journal subscriber" />
+                <input type="hidden" name="name" value="Blog subscriber" />
                 <button className="h-11 px-5 rounded-full bg-foreground text-background text-[14px] font-semibold">
                   Notify me
                 </button>
@@ -134,7 +134,7 @@ export default async function JournalIndex({ searchParams }) {
           )}
 
           {totalPages > 1 && (
-            <nav className="mt-14 md:mt-20 flex items-center justify-center gap-2" aria-label="Journal pagination">
+            <nav className="mt-14 md:mt-20 flex items-center justify-center gap-2" aria-label="Blog pagination">
               <Link
                 href={page > 1 ? `/journal?page=${page - 1}` : '#'}
                 aria-disabled={page <= 1}

@@ -46,7 +46,7 @@ export default function CmsClient({ user }) {
         <div className="mb-4">
           <Tabs items={[
             { key: 'pages',      label: 'Pages',      count: pages.data?.length },
-            { key: 'blog',       label: 'Journal',    count: blog.data?.length },
+            { key: 'blog',       label: 'Blog',       count: blog.data?.length },
             { key: 'mini-blog',  label: 'Mini-blogs', count: miniBlog.data?.length },
             { key: 'media',      label: 'Media library', count: media.data?.length },
           ]} active={tab} onChange={setTab} />
@@ -153,7 +153,7 @@ function BlogEditor({ initial, onClose, onSaved }) {
     finally { setSaving(false); }
   };
   return (
-    <Drawer open onClose={onClose} eyebrow="Journal" title={isEdit ? `Edit “${initial.title}”` : 'New journal post'} wide
+    <Drawer open onClose={onClose} eyebrow="Blog" title={isEdit ? `Edit “${initial.title}”` : 'New blog post'} wide
       footer={<div className="flex justify-end gap-2"><GhostBtn onClick={onClose}>Cancel</GhostBtn><PrimaryBtn onClick={save} disabled={saving || !form.title}>{saving ? 'Saving…' : 'Save'}</PrimaryBtn></div>}
     >
       <div className="space-y-3">

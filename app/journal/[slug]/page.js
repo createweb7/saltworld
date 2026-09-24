@@ -20,8 +20,8 @@ async function loadPost(slug) {
 export async function generateMetadata({ params }) {
   const { slug } = await params;
   const p = await loadPost(slug);
-  if (!p) return { title: 'Not found · Salt World Journal' };
-  const title = `${p.title} · Salt World Journal`;
+  if (!p) return { title: 'Not found · Salt World Blog' };
+  const title = `${p.title} · Salt World Blog`;
   const description = p.excerpt || p.title;
   const url = `${process.env.NEXT_PUBLIC_BASE_URL || ''}/journal/${slug}`;
   return {

@@ -3,28 +3,21 @@
 // Header auth affordance — shows "Sign in" when signed-out, and an avatar +
 // dropdown (My account · Memberships · Wallet · Refer · Sign out) when signed in.
 //
-// Fetches /api/customer/me once. Small, stateless, works in both dark (hero)
-// and light nav variants via the `inverted` prop.
+// Customer identity comes from CustomerProvider (root layout reads the
+// session cookie server-side), so it's correct on first paint — no
+// client-side fetch/loading flash. Works in both dark (hero) and light nav
+// variants via the `inverted` prop.
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { User, LogOut, Wallet, ClipboardList, Users, LogIn, ChevronDown, Package, Gift } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useCustomer } from '@/components/site/customer-context';
 
 export default function AuthWidget({ inverted = false }) {
-  const [customer, setCustomer] = useState(null);
-  const [loaded, setLoaded] = useState(false);
+  const customer = useCustomer();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/customer/me')
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => { if (!cancelled) { setCustomer(d?.customer || null); setLoaded(true); } })
-      .catch(() => { if (!cancelled) setLoaded(true); });
-    return () => { cancelled = true; };
-  }, []);
 
   // Close dropdown on outside click / escape
   useEffect(() => {
@@ -43,15 +36,6 @@ export default function AuthWidget({ inverted = false }) {
     try { await fetch('/api/customer/auth/logout', { method: 'POST' }); }
     finally { window.location.assign('/'); }
   };
-
-  if (!loaded) {
-    return (
-      <span className="inline-flex items-center gap-2 h-9 pl-1 pr-2.5" aria-hidden>
-        <span className={cn('h-7 w-7 rounded-full animate-pulse', inverted ? 'bg-white/20' : 'bg-muted')} />
-        <span className={cn('hidden lg:block h-3 w-16 rounded-full animate-pulse', inverted ? 'bg-white/20' : 'bg-muted')} />
-      </span>
-    );
-  }
 
   if (!customer) {
     return (

@@ -3,6 +3,8 @@ import { Inter, JetBrains_Mono, Fraunces } from 'next/font/google';
 import { Providers } from './providers';
 import { Toaster } from 'sonner';
 import Analytics from '@/components/site/analytics';
+import { CustomerProvider } from '@/components/site/customer-context';
+import { getCurrentCustomer } from '@/lib/customer-auth';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
 const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono', display: 'swap' });
@@ -30,14 +32,23 @@ export const metadata = {
   twitter: { card: 'summary_large_image' },
 };
 
-export default function RootLayout({ children }) {
+export default async function RootLayout({ children }) {
+  const customer = await getCurrentCustomer().catch(() => null);
+  const initialCustomer = customer ? {
+    id: customer.id, name: customer.name || '', email: customer.email || '',
+    phone: customer.phone || '', picture: customer.picture || '',
+    walletBalance: customer.walletBalance || 0,
+  } : null;
+
   return (
     <html lang="en" className={`${inter.variable} ${mono.variable} ${fraunces.variable}`} suppressHydrationWarning>
       <body className="font-sans antialiased bg-background text-foreground">
         <Providers>
-          {children}
-          <Analytics />
-          <Toaster position="bottom-right" theme="system" richColors closeButton />
+          <CustomerProvider initialCustomer={initialCustomer}>
+            {children}
+            <Analytics />
+            <Toaster position="bottom-right" theme="system" richColors closeButton />
+          </CustomerProvider>
         </Providers>
       </body>
     </html>

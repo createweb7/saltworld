@@ -162,7 +162,7 @@ const NAV_LINKS = [
   { href: '/therapies',   label: 'Therapies' },
   { href: '/memberships', label: 'Memberships' },
   { href: '/products',    label: 'Shop' },
-  { href: '/journal',     label: 'Journal' },
+  { href: '/journal',     label: 'Blog' },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -277,7 +277,7 @@ export function SiteFooter() {
         {[
           { h: 'Outcomes', l: [['Stress Relief','/outcomes/stress-relief'],['Sleep & Clarity','/outcomes/sleep-mental-clarity'],['Performance & Recovery','/outcomes/muscle-recovery'],['Couple Activities','/outcomes/couple-activities'],['Skin & Glow','/outcomes/skin-rejuvenation']] },
           { h: 'Therapies', l: [['All therapies','/therapies'],['Memberships','/memberships'],['Gift cards','/gifts'],['Book a session','/book']] },
-          { h: 'Company', l: [['Journal','/journal'],['Shop','/products'],['Gifts','/gifts'],['For teams','/for-teams'],['Contact','/contact']] },
+          { h: 'Company', l: [['Blog','/journal'],['Shop','/products'],['Gifts','/gifts'],['For teams','/for-teams'],['Contact','/contact']] },
         ].map((col) => (
           <div key={col.h} className="md:col-span-2">
             <div className="text-[11px] uppercase tracking-[0.18em] text-foreground font-semibold">{col.h}</div>

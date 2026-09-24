@@ -899,7 +899,7 @@ function JournalPreview() {
       <div className="max-w-[1240px] mx-auto px-5 md:px-8">
         <div className="flex items-end justify-between gap-6 flex-wrap">
           <div>
-            <div className="rise text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-semibold">Journal</div>
+            <div className="rise text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-semibold">Blog</div>
             <h3 className="rise mt-3 font-serif text-[36px] md:text-[52px] leading-[1.02] tracking-tight text-balance">
               Field notes on <span className="italic">wellness.</span>
             </h3>
