@@ -560,10 +560,11 @@ async function handle(req, method, segs) {
     const { getCurrentCustomer } = await import('@/lib/customer-auth');
     const c = await getCurrentCustomer();
     if (!c) return NextResponse.json({ error: 'not_signed_in' }, { status: 401 });
-    const { customerBalance, customerHistory, referralStats, issueReferralCode } = await import('@/lib/loyalty');
+    const { customerBalance, customerHistory, referralStats, issueReferralCode, getLoyaltyConfig } = await import('@/lib/loyalty');
     if (segs[1] === 'wallet' && method === 'GET') {
-      const [balance, history] = await Promise.all([customerBalance(c.id), customerHistory(c.id, 30)]);
-      return NextResponse.json({ balance, history });
+      const [balance, history, cfg] = await Promise.all([customerBalance(c.id), customerHistory(c.id, 30), getLoyaltyConfig(getSupabase())]);
+      const redeemRate = cfg.redeemRate || 1;
+      return NextResponse.json({ balance, balanceInr: Math.floor(balance * redeemRate), redeemRate, history });
     }
     if (segs[1] === 'referrals' && method === 'GET') {
       // Ensure customer has a code — issue one lazily on first fetch.

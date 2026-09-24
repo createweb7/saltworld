@@ -1897,8 +1897,8 @@ export default function BookingClient({ initialOutcome }) {
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
         if (!d) return;
-        // Wallet balance is stored as POINTS. 1 point = ₹0.1 (redeemRate).
-        setWalletAvailableInr(Math.floor((Number(d.balance) || 0) * 0.1));
+        // API returns balanceInr pre-converted using the live redeemRate.
+        setWalletAvailableInr(Number(d.balanceInr) || 0);
       })
       .catch(() => {});
   }, [customerId]);
