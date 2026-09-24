@@ -4,7 +4,7 @@ import { ArrowRight, Calendar, Wallet, Gift, ClipboardList, User as UserIcon, Lo
 import { getCurrentCustomer } from '@/lib/customer-auth';
 import { getSupabase } from '@/lib/supabase';
 import { toBooking, toSubscription } from '@/lib/db-mappers';
-import { customerHistory } from '@/lib/loyalty';
+import { customerHistory, getLoyaltyConfig } from '@/lib/loyalty';
 import { TopNav, SiteFooter } from '@/components/site/shell';
 import { formatDate } from '@/lib/date';
 
@@ -43,6 +43,10 @@ export default async function AccountHome() {
   const customer = await getCurrentCustomer();
   if (!customer) redirect('/account/login');
   const { bookings: allBookings, activeSubs, recentTxs } = await loadDashboard(customer.id, customer.phone);
+  // walletBalance is stored in loyalty POINTS, not rupees — convert to what's
+  // actually redeemable before showing it with a ₹ sign.
+  const loyaltyCfg = await getLoyaltyConfig(getSupabase());
+  const walletBalanceInr = Math.floor((customer.walletBalance || 0) * (loyaltyCfg.redeemRate || 0.1));
 
   // Only show bookings that are genuinely settled — a booking record is
   // created up front for online payments, BEFORE the Razorpay checkout
@@ -90,7 +94,7 @@ export default async function AccountHome() {
 
           {/* Balance + memberships strip */}
           <div className="grid md:grid-cols-3 gap-4">
-            <BalanceCard label="Wallet balance" value={`₹${(customer.walletBalance || 0).toLocaleString('en-IN')}`} icon={Wallet} href="/account/wallet" />
+            <BalanceCard label="Wallet balance" value={`₹${walletBalanceInr.toLocaleString('en-IN')}`} icon={Wallet} href="/account/wallet" />
             <BalanceCard
               label="Active memberships"
               value={activeSubs.length === 0 ? '—' : `${activeSubs.length}`}

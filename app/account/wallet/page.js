@@ -2,33 +2,42 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Wallet as WalletIcon, ArrowDownRight, ArrowUpRight } from 'lucide-react';
 import { getCurrentCustomer } from '@/lib/customer-auth';
-import { customerBalance, customerHistory } from '@/lib/loyalty';
+import { customerBalance, customerHistory, getLoyaltyConfig } from '@/lib/loyalty';
+import { getSupabase } from '@/lib/supabase';
 import { TopNav, SiteFooter } from '@/components/site/shell';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Wallet · Salt World' };
 
 async function loadWallet(customerId) {
-  const [balance, txs] = await Promise.all([
+  const [balance, txs, cfg] = await Promise.all([
     customerBalance(customerId),
     customerHistory(customerId, 100),
+    getLoyaltyConfig(getSupabase()),
   ]);
-  return { balance, txs };
+  // Wallet stores real rupees directly (redeemRate 1). Kept as a multiplier
+  // rather than assuming 1:1 in case it's ever tuned via admin settings.
+  const redeemRate = cfg.redeemRate || 1;
+  return {
+    balanceInr: Math.floor(balance * redeemRate), redeemRate, txs,
+    thresholdInr: cfg.bookingEarnThresholdInr, earnInr: cfg.bookingEarnAmountInr, expiryDays: cfg.bookingEarnExpiryDays,
+  };
 }
 
 const TX_LABEL = {
-  BOOKING_EARN: 'Loyalty earned',
-  REFERRAL_REFEREE: 'Referral reward — signed up via friend',
-  REFERRAL_REFERRER: 'Referral reward — friend booked',
+  booking_earn: 'Wallet credit earned',
+  booking_redeem: 'Applied to booking',
+  referral_reward: 'Referral reward',
+  birthday_bonus: 'Birthday bonus',
   manual_adjustment: 'Admin adjustment',
-  WALLET_REDEEM: 'Applied to booking',
-  PROMO_CREDIT: 'Promotional credit',
+  refund: 'Refund',
+  expiry: 'Credit expired',
 };
 
 export default async function WalletPage() {
   const customer = await getCurrentCustomer();
   if (!customer) redirect('/account/login');
-  const { balance, txs } = await loadWallet(customer.id);
+  const { balanceInr, redeemRate, txs, thresholdInr, earnInr, expiryDays } = await loadWallet(customer.id);
 
   return (
     <div className="min-h-screen bg-background">
@@ -43,7 +52,7 @@ export default async function WalletPage() {
             </div>
             <div>
               <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold">Wallet balance</div>
-              <div className="mt-1 font-serif text-[40px] leading-none tracking-tight">₹{balance.toLocaleString('en-IN')}</div>
+              <div className="mt-1 font-serif text-[40px] leading-none tracking-tight">₹{balanceInr.toLocaleString('en-IN')}</div>
             </div>
           </div>
         </div>
@@ -54,7 +63,7 @@ export default async function WalletPage() {
           <h2 className="font-serif text-[22px] tracking-tight leading-none mb-4">Transaction history</h2>
           {txs.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border p-8 text-center text-[13.5px] text-muted-foreground">
-              No transactions yet. Complete a booking to start earning loyalty points.
+              No transactions yet. Book ₹{thresholdInr.toLocaleString('en-IN')} or more in one visit to earn a ₹{earnInr.toLocaleString('en-IN')} wallet credit.
             </div>
           ) : (
             <div className="rounded-xl border border-border bg-card overflow-hidden">
@@ -80,10 +89,10 @@ export default async function WalletPage() {
                         <td className={`px-4 py-3 text-right font-mono font-semibold whitespace-nowrap ${credit ? 'text-emerald-600' : 'text-red-600'}`}>
                           <span className="inline-flex items-center gap-1 justify-end">
                             {credit ? <ArrowDownRight className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
-                            {credit ? '+' : ''}{(t.points || 0).toLocaleString('en-IN')}
+                            {credit ? '+' : '−'}₹{Math.floor(Math.abs(t.points || 0) * redeemRate).toLocaleString('en-IN')}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-right font-mono text-muted-foreground whitespace-nowrap">₹{(t.balanceAfter || 0).toLocaleString('en-IN')}</td>
+                        <td className="px-4 py-3 text-right font-mono text-muted-foreground whitespace-nowrap">₹{Math.floor((t.balanceAfter || 0) * redeemRate).toLocaleString('en-IN')}</td>
                       </tr>
                     );
                   })}
@@ -92,7 +101,7 @@ export default async function WalletPage() {
             </div>
           )}
           <div className="mt-6 text-[11.5px] text-muted-foreground text-center">
-            Loyalty credits are earned automatically on completed bookings and referrals. ₹1 = 1 point.
+            Pay ₹{thresholdInr.toLocaleString('en-IN')} or more on a single booking to get ₹{earnInr.toLocaleString('en-IN')} added to your wallet, valid for {expiryDays} days.
           </div>
         </div>
       </section>

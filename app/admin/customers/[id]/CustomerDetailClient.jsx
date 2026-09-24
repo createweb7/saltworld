@@ -114,7 +114,7 @@ export default function CustomerDetailClient({ user, id }) {
 
             {/* Info cards */}
             <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
-              <MiniCard icon={Wallet}   label="Wallet"        value={'\u20B9' + (c.walletBalance || 0)} />
+              <MiniCard icon={Wallet}   label="Wallet"        value={'\u20B9' + (c.walletBalanceInr ?? 0).toLocaleString('en-IN')} />
               <MiniCard icon={Calendar} label="Visits"        value={data.visits?.length ?? 0} />
               <MiniCard icon={Heart}    label="Membership"    value={data.subscriptions?.[0]?.status === 'active' ? 'Active' : 'None'} />
               <MiniCard icon={FileText} label="Invoices"      value={data.invoices?.length ?? 0} />
@@ -312,6 +312,8 @@ function WalletTab({ customerId, qc }) {
   const [open, setOpen] = useState(false);
 
   const balance = Number(data?.balance || 0);
+  const balanceInr = Number(data?.balanceInr ?? 0);
+  const redeemRate = Number(data?.redeemRate ?? 1);
   const rows = Array.isArray(data?.history) ? data.history : [];
 
   return (
@@ -319,8 +321,8 @@ function WalletTab({ customerId, qc }) {
       <div className="flex items-start justify-between gap-3 mb-5">
         <div>
           <div className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground">Wallet balance</div>
-          <div className="mt-1 font-serif text-4xl">₹{balance.toLocaleString('en-IN')}</div>
-          <div className="text-[11.5px] text-muted-foreground mt-1">Every transaction below is immutable — records are never edited or deleted.</div>
+          <div className="mt-1 font-serif text-4xl">₹{balanceInr.toLocaleString('en-IN')}</div>
+          <div className="text-[11.5px] text-muted-foreground mt-1">₹{data?.earnInr ?? 500} auto-credited on bookings of ₹{(data?.thresholdInr ?? 3000).toLocaleString('en-IN')}+ ({data?.expiryDays ?? 45}-day validity). Every transaction below is immutable — records are never edited or deleted.</div>
         </div>
         <button onClick={() => setOpen(true)} className="h-9 px-3 rounded-md bg-foreground text-background text-[12.5px] font-semibold inline-flex items-center gap-1.5 hover:bg-foreground/90">
           <Plus className="h-3.5 w-3.5" /> Adjust wallet
@@ -345,20 +347,20 @@ function WalletTab({ customerId, qc }) {
             </thead>
             <tbody>
               {rows.map((tx) => {
-                // Prefer signed rupee amount for display. Manual adjustments store
-                // `amountInr` as an unsigned magnitude, so we derive the sign from
-                // `points` (which is signed for adjustments) or from the note tag.
+                // Points are the stored unit; convert to the actual redeemable
+                // rupee value for display (was previously showing raw points —
+                // or, for booking_earn, the amount *spent* — with a ₹ sign,
+                // overstating the real value by 1/redeemRate).
                 const isCredit = Number(tx.points) >= 0;
-                const signedAmount = tx.amountInr
-                  ? (isCredit ? Number(tx.amountInr) : -Number(tx.amountInr))
-                  : Number(tx.points);
+                const amountInrDisplay = Math.floor(Math.abs(Number(tx.points || 0)) * redeemRate);
+                const balanceInrDisplay = Math.floor(Number(tx.balanceAfter || 0) * redeemRate);
                 return (
                   <tr key={tx.id} className="border-t border-border">
                     <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{new Date(tx.createdAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
                     <td className="px-3 py-2"><span className="capitalize text-[11.5px] font-medium">{String(tx.type || '').replace(/_/g, ' ')}</span></td>
                     <td className="px-3 py-2 text-muted-foreground max-w-xs truncate" title={tx.note}>{tx.note || '—'}</td>
-                    <td className={`px-3 py-2 text-right font-mono ${isCredit ? 'text-emerald-600' : 'text-red-600'}`}>{isCredit ? '+' : '−'}₹{Math.abs(signedAmount).toLocaleString('en-IN')}</td>
-                    <td className="px-3 py-2 text-right font-mono text-foreground">₹{Number(tx.balanceAfter || 0).toLocaleString('en-IN')}</td>
+                    <td className={`px-3 py-2 text-right font-mono ${isCredit ? 'text-emerald-600' : 'text-red-600'}`}>{isCredit ? '+' : '−'}₹{amountInrDisplay.toLocaleString('en-IN')}</td>
+                    <td className="px-3 py-2 text-right font-mono text-foreground">₹{balanceInrDisplay.toLocaleString('en-IN')}</td>
                   </tr>
                 );
               })}

@@ -1,0 +1,5 @@
+{
+  "crons": [
+    { "path": "/api/cron/expire-wallet-credits", "schedule": "0 3 * * *" }
+  ]
+}
