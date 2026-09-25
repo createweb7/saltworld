@@ -477,6 +477,8 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
   const totalDurationMin = journeyData?.totalDurationMin ?? metaDurationSum;
   const totalVisitMin    = journeyData?.totalVisitMin    || 0;
   const visitStillLoading = loading && journeyData === null;
+  const dayHasNoSlots = !loading && !!journeyData && journeyData.groups
+    && !journeyData.groups.morning?.length && !journeyData.groups.afternoon?.length && !journeyData.groups.evening?.length;
 
   // Shared-capacity resources (e.g. the Salt Cave, capacity 7) host multiple
   // independent guests per time slot rather than locking exclusively per
@@ -511,10 +513,10 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
     else if (guests + children > sharedCapacity) setChildren(Math.max(0, sharedCapacity - guests));
   }, [maxChildren, sharedCapacity, guests, children, setChildren]);
 
-  // Precompute time-picker options: every 15 min from 06:00 to 20:00.
+  // Precompute time-picker options: every 15 min from 08:00 (centre opens) to 20:00.
   const timeOptions = useMemo(() => {
     const arr = [];
-    for (let h = 6; h < 20; h++) {
+    for (let h = 8; h < 20; h++) {
       for (let m = 0; m < 60; m += 15) {
         arr.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
       }
@@ -710,7 +712,17 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
       </div>
 
       {/* -------- CONCIERGE FLOW — Preferred time + Top 3 recommendations -------- */}
-      {!manualMode && (
+      {/* Whole day has no bookable slots (e.g. today's hours are over, closed,
+          or fully booked) — say so instead of offering a time picker. */}
+      {!manualMode && dayHasNoSlots && (
+        <div className="mt-8 rounded-2xl border border-dashed border-border p-8 text-center text-muted-foreground text-[13.5px]">
+          {journeyData?.closed
+            ? 'We are closed on this day. Please choose another date.'
+            : 'No slots available on this day. Please choose another date.'}
+        </div>
+      )}
+
+      {!manualMode && !dayHasNoSlots && (
         <div className="mt-8">
           {/* Preferred time picker */}
           <div className="rounded-2xl border border-border bg-card p-5 md:p-6">
@@ -1742,8 +1754,8 @@ export default function BookingClient({ initialOutcome }) {
   const [payCfg, setPayCfg] = useState({ configured: false, keyId: null });
   const [outcomeMap, setOutcomeMap] = useState(null); // admin-configured overrides
   const [therapyMeta, setTherapyMeta] = useState({}); // slug → {name, durationMin, ...} from DB
-  const [sessionMode, setSessionMode] = useState('single'); // float-therapy: single | couple
-  const [floatDurationMin, setFloatDurationMin] = useState(60); // float-therapy: 60 | 90
+  const [sessionMode, setSessionMode] = useState(initialResolvedOutcome === 'couple-activities' ? 'couple' : 'single'); // float-therapy: single | couple
+  const [floatDurationMin, setFloatDurationMin] = useState(initialResolvedOutcome === 'couple-activities' ? 90 : 60); // float-therapy: 60 | 90
   const [guests, setGuests] = useState(1); // adult headcount for shared-capacity therapies (e.g. Salt Cave)
   const [children, setChildren] = useState(0); // charged children joining, max 3, 1 free accompanying adult each
   const [coupon, setCoupon] = useState(null);              // { code, discountInr, applied } | null
@@ -2026,12 +2038,10 @@ export default function BookingClient({ initialOutcome }) {
       const wanted = searchParams.get('therapy');
       const o = getOutcome(outcome);
       const list = o?.protocol?.therapies || [];
-      if (wanted && list.some((x) => x.slug === wanted)) {
-        setTherapies([wanted]);
-        return;
-      }
-      const primary = list.find((x) => String(x.role || '').toLowerCase() === 'primary') || list[0];
-      if (primary?.slug) setTherapies([primary.slug]);
+      // Pre-select every therapy in the outcome's journey; guests can untick
+      // any they don't want.
+      if (list.length) { setTherapies(list.map((x) => x.slug)); return; }
+      if (wanted) setTherapies([wanted]);
     }
   }, [outcome, therapies.length, searchParams]);
 
@@ -2044,9 +2054,10 @@ export default function BookingClient({ initialOutcome }) {
       .then((d) => {
         if (cancelled || !d) return;
         setOutcomeMap(d);
-        if (Array.isArray(d.defaultSelected) && d.defaultSelected.length > 0 && therapies.length <= 1) {
-          setTherapies(d.defaultSelected);
-        }
+        if (isDirectTherapyMode) return;
+        const all = Array.isArray(d.therapies) ? d.therapies.map((t) => t.slug).filter(Boolean) : [];
+        const pick = Array.isArray(d.defaultSelected) && d.defaultSelected.length > 0 ? d.defaultSelected : all;
+        if (pick.length > 0) setTherapies(pick);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -2306,7 +2317,7 @@ export default function BookingClient({ initialOutcome }) {
       <BookingHeader stepIdx={stepIdx} onBack={back} steps={steps} />
 
       <main className="max-w-[1200px] mx-auto px-4 md:px-8 pt-10 md:pt-14 pb-28 md:pb-16">
-        {stepId === 'outcome' && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); }} />}
+        {stepId === 'outcome' && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); const couple = v === 'couple-activities'; setSessionMode(couple ? 'couple' : 'single'); setFloatDurationMin(couple ? 90 : 60); }} />}
         {stepId === 'therapy' && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} therapyMeta={therapyMeta} isDirectMode={isDirectTherapyMode} />}
         {stepId === 'slot'    && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode} setSessionMode={setSessionMode}
           floatDurationMin={floatDurationMin} setFloatDurationMin={setFloatDurationMin} guests={guests} setGuests={setGuests} children={children} setChildren={setChildren} totalRupees={totalRupees}
