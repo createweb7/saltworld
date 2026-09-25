@@ -585,7 +585,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
                         <div className="mt-2 flex items-center justify-between gap-3">
                           <div>
                             <div className="text-[12.5px] font-medium">Children joining?</div>
-                            <div className="text-[10.5px] text-muted-foreground">Up to 3 &middot; 1 accompanying adult free per child, child is charged</div>
+                            <div className="text-[10.5px] text-muted-foreground">Up to 3 &middot; 1 accompanying adult free with children, each child is charged</div>
                           </div>
                           <div className="inline-flex items-center rounded-full border border-border bg-card shrink-0">
                             <button
@@ -1858,12 +1858,11 @@ export default function BookingClient({ initialOutcome }) {
       }
       const dbPrice = Number(meta?.defaultPrice) || 0;
       if (isShared && (guests > 1 || children > 0)) {
-        // Children waive 1 accompanying adult's charge each (up to however
-        // many adults are actually present) and are charged their own flat
-        // rate — mirrors the server-side formula in lib/pricing.js.
+        // Children pay the flat child rate each; exactly ONE accompanying
+        // adult is free — mirrors the server-side formula in lib/pricing.js.
         const adultUnitPrice = guests > 1 ? (tieredRate != null ? Number(tieredRate) : dbPrice) : dbPrice;
-        const childUnitPrice = meta?.childPriceInr != null ? Number(meta.childPriceInr) : adultUnitPrice;
-        const waivedAdults = Math.min(children, guests);
+        const childUnitPrice = meta?.childPriceInr != null ? Number(meta.childPriceInr) : dbPrice;
+        const waivedAdults = children > 0 ? Math.min(1, guests) : 0;
         const chargeableAdults = guests - waivedAdults;
         return s + (adultUnitPrice * chargeableAdults) + (childUnitPrice * children);
       }
