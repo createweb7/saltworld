@@ -444,7 +444,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
       const r = await fetch(`/api/scheduling/recommendations?${q}`);
       const d = await r.json();
       const more = (d.recommendations || []).filter(
-        (n) => !recommendations.some((cur) => cur.startIso === n.startIso),
+        (n) => !recommendations.some((cur) => cur.startIso === n.startIso && cur.orderKey === n.orderKey),
       );
       if (more.length > 0) {
         setRecommendations([...recommendations, ...more]);
@@ -778,10 +778,10 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
               )}
               <div className={cn('mt-6 grid gap-4 transition-opacity', recLoading && 'opacity-40 pointer-events-none')}>
                 {recommendations.map((r) => {
-                  const isSel = value?.startIso === r.startIso;
+                  const isSel = value?.startIso === r.startIso && (value?.plan || []).map((p) => p.therapySlug).join('>') === (r.plan || []).map((p) => p.therapySlug).join('>');
                   return (
                     <button
-                      key={r.startIso}
+                      key={r.startIso + (r.orderKey || '')}
                       type="button"
                       onClick={() => pickRecommendation(r)}
                       className={cn(
