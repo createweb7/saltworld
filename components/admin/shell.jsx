@@ -122,8 +122,10 @@ export default function AdminShell({ user, children, title, actions, tabs, right
       >
         {/* Brand */}
         <div className={cn('h-14 flex items-center gap-2 px-3 border-b border-border', collapsed ? 'justify-center px-0' : 'px-4')}>
-          <div className="h-7 w-7 shrink-0 rounded-md bg-foreground text-background flex items-center justify-center text-[11px] font-bold tracking-tight">SW</div>
-          {!collapsed && <div className="text-[13px] font-semibold tracking-tight">Salt World<span className="align-super text-[0.55em] ml-0.5 opacity-70">BOS</span></div>}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {collapsed
+            ? <img src="/brand/logo-icon.png" alt="Salt World" className="h-7 w-7 shrink-0" />
+            : <><img src="/brand/logo.png" alt="Salt World" className="h-6 w-auto" /><span className="text-[9px] font-semibold tracking-widest opacity-60 self-end mb-3.5">BOS</span></>}
         </div>
 
         {/* Search trigger */}

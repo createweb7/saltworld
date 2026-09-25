@@ -46,8 +46,9 @@ export default function LoginPage() {
       <div className="flex items-center justify-center px-6 py-16">
         <div className="w-full max-w-[360px]">
           <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-md bg-foreground text-background flex items-center justify-center text-[12px] font-bold tracking-tight">SW</div>
-            <div className="text-[14px] font-semibold tracking-tight">Salt World<span className="align-super text-[0.55em] ml-0.5 opacity-70">BOS</span></div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/logo.png" alt="Salt World" className="h-7 w-auto" />
+            <span className="text-[9px] font-semibold tracking-widest opacity-60 self-end mb-1">BOS</span>
           </div>
 
           <h1 className="mt-10 text-[26px] font-semibold tracking-tight">Sign in</h1>

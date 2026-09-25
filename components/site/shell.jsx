@@ -121,38 +121,25 @@ export function useRise(ref) {
 /* ------------------------------------------------------------------ */
 
 export function Logomark({ size = 32, inverted = false, className }) {
-  // Circle = brand teal on light, white on hero-inverted contexts.
-  // Waves = the surface color (bone / white).
-  const disc = inverted ? '#ffffff' : 'hsl(var(--brand))';
-  const wave = inverted ? 'hsl(var(--brand))' : 'hsl(var(--background))';
+  // Official icon, always in its original brand colours.
   return (
-    <svg
-      viewBox="0 0 40 40" width={size} height={size} aria-hidden="true"
-      className={className} role="img" focusable="false"
-    >
-      <defs>
-        <clipPath id="sw-clip"><circle cx="20" cy="20" r="19.5" /></clipPath>
-      </defs>
-      <circle cx="20" cy="20" r="19.5" fill={disc} />
-      <g clipPath="url(#sw-clip)" fill="none" stroke={wave} strokeWidth="3.6" strokeLinecap="round">
-        <path d="M-4 13 Q6 8 14 12 T30 11 T44 13" />
-        <path d="M-4 22 Q6 17 14 21 T30 20 T44 22" />
-        <path d="M-4 31 Q6 26 14 30 T30 29 T44 31" />
-      </g>
-    </svg>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src="/brand/logo-icon.png" alt="" width={size} height={size} aria-hidden="true"
+      className={className}
+      style={{ width: size, height: size }}
+    />
   );
 }
 
 export function Wordmark({ inverted }) {
   return (
-    <Link href="/" className="flex items-center gap-2.5" aria-label="Salt World — home">
-      <Logomark size={30} inverted={inverted} />
-      <span className={cn(
-        'text-[13.5px] font-semibold tracking-[0.22em] uppercase',
-        inverted ? 'text-white' : 'text-foreground'
-      )}>
-        Salt World<span className="align-super text-[0.55em] ml-0.5">®</span>
-      </span>
+    <Link href="/" className="flex items-center" aria-label="Salt World — home">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/brand/logo.png" alt="Salt World" width={488} height={108}
+        className="h-[40px] w-auto"
+      />
     </Link>
   );
 }
