@@ -873,7 +873,7 @@ async function handle(req, method, segs) {
           for (const step of planSteps) {
             const stepSlug = step.therapySlug || step.slug;
             if (!stepSlug || !step.from) continue;
-            const stepCheck = await assertCanBook({ therapies: [stepSlug], startIso: step.from });
+            const stepCheck = await assertCanBook({ therapies: [stepSlug], startIso: step.from, branchId });
             if (!stepCheck.ok) {
               return NextResponse.json({
                 error: stepCheck.code || 'booking_rule_violation',
@@ -1222,7 +1222,7 @@ async function handle(req, method, segs) {
       // or cutoff windows.
       {
         const { assertCanBook } = await import('@/lib/booking-rules');
-        const rc = await assertCanBook({ therapies: therapySlugs, startIso: newStart });
+        const rc = await assertCanBook({ therapies: therapySlugs, startIso: newStart, branchId: doc.branchId });
         if (!rc.ok) {
           return NextResponse.json({
             error: rc.code || 'booking_rule_violation',
