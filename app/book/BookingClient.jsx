@@ -513,15 +513,12 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
     else if (guests + children > sharedCapacity) setChildren(Math.max(0, sharedCapacity - guests));
   }, [maxChildren, sharedCapacity, guests, children, setChildren]);
 
-  // Float tank sessions only ever start at these fixed times — fixed, not
-  // availability-computed — so tank turnover stays predictable for staff.
-  // Keep this in sync with FLOAT_ANCHOR_TIMES in lib/scheduling.js.
-  const FLOAT_ANCHOR_TIMES = ['08:00', '10:30', '13:00', '15:30', '18:00', '20:30'];
-
-  // Precompute time-picker options: the fixed Float anchors when Float is in
-  // the journey, otherwise every 15 min from 08:00 (centre opens) to 20:00.
+  // Precompute time-picker options: every 15 min from 08:00 (centre opens) to 20:00.
+  // Float always shows here too — the guest picks any preferred time and the
+  // scheduling engine shuffles the journey around it, snapping only Float's
+  // own step forward to its next fixed daily time (see FLOAT_ANCHOR_TIMES in
+  // lib/scheduling.js); other therapies keep the guest's actual preferred time.
   const timeOptions = useMemo(() => {
-    if (hasFloat) return FLOAT_ANCHOR_TIMES;
     const arr = [];
     for (let h = 8; h < 20; h++) {
       for (let m = 0; m < 60; m += 15) {
@@ -529,19 +526,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
       }
     }
     return arr;
-  }, [hasFloat]);
-
-  // If the journey's Float-ness changes (therapy add/remove) and the current
-  // preferred time is no longer one of the offered options, snap to the
-  // closest one instead of leaving a stale/invalid selection.
-  useEffect(() => {
-    if (timeOptions.includes(preferredTime)) return;
-    const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
-    const target = toMin(preferredTime);
-    const closest = timeOptions.reduce((best, t) =>
-      Math.abs(toMin(t) - target) < Math.abs(toMin(best) - target) ? t : best, timeOptions[0]);
-    setPreferredTime(closest);
-  }, [timeOptions]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div>
