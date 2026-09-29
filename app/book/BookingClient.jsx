@@ -518,6 +518,8 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
   // scheduling engine shuffles the journey around it, snapping only Float's
   // own step forward to its next fixed daily time (see FLOAT_ANCHOR_TIMES in
   // lib/scheduling.js); other therapies keep the guest's actual preferred time.
+  // On today's date, times already passed are hidden — no point offering
+  // 08:00 as a preference at 5:52pm.
   const timeOptions = useMemo(() => {
     const arr = [];
     for (let h = 8; h < 20; h++) {
@@ -525,8 +527,24 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
         arr.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
       }
     }
-    return arr;
-  }, []);
+    const istNow = new Date(Date.now() + 330 * 60000);
+    const todayIso = istNow.toISOString().slice(0, 10);
+    if (date !== todayIso) return arr;
+    const roundedMin = Math.ceil(istNow.getUTCMinutes() / 15) * 15;
+    const cutoffHour = istNow.getUTCHours() + Math.floor(roundedMin / 60);
+    const cutoffMin = roundedMin % 60;
+    const cutoff = `${String(cutoffHour).padStart(2, '0')}:${String(cutoffMin).padStart(2, '0')}`;
+    return arr.filter((t) => t >= cutoff);
+  }, [date]);
+
+  // If the current preferred time has fallen out of today's options (either
+  // because the date changed or time has simply moved on), snap forward to
+  // the earliest one still offered.
+  useEffect(() => {
+    if (timeOptions.length && !timeOptions.includes(preferredTime)) {
+      setPreferredTime(timeOptions[0]);
+    }
+  }, [timeOptions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>
