@@ -157,12 +157,18 @@ function parsePrice(str) {
   return Number(String(str || '0').replace(/[^\d]/g, '')) || 0;
 }
 
-function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta = {}, isDirectMode = false }) {
+function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta = {}, isDirectMode = false, sessionMode, setSessionMode, sessionModeTouched, setSessionModeTouched, totalRupees = 0 }) {
   const o = getOutcome(outcome);
   // Prefer DB override (admin-configurable), fall back to static outcome data.
   const therapies = mappingOverride?.length ? mappingOverride : (o?.protocol?.therapies || []);
   const basePrice = parsePrice(o?.pricing?.single?.price);
   const baseDuration = parseInt(String(o?.protocol?.duration || '45'), 10) || 45;
+  const hasFloat = values.some((s) => String(s).includes('float'));
+  // Any selected therapy priced off a solo/couple durationOptions matrix
+  // (Float, Sauna, Red Light, Cold Plunge) — the guest must choose before a
+  // real price can be shown (see sessionModeTouched in the parent).
+  const sessionModeTherapies = values.filter((slug) => Array.isArray(therapyMeta?.[slug]?.durationOptions) && therapyMeta[slug].durationOptions.length > 0);
+  const hasSessionMode = sessionModeTherapies.length > 0;
 
   // Resolve the true duration for a therapy: static override > DB meta > outcome-level fallback.
   const durationFor = (t) => t.durationMin || therapyMeta[t.slug]?.durationMin || baseDuration;
@@ -317,6 +323,39 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
         })}
       </div>
 
+      {/* Session-mode (solo/couple) toggle — any selected therapy priced off
+          a durationOptions matrix (Float, Sauna, Red Light, Cold Plunge).
+          Decided here, before date & time, since it also affects which
+          resources (e.g. couple-capable float tanks) are searched later. */}
+      {hasSessionMode && (
+        <div className="mt-6 rounded-2xl border border-border bg-card p-5 md:p-6">
+          <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold mb-2">
+            {hasFloat ? 'Float session type' : sessionModeTherapies.length === 1 ? `${therapyMeta[sessionModeTherapies[0]]?.name || 'Session'} type` : 'Session type'}
+          </div>
+          <div className="inline-flex rounded-full border border-border p-0.5 bg-background">
+            <button type="button" onClick={() => { setSessionMode('single'); setSessionModeTouched(true); }}
+              className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
+                sessionModeTouched && sessionMode === 'single' ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground')}>
+              Solo
+            </button>
+            <button type="button" onClick={() => { setSessionMode('couple'); setSessionModeTouched(true); }}
+              className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
+                sessionModeTouched && sessionMode === 'couple' ? 'bg-brand text-white' : 'text-muted-foreground hover:text-foreground')}>
+              Couple
+            </button>
+          </div>
+          <div className="mt-2 text-[11.5px] text-muted-foreground max-w-[520px] leading-[1.5]">
+            {!sessionModeTouched
+              ? 'Select solo or couple to see the price for this journey.'
+              : hasFloat
+                ? (sessionMode === 'couple'
+                    ? 'Couple sessions use a couple-capable float tank for two people together. Fewer tanks support couple mode — book early.'
+                    : 'Standard float in a solo tank.')
+                : (sessionMode === 'couple' ? 'Two people, together in the same room.' : 'One person.')}
+          </div>
+        </div>
+      )}
+
       {/* Combined journey summary — updates as therapies are toggled */}
       <div className="mt-6 rounded-2xl border border-border bg-card p-5">
         <div className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground mb-2">Your journey</div>
@@ -324,7 +363,9 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
         <div className="mt-3 flex items-center gap-x-6 gap-y-1.5 flex-wrap text-[13px]">
           <div className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-muted-foreground" /><span><span className="font-semibold">{combinedDuration}</span> min total</span></div>
           <div className="inline-flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-muted-foreground" /><span><span className="font-semibold">{selected.length}</span> therapy{selected.length === 1 ? '' : ' combo'}</span></div>
-          <div className="ml-auto font-mono text-[15px] font-semibold">₹{combinedPrice.toLocaleString('en-IN')}</div>
+          <div className="ml-auto font-mono text-[15px] font-semibold">
+            ₹{(hasSessionMode && !sessionModeTouched ? 0 : totalRupees).toLocaleString('en-IN')}
+          </div>
         </div>
       </div>
     </div>
@@ -349,7 +390,7 @@ function fmtVisit(mins) {
   return `${mins}m`;
 }
 
-function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSessionMode, floatDurationMin, setFloatDurationMin, guests, setGuests, children, setChildren, totalRupees = 0, onReorderTherapies }) {
+function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatDurationMin, setFloatDurationMin, guests, setGuests, children, setChildren, totalRupees = 0, onReorderTherapies }) {
   const days = useMemo(() => {
     // Auto-rollover: if IST wall-clock is past 20:00 (branch close) we hide
     // "today" from the picker and default to tomorrow. TC-1 fix.
@@ -371,15 +412,6 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
   const [journeyData, setJourneyData] = useState(null); // full journey response for summary
   const [loading, setLoading] = useState(false);
   const hasFloat = therapies.some((t) => String(t).includes('float'));
-  // Any therapy priced off a solo/couple durationOptions matrix (Float, or a
-  // single-duration private-room therapy like Sauna/Red Light/Cold Plunge)
-  // needs the session-mode toggle. Availability itself only changes for
-  // Float (couple-capable tanks are a distinct resource pool) — for the
-  // others sessionMode is a pure pricing input, so it's safe to compute this
-  // purely from therapyMeta rather than threading a new capability flag.
-  const sessionModeTherapies = therapies.filter((slug) => Array.isArray(therapyMeta?.[slug]?.durationOptions) && therapyMeta[slug].durationOptions.length > 0);
-  const hasSessionMode = sessionModeTherapies.length > 0;
-
   // Preferred-time concierge flow — the primary UX per Aug-05-2026 direction.
   const [preferredTime, setPreferredTime] = useState('08:00');
   const [recommendations, setRecommendations] = useState([]);
@@ -664,34 +696,9 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, setSes
         </div>
       )}
 
-      {/* Session-mode (solo/couple) toggle — any therapy priced off a
-          durationOptions matrix (Float, Sauna, Red Light, Cold Plunge). */}
-      {hasSessionMode && (
-        <div className="mt-6">
-          <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold mb-2">
-            {hasFloat ? 'Float session type' : sessionModeTherapies.length === 1 ? `${therapyMeta[sessionModeTherapies[0]]?.name || 'Session'} type` : 'Session type'}
-          </div>
-          <div className="inline-flex rounded-full border border-border p-0.5 bg-card">
-            <button type="button" onClick={() => { setSessionMode('single'); onChange(null); }}
-              className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
-                sessionMode === 'single' ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground')}>
-              Solo
-            </button>
-            <button type="button" onClick={() => { setSessionMode('couple'); onChange(null); }}
-              className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
-                sessionMode === 'couple' ? 'bg-brand text-white' : 'text-muted-foreground hover:text-foreground')}>
-              Couple
-            </button>
-          </div>
-          <div className="mt-2 text-[11.5px] text-muted-foreground max-w-[520px] leading-[1.5]">
-            {hasFloat
-              ? (sessionMode === 'couple'
-                  ? 'Couple sessions use a couple-capable float tank for two people together. Fewer tanks support couple mode — book early.'
-                  : 'Standard float in a solo tank.')
-              : (sessionMode === 'couple' ? 'Two people, together in the same room.' : 'One person.')}
-          </div>
-        </div>
-      )}
+      {/* Solo/Couple is now chosen on the Therapy step (before this one) —
+          see StepTherapy — since it also affects which rooms this step
+          searches. sessionMode is still read below to filter results. */}
 
       {/* Float duration toggle — only if float-therapy is in the journey */}
       {hasFloat && (
@@ -1777,6 +1784,17 @@ export default function BookingClient({ initialOutcome }) {
   const [outcomeMap, setOutcomeMap] = useState(null); // admin-configured overrides
   const [therapyMeta, setTherapyMeta] = useState({}); // slug → {name, durationMin, ...} from DB
   const [sessionMode, setSessionMode] = useState(initialResolvedOutcome === 'couple-activities' ? 'couple' : 'single'); // float-therapy: single | couple
+  // Whether the guest has actively picked solo/couple (vs. just inheriting
+  // the 'single' default) — gates the therapy step's price display and its
+  // Continue button, since solo/couple prices differ significantly and we
+  // don't want to silently assume 'single' for the guest.
+  const [sessionModeTouched, setSessionModeTouched] = useState(initialResolvedOutcome === 'couple-activities');
+  // Re-require an explicit solo/couple confirmation whenever the therapy
+  // selection changes — a different combo can change what solo/couple even
+  // applies to, and pricing must never silently carry over a stale choice.
+  useEffect(() => {
+    if (outcome !== 'couple-activities') setSessionModeTouched(false);
+  }, [therapies]); // eslint-disable-line react-hooks/exhaustive-deps
   const [floatDurationMin, setFloatDurationMin] = useState(initialResolvedOutcome === 'couple-activities' ? 90 : 60); // float-therapy: 60 | 90
   const [guests, setGuests] = useState(1); // adult headcount for shared-capacity therapies (e.g. Salt Cave)
   const [children, setChildren] = useState(0); // charged children joining, max 3, 1 free accompanying adult each
@@ -2097,9 +2115,14 @@ export default function BookingClient({ initialOutcome }) {
     return () => { cancelled = true; };
   }, []);
 
+  // Any selected therapy priced off a solo/couple durationOptions matrix
+  // (Float, Sauna, Red Light, Cold Plunge) requires an explicit choice
+  // before the guest can move past the therapy step — see sessionModeTouched.
+  const hasSessionModeChoice = therapies.some((slug) => Array.isArray(therapyMeta?.[slug]?.durationOptions) && therapyMeta[slug].durationOptions.length > 0);
+
   const canNext =
     (stepId === 'outcome' && !!outcome) ||
-    (stepId === 'therapy' && therapies.length > 0) ||
+    (stepId === 'therapy' && therapies.length > 0 && (!hasSessionModeChoice || sessionModeTouched)) ||
     (stepId === 'slot'    && !!slot?.date && !!slot?.time) ||
     stepId === 'contact';
 
@@ -2340,8 +2363,10 @@ export default function BookingClient({ initialOutcome }) {
 
       <main className="max-w-[1200px] mx-auto px-4 md:px-8 pt-10 md:pt-14 pb-28 md:pb-16">
         {stepId === 'outcome' && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); const couple = v === 'couple-activities'; setSessionMode(couple ? 'couple' : 'single'); setFloatDurationMin(couple ? 90 : 60); }} />}
-        {stepId === 'therapy' && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} therapyMeta={therapyMeta} isDirectMode={isDirectTherapyMode} />}
-        {stepId === 'slot'    && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode} setSessionMode={setSessionMode}
+        {stepId === 'therapy' && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} therapyMeta={therapyMeta} isDirectMode={isDirectTherapyMode}
+          sessionMode={sessionMode} setSessionMode={setSessionMode} sessionModeTouched={sessionModeTouched} setSessionModeTouched={setSessionModeTouched}
+          totalRupees={totalRupees} />}
+        {stepId === 'slot'    && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode}
           floatDurationMin={floatDurationMin} setFloatDurationMin={setFloatDurationMin} guests={guests} setGuests={setGuests} children={children} setChildren={setChildren} totalRupees={totalRupees}
           onReorderTherapies={(idx, dir) => {
             const arr = [...therapies];
