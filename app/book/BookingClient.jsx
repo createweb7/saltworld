@@ -330,7 +330,7 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
       {hasSessionMode && (
         <div className="mt-6 rounded-2xl border border-border bg-card p-5 md:p-6">
           <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold mb-2">
-            {hasFloat ? 'Float session type' : sessionModeTherapies.length === 1 ? `${therapyMeta[sessionModeTherapies[0]]?.name || 'Session'} type` : 'Session type'}
+            Session type
           </div>
           <div className="inline-flex rounded-full border border-border p-0.5 bg-background">
             <button type="button" onClick={() => { setSessionMode('single'); setSessionModeTouched(true); }}
@@ -347,11 +347,11 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
           <div className="mt-2 text-[11.5px] text-muted-foreground max-w-[520px] leading-[1.5]">
             {!sessionModeTouched
               ? 'Select solo or couple to see the price for this journey.'
-              : hasFloat
+              : hasFloat && sessionModeTherapies.length === 1
                 ? (sessionMode === 'couple'
                     ? 'Couple sessions use a couple-capable float tank for two people together. Fewer tanks support couple mode — book early.'
                     : 'Standard float in a solo tank.')
-                : (sessionMode === 'couple' ? 'Two people, together in the same room.' : 'One person.')}
+                : (sessionMode === 'couple' ? 'Two people, together in the same room, across your selected therapies.' : 'One person, across your selected therapies.')}
           </div>
         </div>
       )}
