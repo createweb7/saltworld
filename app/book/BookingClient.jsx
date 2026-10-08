@@ -527,23 +527,23 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatD
     ? Math.min(...sharedCapTherapies.map((slug) => Number(therapyMeta[slug].maxCapacity)))
     : 0;
 
-  // Keep `guests` in range as the selected therapies change — e.g. switching
-  // away from a shared-capacity therapy should drop back to 1, and switching
-  // to one with a smaller cap should clamp down.
+  // Guests for shared-capacity therapies (e.g. Salt Cave) are no longer
+  // manually picked here — there's no separate headcount control on this
+  // step any more. They're driven by the Session type toggle on the
+  // Therapy step: Solo -> 1, Couple -> 2 (clamped to the room's cap).
+  // Children are no longer offered at all, so they always stay 0.
   useEffect(() => {
-    if (sharedCapacity <= 1 && guests !== 1) setGuests(1);
-    else if (sharedCapacity > 1 && guests > sharedCapacity) setGuests(sharedCapacity);
-  }, [sharedCapacity, guests, setGuests]);
+    if (sharedCapacity <= 1) {
+      if (guests !== 1) setGuests(1);
+      return;
+    }
+    const target = sessionMode === 'couple' ? Math.min(2, sharedCapacity) : 1;
+    if (guests !== target) setGuests(target);
+  }, [sharedCapacity, sessionMode, guests, setGuests]);
 
-  // Children: max 3, and adults + children must still fit the room (e.g.
-  // Salt Cave, 7). Drop to 0 entirely when there's no shared-capacity
-  // therapy in the journey.
-  const maxChildren = sharedCapacity > 1 ? Math.max(0, Math.min(3, sharedCapacity - 1)) : 0;
   useEffect(() => {
-    if (maxChildren <= 0 && children !== 0) setChildren(0);
-    else if (children > maxChildren) setChildren(maxChildren);
-    else if (guests + children > sharedCapacity) setChildren(Math.max(0, sharedCapacity - guests));
-  }, [maxChildren, sharedCapacity, guests, children, setChildren]);
+    if (children !== 0) setChildren(0);
+  }, [children, setChildren]);
 
   // Precompute time-picker options: every 15 min from 08:00 (centre opens) to 20:00.
   // Float always shows here too — the guest picks any preferred time and the
@@ -605,63 +605,17 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatD
                     <div className="flex items-center gap-2"><Check className="h-3.5 w-3.5 text-brand" /><span className="font-medium">{meta.name}</span></div>
                     <div className="text-[12.5px] text-muted-foreground font-mono">{meta.durationMin} min</div>
                   </div>
-                  {/* Guest-count control lives right under ITS OWN therapy — not
-                      as a shared control for the whole journey — since it only
-                      ever applies to this specific shared-capacity resource
-                      (e.g. Salt Cave). Other therapies in the same journey
-                      (Float, Sauna, etc.) set their own headcount separately
-                      via their solo/couple toggle below. */}
+                  {/* Headcount for this shared-capacity resource (e.g. Salt
+                      Cave) is no longer manually picked here — it's derived
+                      from the Session type toggle on the Therapy step (Solo
+                      -> 1, Couple -> 2). The capacity note stays so guests
+                      understand they may be sharing the room. */}
                   {therapyIsShared && (
                     <div className="mt-2 mb-1 ml-6 pl-3 border-l-2 border-brand/20">
                       <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
                         <Users className="h-3.5 w-3.5 text-brand shrink-0" />
                         <span>Capacity: 1&ndash;{sharedCapacity} people per time slot &mdash; you may share with other guests.</span>
                       </div>
-                      <div className="mt-2 flex items-center justify-between gap-3">
-                        <div className="text-[12.5px] font-medium">How many adults for {meta.name}?</div>
-                        <div className="inline-flex items-center rounded-full border border-border bg-card">
-                          <button
-                            type="button"
-                            aria-label="Fewer guests"
-                            disabled={guests <= 1}
-                            onClick={() => { setGuests(Math.max(1, guests - 1)); onChange(null); }}
-                            className="h-8 w-8 rounded-full inline-flex items-center justify-center text-[15px] font-medium text-foreground disabled:opacity-30 disabled:cursor-not-allowed hover:bg-muted transition-colors"
-                          >&minus;</button>
-                          <span className="w-8 text-center font-mono text-[13.5px] font-semibold">{guests}</span>
-                          <button
-                            type="button"
-                            aria-label="More guests"
-                            disabled={guests >= sharedCapacity - children}
-                            onClick={() => { setGuests(Math.min(sharedCapacity - children, guests + 1)); onChange(null); }}
-                            className="h-8 w-8 rounded-full inline-flex items-center justify-center text-[15px] font-medium text-foreground disabled:opacity-30 disabled:cursor-not-allowed hover:bg-muted transition-colors"
-                          >+</button>
-                        </div>
-                      </div>
-                      {maxChildren > 0 && (
-                        <div className="mt-2 flex items-center justify-between gap-3">
-                          <div>
-                            <div className="text-[12.5px] font-medium">Children joining?</div>
-                            <div className="text-[10.5px] text-muted-foreground">Up to 3 &middot; 1 accompanying adult free with children, each child is charged</div>
-                          </div>
-                          <div className="inline-flex items-center rounded-full border border-border bg-card shrink-0">
-                            <button
-                              type="button"
-                              aria-label="Fewer children"
-                              disabled={children <= 0}
-                              onClick={() => { setChildren(Math.max(0, children - 1)); onChange(null); }}
-                              className="h-8 w-8 rounded-full inline-flex items-center justify-center text-[15px] font-medium text-foreground disabled:opacity-30 disabled:cursor-not-allowed hover:bg-muted transition-colors"
-                            >&minus;</button>
-                            <span className="w-8 text-center font-mono text-[13.5px] font-semibold">{children}</span>
-                            <button
-                              type="button"
-                              aria-label="More children"
-                              disabled={children >= maxChildren || guests + children >= sharedCapacity}
-                              onClick={() => { setChildren(Math.min(maxChildren, sharedCapacity - guests, children + 1)); onChange(null); }}
-                              className="h-8 w-8 rounded-full inline-flex items-center justify-center text-[15px] font-medium text-foreground disabled:opacity-30 disabled:cursor-not-allowed hover:bg-muted transition-colors"
-                            >+</button>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>
