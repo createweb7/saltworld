@@ -938,7 +938,13 @@ async function handle(req, method, segs) {
         sessionMode: sessionMode || null,
         slotDate:   body.slotDate   || null,
         slotTime:   body.slotTime   || null,
-        startAt:    startIso        || null,
+        // Use the ALLOCATED visit start (blockedFrom), not the raw requested
+        // startIso — the scheduling engine may have shuffled/snapped the
+        // actual first leg forward (e.g. Float Therapy rounding up to its
+        // next fixed daily anchor), and startAt drives the customer-facing
+        // date/time display plus the cancel/reschedule cutoff calculation,
+        // so it must reflect what was actually booked.
+        startAt:    blockedFrom     || startIso || null,
         guests:     body.guests     || 1,
         children:   requestedChildren,
         contact:    body.contact    || {},
@@ -1183,6 +1189,9 @@ async function handle(req, method, segs) {
         data: { ...row.data, cancelledAt: new Date().toISOString(), cancelledBy: 'customer', cancelReason: body.reason || null },
       }).eq('id', bid);
       const { data: after } = await supabase.from('bookings').select('*').eq('id', bid).single();
+      const cancelledDoc = toBooking(after);
+      const { refundCancelledBookingToWallet } = await import('@/lib/loyalty');
+      await refundCancelledBookingToWallet({ booking: cancelledDoc }).catch((e) => console.error('wallet refund on cancel failed', e));
       return NextResponse.json({ ok: true, booking: await toBookingFull(supabase, after) });
     }
 
@@ -1211,6 +1220,13 @@ async function handle(req, method, segs) {
       if (!newStart) return NextResponse.json({ error: 'startAt_required' }, { status: 400 });
       const therapySlugs = (doc.therapies || []).map((t) => t.slug).filter(Boolean);
       const sessionMode = body.sessionMode || doc.sessionMode || null;
+      // An explicit per-leg plan (from the "auto build" recommendation picker)
+      // pins the exact journey the customer saw — same as booking creation —
+      // instead of re-deriving whichever order allocateJourney judges best for
+      // that candidate start, which could pick a different order than the one
+      // actually shown/clicked when a start time has more than one bookable
+      // sequence.
+      const suppliedPlan = Array.isArray(body.plan) && body.plan.length > 0 ? body.plan : null;
       // Preserve any per-therapy duration override from the original booking
       // (e.g. a 90-min Float session) — reschedule must not silently revert
       // it to the therapy's default duration.
@@ -1219,27 +1235,41 @@ async function handle(req, method, segs) {
         if (t?.slug && Number(t.durationMin) > 0) durationOverrides[t.slug] = Number(t.durationMin);
       }
       // Booking-rules gate — reject reschedules that would violate lead time
-      // or cutoff windows.
+      // or cutoff windows. Checked PER STEP against that step's own therapy
+      // and actual time (same as booking creation) — not once against every
+      // selected therapy using the worst-case lead time, which would wrongly
+      // reject journeys where a stricter-lead-time therapy (e.g. Float) isn't
+      // the first leg.
       {
         const { assertCanBook } = await import('@/lib/booking-rules');
-        const rc = await assertCanBook({ therapies: therapySlugs, startIso: newStart, branchId: doc.branchId });
-        if (!rc.ok) {
-          return NextResponse.json({
-            error: rc.code || 'booking_rule_violation',
-            message: rc.message, meta: rc.meta || null,
-          }, { status: 400 });
+        const planSteps = suppliedPlan || [{ therapySlug: therapySlugs[0], from: newStart }];
+        for (const step of planSteps) {
+          const stepSlug = step.therapySlug || step.slug;
+          if (!stepSlug || !step.from) continue;
+          const rc = await assertCanBook({ therapies: [stepSlug], startIso: step.from, branchId: doc.branchId });
+          if (!rc.ok) {
+            return NextResponse.json({
+              error: rc.code || 'booking_rule_violation',
+              message: rc.message, meta: rc.meta || null,
+            }, { status: 400 });
+          }
         }
       }
       const { allocateJourney, suggestNextAvailableSlots } = await import('@/lib/scheduling');
       const rescheduleGuests = Math.max(1, Number(doc.guests) || 1);
       const rescheduleChildren = Math.max(0, Number(doc.children) || 0);
-      const r = await allocateJourney({ therapySlugs, branchId: doc.branchId, startIso: newStart, excludeBookingId: bid, sessionMode, durationOverrides, guests: rescheduleGuests, children: rescheduleChildren });
+      const r = await allocateJourney({ therapySlugs, branchId: doc.branchId, startIso: newStart, excludeBookingId: bid, sessionMode, durationOverrides, guests: rescheduleGuests, children: rescheduleChildren, plan: suppliedPlan });
       if (!r.ok) {
         const suggestions = await suggestNextAvailableSlots({ therapySlugs, branchId: doc.branchId, startIso: newStart, sessionMode, durationOverrides, guests: rescheduleGuests, children: rescheduleChildren, limit: 5 }).catch(() => []);
         return NextResponse.json({ error: 'slot_unavailable', reason: r.reason, suggestions }, { status: 409 });
       }
+      // Store the ALLOCATED visit start (blockedFrom), not the raw requested
+      // newStart — same reasoning as booking creation: the actual first leg
+      // may have snapped forward (e.g. Float's fixed daily anchors), and
+      // start_at drives both the customer-facing date/time display and the
+      // cancel/reschedule cutoff calculation.
       await supabase.from('bookings').update({
-        start_at: newStart, session_mode: sessionMode,
+        start_at: r.blockedFrom || newStart, session_mode: sessionMode,
         primary_resource_id: r.resourceId, primary_resource_name: r.resourceName,
         blocked_from: r.blockedFrom, blocked_to: r.blockedTo, updated_at: new Date().toISOString(),
         data: { ...row.data, slotDate: body.slotDate || newStart.slice(0, 10), slotTime: body.slotTime || newStart.slice(11, 16), rescheduledAt: new Date().toISOString(), rescheduledBy: 'customer' },
@@ -1254,6 +1284,54 @@ async function handle(req, method, segs) {
       }
       const { data: after } = await supabase.from('bookings').select('*').eq('id', bid).single();
       return NextResponse.json({ ok: true, booking: await toBookingFull(supabase, after) });
+    }
+
+    // Customer self-service Solo -> Couple conversion (same date/time, pay
+    // the price difference online). See lib/session-mode-upgrade.js.
+    //   GET  /api/bookings/:id/session-mode-quote
+    //   POST /api/bookings/:id/session-mode/order    -> { order, keyId, diffInr }
+    //   POST /api/bookings/:id/session-mode/verify    body: { razorpay_order_id, razorpay_payment_id, razorpay_signature }
+    if (segs[1] && segs[2] === 'session-mode-quote' && method === 'GET') {
+      const bid = segs[1];
+      const { getCurrentCustomer } = await import('@/lib/customer-auth');
+      const customer = await getCurrentCustomer();
+      const { data: row } = await supabase.from('bookings').select('customer_id').eq('id', bid).maybeSingle();
+      if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      if (!customer || row.customer_id !== customer.id) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+      const { quoteSessionModeUpgrade } = await import('@/lib/session-mode-upgrade');
+      const q = await quoteSessionModeUpgrade(bid);
+      if (!q.ok) return NextResponse.json({ eligible: false, reason: q.error });
+      return NextResponse.json({ eligible: true, diffInr: q.diffInr, newTotalInr: q.newTotalInr });
+    }
+    if (segs[1] && segs[2] === 'session-mode' && segs[3] === 'order' && method === 'POST') {
+      const bid = segs[1];
+      const { getCurrentCustomer } = await import('@/lib/customer-auth');
+      const customer = await getCurrentCustomer();
+      const { data: row } = await supabase.from('bookings').select('customer_id').eq('id', bid).maybeSingle();
+      if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      if (!customer || row.customer_id !== customer.id) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+      const { createSessionModeUpgradeOrder } = await import('@/lib/session-mode-upgrade');
+      const r = await createSessionModeUpgradeOrder(bid);
+      if (!r.ok) return NextResponse.json({ error: r.error, details: r.details }, { status: r.error === 'razorpay_not_configured' ? 503 : 400 });
+      return NextResponse.json({ order: r.order, keyId: r.keyId, diffInr: r.diffInr });
+    }
+    if (segs[1] && segs[2] === 'session-mode' && segs[3] === 'verify' && method === 'POST') {
+      const bid = segs[1];
+      const { getCurrentCustomer } = await import('@/lib/customer-auth');
+      const customer = await getCurrentCustomer();
+      const { data: row } = await supabase.from('bookings').select('customer_id').eq('id', bid).maybeSingle();
+      if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      if (!customer || row.customer_id !== customer.id) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+      const body = await req.json().catch(() => ({}));
+      const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = body;
+      if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+        return NextResponse.json({ error: 'missing_fields' }, { status: 400 });
+      }
+      const { verifySessionModeUpgrade } = await import('@/lib/session-mode-upgrade');
+      const r = await verifySessionModeUpgrade({ bookingId: bid, razorpay_order_id, razorpay_payment_id, razorpay_signature });
+      if (!r.ok) return NextResponse.json({ error: r.error, reason: r.reason }, { status: r.error === 'conversion_failed_after_payment' ? 409 : 400 });
+      const { data: after2 } = await supabase.from('bookings').select('*').eq('id', bid).single();
+      return NextResponse.json({ ok: true, booking: await toBookingFull(supabase, after2) });
     }
   }
 

@@ -265,15 +265,21 @@ function NotesTab({ notes = [], customerId, qc }) {
 function VisitsTab({ visits = [] }) {
   if (visits.length === 0) return <div className="text-[12.5px] text-muted-foreground">No visits yet.</div>;
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 max-w-[720px]">
       {visits.map((v) => (
-        <div key={v.id} className="rounded-md border border-border bg-card px-4 py-2.5 flex items-center justify-between">
-          <div>
-            <div className="text-[13px] font-medium">{v.therapyId || 'Session'}</div>
-            <div className="text-[11.5px] text-muted-foreground mt-0.5">{new Date(v.startedAt).toLocaleString()}</div>
+        <Link key={v.id} href={`/admin/bookings/${v.id}`}
+          className="rounded-md border border-border bg-card px-4 py-2.5 flex items-center justify-between hover:border-foreground/30 transition-colors">
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium truncate">{v.outcomeLabel || v.outcome || v.therapyLabel || v.therapy || 'Session'}</div>
+            <div className="text-[11.5px] text-muted-foreground mt-0.5 font-mono">
+              {v.ref} · {v.startAt ? new Date(v.startAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}
+            </div>
           </div>
-          <div className="text-[11.5px] text-muted-foreground">{v.therapistId || '—'}</div>
-        </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="text-[12.5px] font-medium">₹{Number(v.total || 0).toLocaleString('en-IN')}</div>
+            <span className="text-[10.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">{(v.status || '').replace(/_/g, ' ')}</span>
+          </div>
+        </Link>
       ))}
     </div>
   );

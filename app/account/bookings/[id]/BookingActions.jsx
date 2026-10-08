@@ -8,14 +8,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, X, Calendar, Clock } from 'lucide-react';
+import Script from 'next/script';
+import { AlertTriangle, X, Calendar, Users, Loader2 } from 'lucide-react';
+import RescheduleDialog from '@/components/booking/RescheduleDialog';
 
 const IST_OFFSET_MIN = 330;
-
-function toIsoDay(d) {
-  const shifted = new Date(d.getTime() + IST_OFFSET_MIN * 60000);
-  return shifted.toISOString().slice(0, 10);
-}
 
 export default function BookingActions({ booking }) {
   const router = useRouter();
@@ -100,11 +97,98 @@ export default function BookingActions({ booking }) {
       {rescheduleOpen && (
         <RescheduleDialog
           booking={booking}
+          basePath={`/api/bookings/${booking.id}`}
           onClose={() => setRescheduleOpen(false)}
           onSaved={() => { setRescheduleOpen(false); router.refresh(); }}
         />
       )}
+
+      {!disabled && booking.sessionMode !== 'couple' && (
+        <ConvertToCouple booking={booking} onConverted={() => router.refresh()} />
+      )}
     </>
+  );
+}
+
+// Solo -> Couple, same date/time, price difference charged online. Only
+// shown when the booking is actually eligible (quote comes back positive) —
+// e.g. no session-mode-priced therapy in the journey, or already Couple,
+// quietly renders nothing.
+function ConvertToCouple({ booking, onConverted }) {
+  const [quote, setQuote] = useState(null); // { eligible, diffInr, newTotalInr }
+  const [paying, setPaying] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    let ok = true;
+    fetch(`/api/bookings/${booking.id}/session-mode-quote`)
+      .then((r) => r.json())
+      .then((d) => { if (ok) setQuote(d); })
+      .catch(() => { if (ok) setQuote({ eligible: false }); });
+    return () => { ok = false; };
+  }, [booking.id]);
+
+  const pay = async () => {
+    setPaying(true); setErr(null);
+    try {
+      const orderRes = await fetch(`/api/bookings/${booking.id}/session-mode/order`, { method: 'POST' });
+      const orderJson = await orderRes.json();
+      if (!orderRes.ok) throw new Error(orderJson.error || 'order_failed');
+      if (typeof window.Razorpay !== 'function') throw new Error('checkout_not_ready');
+
+      const rzp = new window.Razorpay({
+        key: orderJson.keyId,
+        amount: orderJson.order.amount,
+        currency: orderJson.order.currency,
+        order_id: orderJson.order.id,
+        name: 'Salt World',
+        description: 'Convert to Couple',
+        theme: { color: '#0f4c3a' },
+        handler: async (response) => {
+          try {
+            const res = await fetch(`/api/bookings/${booking.id}/session-mode/verify`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              }),
+            });
+            const j = await res.json();
+            if (!res.ok) throw new Error(j.error || 'verify_failed');
+            onConverted();
+          } catch (e) {
+            setErr(e.message === 'conversion_failed_after_payment'
+              ? 'Payment went through, but this slot can no longer run as Couple (e.g. no couple tank free at this time). Please call reception — your payment is on file and will be sorted out.'
+              : 'Payment succeeded but we could not confirm the conversion. Please contact us with your payment ID.');
+          } finally { setPaying(false); }
+        },
+        modal: { ondismiss: () => setPaying(false) },
+      });
+      rzp.on('payment.failed', () => { setErr('Payment failed. Please try again.'); setPaying(false); });
+      rzp.open();
+    } catch (e) {
+      setErr('Could not start payment. Please try again in a moment.');
+      setPaying(false);
+    }
+  };
+
+  if (!quote?.eligible) return null;
+
+  return (
+    <div className="mt-3 pt-3 border-t border-border">
+      <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="afterInteractive" />
+      <button
+        type="button"
+        onClick={pay}
+        disabled={paying}
+        className="h-9 w-full rounded-md border border-border text-[12.5px] font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
+      >
+        {paying ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Processing…</> : <><Users className="h-3.5 w-3.5" /> Add a partner — convert to Couple (+₹{quote.diffInr.toLocaleString('en-IN')})</>}
+      </button>
+      <div className="mt-1.5 text-[11px] text-muted-foreground">Same date & time — just pay the difference online.</div>
+      {err && <div className="mt-2 text-[11.5px] text-red-600">{err}</div>}
+    </div>
   );
 }
 
@@ -142,142 +226,6 @@ function ConfirmCancel({ bookingId, onClose, onConfirmed }) {
           <button onClick={onClose} className="h-9 px-3 rounded-md text-[12.5px] font-medium border border-border hover:bg-muted">Keep booking</button>
           <button onClick={submit} disabled={busy} className="h-9 px-3 rounded-md text-[12.5px] font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-40">
             {busy ? 'Cancelling…' : 'Cancel booking'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RescheduleDialog({ booking, onClose, onSaved }) {
-  const therapySlugs = (booking.therapies || []).map((t) => t.slug).filter(Boolean);
-  const sessionMode  = booking.sessionMode || null;
-
-  const days = useMemo(() => {
-    const arr = [];
-    const start = new Date(); start.setHours(0,0,0,0);
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(start); d.setDate(d.getDate() + i);
-      arr.push(d);
-    }
-    return arr;
-  }, []);
-
-  const [date, setDate]         = useState(toIsoDay(new Date()));
-  const [slots, setSlots]       = useState(null);
-  const [loading, setLoading]   = useState(false);
-  const [picked, setPicked]     = useState(null);
-  const [busy, setBusy]         = useState(false);
-  const [err, setErr]           = useState(null);
-  const [conflictHint, setConflictHint] = useState(null);
-
-  useEffect(() => {
-    if (therapySlugs.length === 0 || !date) return;
-    let ok = true;
-    setLoading(true);
-    const q = new URLSearchParams({ therapies: therapySlugs.join(','), date });
-    if (sessionMode) q.set('sessionMode', sessionMode);
-    fetch(`/api/scheduling/slots?${q}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => { if (ok) { setSlots(d); setLoading(false); } })
-      .catch(() => { if (ok) { setSlots(null); setLoading(false); } });
-    return () => { ok = false; };
-  }, [date, therapySlugs.join(','), sessionMode]);
-
-  const submit = async () => {
-    if (!picked) return setErr('Please pick a new time slot.');
-    setBusy(true); setErr(null); setConflictHint(null);
-    try {
-      const r = await fetch(`/api/bookings/${booking.id}/reschedule`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          startAt: picked.startIso,
-          slotDate: date,
-          slotTime: picked.time,
-          sessionMode,
-        }),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (r.status === 409) {
-        setConflictHint('That time slot just got taken. Please pick another below.');
-        // Refresh the slots for the same date
-        const q = new URLSearchParams({ therapies: therapySlugs.join(','), date });
-        if (sessionMode) q.set('sessionMode', sessionMode);
-        const fresh = await fetch(`/api/scheduling/slots?${q}`).then((r) => r.ok ? r.json() : null);
-        setSlots(fresh);
-        setPicked(null);
-        setBusy(false);
-        return;
-      }
-      if (!r.ok) throw new Error(j.error || 'reschedule_failed');
-      onSaved();
-    } catch (e) { setErr(String(e.message || 'Could not reschedule')); }
-    finally { setBusy(false); }
-  };
-
-  const allSlots = slots
-    ? [...(slots.groups?.morning || []), ...(slots.groups?.afternoon || []), ...(slots.groups?.evening || [])]
-    : [];
-
-  return (
-    <div className="fixed inset-0 z-[100] bg-foreground/50 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-background rounded-2xl border border-border shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-[10.5px] uppercase tracking-[0.16em] text-muted-foreground font-semibold">Reschedule</div>
-            <h2 className="mt-1 font-serif text-2xl">Pick a new time</h2>
-            <p className="mt-1 text-[12.5px] text-muted-foreground">
-              {therapySlugs.length} {therapySlugs.length === 1 ? 'therapy' : 'therapies'}
-              {sessionMode ? ` · ${sessionMode} float` : ''}
-            </p>
-          </div>
-          <button onClick={onClose} className="h-8 w-8 rounded-full hover:bg-muted inline-flex items-center justify-center"><X className="h-4 w-4" /></button>
-        </div>
-
-        {conflictHint && (
-          <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50/60 dark:bg-amber-500/5 p-3 text-[12.5px] text-amber-900 dark:text-amber-200 flex items-start gap-2">
-            <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />{conflictHint}
-          </div>
-        )}
-
-        <div className="mt-5 flex gap-2 overflow-x-auto pb-1">
-          {days.map((d) => {
-            const iso = toIsoDay(d);
-            const sel = date === iso;
-            return (
-              <button key={iso} onClick={() => { setDate(iso); setPicked(null); }}
-                className={`shrink-0 w-[80px] rounded-xl border py-2.5 flex flex-col items-center transition-all ${sel ? 'border-brand bg-brand-soft text-foreground' : 'border-border bg-card hover:border-foreground/40'}`}>
-                <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">{d.toLocaleDateString('en-IN', { weekday: 'short' })}</div>
-                <div className={`mt-0.5 font-serif text-[20px] leading-none ${sel ? 'text-brand' : ''}`}>{d.getDate()}</div>
-                <div className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{d.toLocaleDateString('en-IN', { month: 'short' })}</div>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="mt-4">
-          {loading ? (
-            <div className="text-[12.5px] text-muted-foreground py-6">Loading available slots…</div>
-          ) : allSlots.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-border p-4 text-[12.5px] text-muted-foreground">No slots on this date. Pick a different day.</div>
-          ) : (
-            <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
-              {allSlots.map((s) => (
-                <button key={s.time} onClick={() => setPicked(s)}
-                  className={`rounded-lg border py-2 font-mono text-[13px] font-semibold transition-all ${picked?.time === s.time ? 'border-brand bg-brand text-white' : 'border-border bg-card hover:border-foreground/40'}`}>
-                  {s.time}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {err && <div className="mt-3 text-[12px] text-red-600">{err}</div>}
-
-        <div className="mt-5 flex items-center justify-end gap-2">
-          <button onClick={onClose} className="h-9 px-3 rounded-md text-[12.5px] font-medium border border-border hover:bg-muted">Keep current time</button>
-          <button onClick={submit} disabled={busy || !picked} className="h-9 px-3 rounded-md text-[12.5px] font-semibold bg-foreground text-background disabled:opacity-40">
-            {busy ? 'Rescheduling…' : (picked ? `Confirm ${picked.time}` : 'Pick a time')}
           </button>
         </div>
       </div>
