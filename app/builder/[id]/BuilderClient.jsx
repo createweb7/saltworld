@@ -20,9 +20,11 @@ import { Button, IconButton, Badge, Pill, Card } from '@/components/ss/primitive
 import { Field, Input, Textarea, Select, Switch, Label } from '@/components/ss/forms';
 import { renderBlock, BLOCK_META } from '@/components/ss/renderer';
 import { cn } from '@/components/ss/utils';
+import RichTextEditor from '@/components/admin/rich-text-editor';
 
 const BLOCK_TYPES = [
   { type: 'hero',         label: 'Hero',         icon: Sparkles,           desc: 'Big title, subtitle, two CTAs.' },
+  { type: 'content',      label: 'Content',      icon: LayoutList,         desc: 'Rich text — paragraphs, headings, links.' },
   { type: 'cta',          label: 'CTA',          icon: ArrowRightIcon,     desc: 'Conversion block. Light or dark.' },
   { type: 'pricing',      label: 'Pricing',      icon: IndianRupee,        desc: 'Three-tier pricing grid.' },
   { type: 'testimonials', label: 'Testimonials', icon: MessageSquareQuote, desc: 'Quote cards with author + rating.' },
@@ -37,6 +39,10 @@ const DEFAULT_PROPS = {
     subtitle: 'Write a short, benefit-led subtitle to invite bookings.',
     primaryCtaLabel: 'Book a session',
     secondaryCtaLabel: 'Learn more',
+  },
+  content: {
+    title: '',
+    html: '<p>Start writing…</p>',
   },
   cta: {
     title: 'Ready to start?',
@@ -224,7 +230,18 @@ function Inspector({ section, onChange }) {
           <div className="grid grid-cols-2 gap-2">
             <Field label="Primary CTA"><Input value={p.primaryCtaLabel || ''} onChange={(e) => set({ primaryCtaLabel: e.target.value })} /></Field>
             <Field label="Secondary CTA"><Input value={p.secondaryCtaLabel || ''} onChange={(e) => set({ secondaryCtaLabel: e.target.value })} /></Field>
+            <Field label="Primary CTA link" hint="e.g. /gifts — leave blank for a non-clickable button"><Input value={p.primaryCtaHref || ''} onChange={(e) => set({ primaryCtaHref: e.target.value })} /></Field>
+            <Field label="Secondary CTA link"><Input value={p.secondaryCtaHref || ''} onChange={(e) => set({ secondaryCtaHref: e.target.value })} /></Field>
           </div>
+          <Field label="Hero image URL" hint="Leave blank for the default placeholder"><Input value={p.heroImage || ''} onChange={(e) => set({ heroImage: e.target.value })} placeholder="https://…" /></Field>
+        </>
+      )}
+      {section.type === 'content' && (
+        <>
+          <Field label="Heading (optional)"><Input value={p.title || ''} onChange={(e) => set({ title: e.target.value })} /></Field>
+          <Field label="Body">
+            <RichTextEditor value={p.html || ''} onChange={(html) => set({ html })} placeholder="Write the page copy…" minHeight={360} />
+          </Field>
         </>
       )}
       {section.type === 'cta' && (
@@ -234,6 +251,8 @@ function Inspector({ section, onChange }) {
           <div className="grid grid-cols-2 gap-2">
             <Field label="Primary CTA"><Input value={p.primaryCtaLabel || ''} onChange={(e) => set({ primaryCtaLabel: e.target.value })} /></Field>
             <Field label="Secondary CTA"><Input value={p.secondaryCtaLabel || ''} onChange={(e) => set({ secondaryCtaLabel: e.target.value })} /></Field>
+            <Field label="Primary CTA link" hint="e.g. /gifts — leave blank for a non-clickable button"><Input value={p.primaryCtaHref || ''} onChange={(e) => set({ primaryCtaHref: e.target.value })} /></Field>
+            <Field label="Secondary CTA link"><Input value={p.secondaryCtaHref || ''} onChange={(e) => set({ secondaryCtaHref: e.target.value })} /></Field>
           </div>
           <Field label="Style">
             <Select value={p.variant || 'default'} onChange={(e) => set({ variant: e.target.value })}>

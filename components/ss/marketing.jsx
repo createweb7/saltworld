@@ -9,8 +9,8 @@ export const HeroSection = ({
   eyebrow = 'Salt World',
   title = 'Breathe better. Live lighter.',
   subtitle = "Bengaluru's premier halotherapy sanctuary. Book your session in under a minute.",
-  primaryCta = { label: 'Book a session', href: '#' },
-  secondaryCta = { label: 'Explore therapies', href: '#' },
+  primaryCta = { label: 'Book a session' },
+  secondaryCta = { label: 'Explore therapies' },
   media,
   className,
 }) => (
@@ -22,8 +22,8 @@ export const HeroSection = ({
         <h1 className="mt-4 text-4xl md:text-5xl font-semibold tracking-tight leading-[1.05]">{title}</h1>
         <p className="mt-4 text-[16px] leading-7 text-muted-foreground max-w-md">{subtitle}</p>
         <div className="mt-6 flex flex-wrap gap-2">
-          <Button variant="primary" size="lg" iconRight={<ArrowRight className="h-4 w-4" />}>{primaryCta.label}</Button>
-          <Button variant="outline" size="lg">{secondaryCta.label}</Button>
+          <Button variant="primary" size="lg" href={primaryCta.href} iconRight={<ArrowRight className="h-4 w-4" />}>{primaryCta.label}</Button>
+          <Button variant="outline" size="lg" href={secondaryCta.href}>{secondaryCta.label}</Button>
         </div>
         <div className="mt-6 flex items-center gap-4 text-[12.5px] text-muted-foreground">
           <div className="flex items-center gap-1">{[0,1,2,3,4].map(i => <Star key={i} className="h-3.5 w-3.5 fill-current text-amber-500" />)}</div>
@@ -64,8 +64,8 @@ export const CTASection = ({
           <p className={cn('mt-2 text-[15px]', inverted ? 'text-background/70' : 'text-muted-foreground')}>{subtitle}</p>
         </div>
         <div className="flex gap-2 shrink-0">
-          <Button variant={inverted ? 'secondary' : 'primary'} size="lg">{primaryCta.label}</Button>
-          <Button variant={inverted ? 'ghost' : 'outline'} size="lg" className={inverted ? 'text-background hover:bg-background/10' : ''}>{secondaryCta.label}</Button>
+          <Button variant={inverted ? 'secondary' : 'primary'} size="lg" href={primaryCta.href}>{primaryCta.label}</Button>
+          <Button variant={inverted ? 'ghost' : 'outline'} size="lg" href={secondaryCta.href} className={inverted ? 'text-background hover:bg-background/10' : ''}>{secondaryCta.label}</Button>
         </div>
       </div>
     </section>

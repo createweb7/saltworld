@@ -19,25 +19,32 @@ const BTN_SIZES = {
   lg: 'h-11 px-5 text-[14.5px] rounded-lg gap-2',
 };
 export const Button = React.forwardRef(function Button(
-  { variant = 'primary', size = 'md', loading, iconLeft, iconRight, className, children, disabled, ...rest }, ref
+  { variant = 'primary', size = 'md', loading, iconLeft, iconRight, className, children, disabled, href, ...rest }, ref
 ) {
-  return (
-    <button
-      ref={ref}
-      disabled={disabled || loading}
-      className={cn(
-        'inline-flex items-center justify-center font-medium tracking-tight transition-all',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-        'disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98]',
-        BTN_VARIANTS[variant],
-        BTN_SIZES[size],
-        className
-      )}
-      {...rest}
-    >
+  const cls = cn(
+    'inline-flex items-center justify-center font-medium tracking-tight transition-all',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+    'disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98]',
+    BTN_VARIANTS[variant],
+    BTN_SIZES[size],
+    className
+  );
+  const content = (
+    <>
       {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : iconLeft}
       {children}
       {!loading && iconRight}
+    </>
+  );
+  // Builder-authored CTA blocks can supply a real destination; plain
+  // decorative buttons (no href) keep rendering as <button> exactly as
+  // before, so existing pages are unaffected.
+  if (href && !disabled && !loading) {
+    return <a ref={ref} href={href} className={cls} {...rest}>{content}</a>;
+  }
+  return (
+    <button ref={ref} disabled={disabled || loading} className={cls} {...rest}>
+      {content}
     </button>
   );
 });

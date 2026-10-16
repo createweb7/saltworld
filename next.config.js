@@ -14,10 +14,13 @@ const nextConfig = {
     pagesBufferLength: 2,
   },
   async redirects() {
-    // Better Sleep + Mental Wellness were merged into one outcome page.
     return [
+      // Better Sleep + Mental Wellness were merged into one outcome page.
       { source: '/outcomes/better-sleep',   destination: '/outcomes/sleep-mental-clarity', permanent: true },
       { source: '/outcomes/mental-wellness', destination: '/outcomes/sleep-mental-clarity', permanent: true },
+      // Old site's standalone gift-card purchase page — the new /gifts
+      // page covers the same job (buy a gift card) plus more.
+      { source: '/giftcards', destination: '/gifts', permanent: true },
     ];
   },
   async headers() {

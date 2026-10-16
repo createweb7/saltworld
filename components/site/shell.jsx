@@ -9,6 +9,7 @@ import { cn } from '@/components/ss/utils';
 import AuthWidget from '@/components/site/auth-widget';
 import CartWidget from '@/components/site/cart-widget';
 import ProductCartWidget from '@/components/site/product-cart-widget';
+import { GIFT_GUIDES } from '@/lib/gift-guides';
 
 /* ------------------------------------------------------------------ */
 /* Announcement Bar — dismissible, persists in localStorage           */
@@ -284,6 +285,14 @@ export function SiteFooter() {
             <a href="#" aria-label="Instagram" className="h-9 w-9 rounded-full border border-border flex items-center justify-center hover:bg-muted transition-colors"><Instagram className="h-3.5 w-3.5" /></a>
             <a href="https://wa.me/917687878793" aria-label="WhatsApp" className="h-9 w-9 rounded-full border border-border flex items-center justify-center hover:bg-muted transition-colors"><MessageCircle className="h-3.5 w-3.5" /></a>
           </div>
+        </div>
+        <div className="col-span-2 md:col-span-12 pt-10 mt-2 border-t border-border">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-foreground font-semibold">Gifting Options</div>
+          <ul className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-2.5">
+            {[['Gift Cards','/gifts'], ...GIFT_GUIDES.map((g) => [g.label, `/${g.slug}`])].map(([label, href]) => (
+              <li key={href}><Link href={href} className="text-[13px] text-muted-foreground hover:text-foreground transition-colors">{label}</Link></li>
+            ))}
+          </ul>
         </div>
       </div>
       <div className="border-t border-border">

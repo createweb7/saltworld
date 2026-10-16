@@ -9,7 +9,8 @@ const Section = ({ children, className }) => (
 );
 
 export const BLOCK_META = {
-  hero:          { label: 'Hero',        editable: ['eyebrow','title','subtitle','primaryCtaLabel','secondaryCtaLabel'] },
+  hero:          { label: 'Hero',        editable: ['eyebrow','title','subtitle','primaryCtaLabel','secondaryCtaLabel','heroImage'] },
+  content:       { label: 'Content',     editable: ['title','html'] },
   cta:           { label: 'CTA',         editable: ['title','subtitle','primaryCtaLabel','secondaryCtaLabel','variant'] },
   pricing:       { label: 'Pricing',     editable: ['title','subtitle','tiles'] },
   testimonials:  { label: 'Testimonials',editable: ['title','items'] },
@@ -23,9 +24,25 @@ export const renderBlock = (b) => {
         <Section>
           <HeroSection
             eyebrow={p.eyebrow} title={p.title} subtitle={p.subtitle}
-            primaryCta={{ label: p.primaryCtaLabel || 'Get started' }}
-            secondaryCta={{ label: p.secondaryCtaLabel || 'Learn more' }}
+            primaryCta={{ label: p.primaryCtaLabel || 'Get started', href: p.primaryCtaHref }}
+            secondaryCta={{ label: p.secondaryCtaLabel || 'Learn more', href: p.secondaryCtaHref }}
+            media={p.heroImage ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={p.heroImage} alt={p.heroImageAlt || ''} className="h-full w-full object-cover" loading="eager" />
+            ) : undefined}
           />
+        </Section>
+      );
+    case 'content':
+      return (
+        <Section>
+          <div className="max-w-[760px] mx-auto">
+            {p.title && <h2 className="font-serif text-3xl md:text-4xl tracking-tight mb-6">{p.title}</h2>}
+            <div
+              className="prose prose-sm max-w-none [&_h2]:font-serif [&_h2]:font-bold [&_h2]:mt-8 [&_h3]:font-serif [&_h3]:font-bold [&_h3]:text-[15px] [&_h3]:mt-6 [&_a]:text-brand [&_a]:underline [&_a]:underline-offset-2 text-[13px] leading-[1.65] text-foreground/90"
+              dangerouslySetInnerHTML={{ __html: p.html || '' }}
+            />
+          </div>
         </Section>
       );
     case 'cta':
@@ -33,8 +50,8 @@ export const renderBlock = (b) => {
         <Section>
           <CTASection
             title={p.title} subtitle={p.subtitle}
-            primaryCta={{ label: p.primaryCtaLabel || 'Book' }}
-            secondaryCta={{ label: p.secondaryCtaLabel || 'Talk to us' }}
+            primaryCta={{ label: p.primaryCtaLabel || 'Book', href: p.primaryCtaHref }}
+            secondaryCta={{ label: p.secondaryCtaLabel || 'Talk to us', href: p.secondaryCtaHref }}
             variant={p.variant || 'default'}
           />
         </Section>
@@ -71,6 +88,14 @@ export const renderBlock = (b) => {
       return <div className="p-4 text-sm text-muted-foreground">Unknown block: {b.type}</div>;
   }
 };
+
+// renderBlock is a plain function, not a component — calling it directly
+// from a server component throws ("client function invoked on server").
+// SectionList wraps it so a server component can render a subset of a
+// page's sections as JSX (<SectionList sections={...} />) instead.
+export const SectionList = ({ sections }) => (
+  <>{(sections || []).map((b) => <div key={b.id}>{renderBlock(b)}</div>)}</>
+);
 
 export const PageRenderer = ({ page }) => (
   <div className="bg-background">
