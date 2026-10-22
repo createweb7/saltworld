@@ -264,6 +264,42 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
           </div>
         )}
 
+        {/* Session-mode (solo/couple) toggle — same requirement as the
+            outcome flow: Float/Sauna/Red Light/Cold Plunge are priced off a
+            durationOptions matrix, so the guest must choose before Continue
+            is enabled (see hasSessionModeChoice/sessionModeTouched in the
+            parent's canNext). The direct-mode branch previously had no way
+            to set this at all, so Continue was permanently stuck disabled
+            for any direct entry into one of these therapies. */}
+        {hasSessionMode && (
+          <div className="mt-6 rounded-2xl border border-border bg-card p-5 md:p-6">
+            <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold mb-2">
+              Session type
+            </div>
+            <div className="inline-flex rounded-full border border-border p-0.5 bg-background">
+              <button type="button" onClick={() => { setSessionMode('single'); setSessionModeTouched(true); }}
+                className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
+                  sessionModeTouched && sessionMode === 'single' ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground')}>
+                Solo
+              </button>
+              <button type="button" onClick={() => { setSessionMode('couple'); setSessionModeTouched(true); }}
+                className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
+                  sessionModeTouched && sessionMode === 'couple' ? 'bg-brand text-white' : 'text-muted-foreground hover:text-foreground')}>
+                Couple
+              </button>
+            </div>
+            <div className="mt-2 text-[11.5px] text-muted-foreground max-w-[520px] leading-[1.5]">
+              {!sessionModeTouched
+                ? 'Select solo or couple to see the price for this journey.'
+                : hasFloat && sessionModeTherapies.length === 1
+                  ? (sessionMode === 'couple'
+                      ? 'Couple sessions use a couple-capable float tank for two people together. Fewer tanks support couple mode — book early.'
+                      : 'Standard float in a solo tank.')
+                  : (sessionMode === 'couple' ? 'Two people, together in the same room, across your selected therapies.' : 'One person, across your selected therapies.')}
+            </div>
+          </div>
+        )}
+
         {/* Same journey summary bar as outcome flow */}
         <div className="mt-6 rounded-2xl border border-border bg-card p-5">
           <div className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground mb-2">Your session</div>
