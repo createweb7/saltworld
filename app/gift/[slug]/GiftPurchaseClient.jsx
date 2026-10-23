@@ -65,14 +65,27 @@ export default function GiftPurchaseClient({ outcome, therapies, therapyMeta }) 
   useEffect(() => { if (!canGoCouple && guests > 1) setGuests(1); }, [canGoCouple, guests]);
 
   // Live price, quoted the same way a real booking would be — matches what
-  // the recipient's eventual booking will actually cost.
+  // the recipient's eventual booking will actually cost. Mirrors the quote
+  // request BookingClient sends (session mode + float duration per
+  // therapy) — omitting these silently falls back to solo/60min pricing in
+  // the pricing engine for Float/Sauna/Red Light/Cold Plunge, understating
+  // the total whenever Couple is selected.
+  const sessionMode = guests > 1 ? 'couple' : 'single';
+  const floatDurationMin = outcome?.slug === 'couple-activities' ? 90 : 60;
   useEffect(() => {
     if (selected.length === 0) { setAmount(0); return; }
     let cancelled = false;
     setQuoting(true);
     fetch('/api/pricing/quote', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ therapies: selected.map((slug) => ({ slug })), guests }),
+      body: JSON.stringify({
+        therapies: selected.map((slug) => ({
+          slug,
+          sessionMode: Array.isArray(therapyMeta[slug]?.durationOptions) && therapyMeta[slug].durationOptions.length > 0 ? sessionMode : undefined,
+          durationMin: String(slug).includes('float') ? floatDurationMin : undefined,
+        })),
+        guests,
+      }),
     })
       .then((r) => r.json())
       .then((q) => { if (!cancelled) setAmount(Math.round(q.payableInr || 0)); })
