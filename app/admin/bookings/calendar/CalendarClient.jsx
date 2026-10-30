@@ -194,9 +194,18 @@ export default function CalendarClient({ user }) {
             <div className="min-w-[1400px] grid" style={{ gridTemplateColumns: `160px repeat(${SLOTS.length}, minmax(44px, 1fr))` }}>
               {/* Header row */}
               <div className="sticky left-0 z-10 bg-card border-r border-b border-border text-[11px] uppercase tracking-[0.14em] text-muted-foreground font-semibold px-3 py-2">Resource</div>
+              {/* Left-aligned, not centered: the label marks where its slot
+                  STARTS (standard calendar convention, e.g. Google
+                  Calendar/Outlook), so a booking bar's right edge lines up
+                  exactly under the label of the slot it ends before. Centered
+                  labels made a bar that correctly ended ON a gridline look
+                  like it stopped a whole 15-min column early (reported: a
+                  60-min, 10:30-11:30 booking "looked like" it ended at
+                  11:15, even though its own text and underlying math were
+                  already correct). */}
               {SLOTS.map((s) => (
                 <div key={s} className={cn(
-                  'border-b border-l border-border text-[10.5px] text-muted-foreground text-center py-2 font-mono',
+                  'border-b border-l border-border text-[10.5px] text-muted-foreground text-left pl-1 py-2 font-mono',
                   s.endsWith(':00') ? 'text-foreground/70 font-semibold' : ''
                 )}>{s}</div>
               ))}
