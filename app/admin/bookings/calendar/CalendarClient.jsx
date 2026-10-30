@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Calendar as CalIcon, Loader2, ArrowLeft } from 'lucide-react';
@@ -102,6 +102,7 @@ export default function CalendarClient({ user }) {
             resourceName: s.resourceName,
             from: s.from,
             to: s.to,
+            blockedTo: s.blockedTo || s.to,
             therapyName: s.therapyName || s.therapySlug || b.therapy || b.therapyLabel,
           }))
         : [{
@@ -109,18 +110,26 @@ export default function CalendarClient({ user }) {
             resourceName: b.resourceName,
             from: b.startAt || (b.slotDate && b.slotTime ? `${b.slotDate}T${b.slotTime}:00+05:30` : null),
             to: b.blockedTo || null,
+            blockedTo: b.blockedTo || null,
             therapyName: b.therapyLabel || b.therapy || b.outcomeLabel || b.outcome,
           }];
       for (const step of steps) {
         if (!step.resourceId || !step.from) continue;
         const colStart = colIndexForIso(step.from);
         if (colStart == null || colStart < 0 || colStart >= SLOTS.length) continue;
-        const span = slotsBetween(step.from, step.to);
-        const colEnd = Math.min(SLOTS.length, colStart + span); // exclusive
+        // The room stays held past the session's raw end for its post/
+        // cleaning buffer (`blockedTo`, from the therapy's own config) —
+        // render that trailing stretch too, visually distinct from the
+        // actual session, so the calendar doesn't make a still-occupied
+        // room look free (reported: block shown ending 15 min early).
+        const sessionSpan = slotsBetween(step.from, step.to);
+        const sessionColEnd = Math.min(SLOTS.length, colStart + sessionSpan);
+        const fullSpan = slotsBetween(step.from, step.blockedTo || step.to);
+        const colEnd = Math.min(SLOTS.length, colStart + fullSpan); // exclusive
         const guests = Math.max(1, Number(b.guests) || 1);
         const children = Math.max(0, Number(b.children) || 0);
         (byResource[step.resourceId] = byResource[step.resourceId] || [])
-          .push({ booking: b, step, colStart, colEnd, guests, children });
+          .push({ booking: b, step, colStart, sessionColEnd, colEnd, guests, children });
       }
     }
 
@@ -204,6 +213,9 @@ export default function CalendarClient({ user }) {
           <LegendDot cls="bg-purple-500/80" label="In session" />
           <LegendDot cls="bg-muted" label="Completed" />
           <LegendDot cls="bg-red-500/70" label="Cancelled / No-show" />
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-sm border border-dashed border-foreground/40" /> Room reset buffer (held, not in-session)
+          </span>
         </div>
       </AdminSection>
     </AdminShell>
@@ -249,29 +261,43 @@ function FragmentRow({ r, layout }) {
                 {occ}/{capacity}
               </div>
             )}
-            {cellItems.map(({ booking: b, step, colEnd, lane, guests, children }, i) => {
-              const span = colEnd - colIdx;
+            {cellItems.map(({ booking: b, step, sessionColEnd, colEnd, lane, guests, children }, i) => {
+              const sessionSpan = Math.max(1, sessionColEnd - colIdx);
+              const bufferSpan = Math.max(0, colEnd - sessionColEnd);
               const top = (showBadges ? BADGE_STRIP : 2) + lane * LANE_HEIGHT;
               // Single-lane resources (the common case — everything except Salt
               // Cave) fill the whole cell like before; multi-lane rows keep each
               // card compact so several fit without overlapping.
               const itemHeight = laneCount === 1 ? cellHeight - top - 2 : LANE_HEIGHT - 4;
-              // Absolute overlay stretches across `span` columns using inline style;
-              // `top` keeps simultaneous bookings on separate lanes instead of overlapping.
+              // Absolute overlay stretches across `sessionSpan` columns using
+              // inline style; `top` keeps simultaneous bookings on separate
+              // lanes instead of overlapping. A second, lighter overlay
+              // (bufferSpan) renders the room's post/cleaning buffer right
+              // after it \u2014 still occupied, just not in-session \u2014 so the
+              // calendar doesn't show a room as free before it actually is.
               return (
-                <Link key={b.id + '-' + i} href={`/admin/bookings/${b.id}`}
-                  className={cn(
-                    'absolute left-0.5 rounded-md px-1.5 py-0.5 text-[10px] leading-tight overflow-hidden z-10',
-                    statusClasses(b.status)
+                <Fragment key={b.id + '-' + i}>
+                  <Link href={`/admin/bookings/${b.id}`}
+                    className={cn(
+                      'absolute left-0.5 rounded-md px-1.5 py-0.5 text-[10px] leading-tight overflow-hidden z-10',
+                      statusClasses(b.status)
+                    )}
+                    style={{ width: `calc(${sessionSpan * 100}% - 4px)`, top, height: itemHeight }}
+                    title={`${b.contact?.name || 'Guest'} \u00b7 ${step.therapyName || ''}${guests > 1 ? ` \u00b7 ${guests} guests` : ''}${children > 0 ? ` + ${children} child${children > 1 ? 'ren' : ''}` : ''}`}
+                  >
+                    <div className="font-semibold truncate">
+                      {b.contact?.name || 'Guest'}{(guests > 1 || children > 0) && <span className="opacity-70"> {'\u00d7'}{guests}{children > 0 ? `+${children}` : ''}</span>}
+                    </div>
+                    <div className="opacity-80 truncate">{step.therapyName || '\u2014'}</div>
+                  </Link>
+                  {bufferSpan > 0 && b.status !== 'cancelled' && (
+                    <div
+                      className="absolute rounded-md border border-dashed border-foreground/25 bg-foreground/5 z-[5]"
+                      style={{ left: `${sessionSpan * 100}%`, width: `calc(${bufferSpan * 100}% - 4px)`, top, height: itemHeight }}
+                      title={`Room reset \u00b7 ${bufferSpan * SLOT_MIN} min buffer`}
+                    />
                   )}
-                  style={{ width: `calc(${span * 100}% - 4px)`, top, height: itemHeight }}
-                  title={`${b.contact?.name || 'Guest'} \u00b7 ${step.therapyName || ''}${guests > 1 ? ` \u00b7 ${guests} guests` : ''}${children > 0 ? ` + ${children} child${children > 1 ? 'ren' : ''}` : ''}`}
-                >
-                  <div className="font-semibold truncate">
-                    {b.contact?.name || 'Guest'}{(guests > 1 || children > 0) && <span className="opacity-70"> {'\u00d7'}{guests}{children > 0 ? `+${children}` : ''}</span>}
-                  </div>
-                  <div className="opacity-80 truncate">{step.therapyName || '\u2014'}</div>
-                </Link>
+                </Fragment>
               );
             })}
           </div>
