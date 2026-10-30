@@ -300,14 +300,20 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
           </div>
         )}
 
-        {/* Same journey summary bar as outcome flow */}
+        {/* Same journey summary bar as outcome flow. Price must come from
+            `totalRupees` (session-mode-aware, computed at the parent from
+            each therapy's durationOptions matrix) — NOT the local
+            `combinedPrice`, which only ever reads defaultPrice and so never
+            reflected a Couple selection here (e.g. Float stayed ₹3,000
+            after switching to Couple, only correcting itself once Step 3
+            recomputed the quote from scratch). */}
         <div className="mt-6 rounded-2xl border border-border bg-card p-5">
           <div className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground mb-2">Your session</div>
           <div className="font-serif text-[19px] leading-tight tracking-tight text-balance">{journeyLabel}</div>
           <div className="mt-3 flex items-center gap-x-6 gap-y-1.5 flex-wrap text-[13px]">
             <div className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-muted-foreground" /><span><span className="font-semibold">{combinedDuration}</span> min total</span></div>
             <div className="inline-flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-muted-foreground" /><span><span className="font-semibold">{selected.length}</span> therapy{selected.length === 1 ? '' : ' combo'}</span></div>
-            <div className="ml-auto font-mono text-[15px] font-semibold">&#x20B9;{combinedPrice.toLocaleString('en-IN')}</div>
+            <div className="ml-auto font-mono text-[15px] font-semibold">&#x20B9;{(hasSessionMode && !sessionModeTouched ? 0 : totalRupees).toLocaleString('en-IN')}</div>
           </div>
         </div>
       </div>
