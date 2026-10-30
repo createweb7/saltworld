@@ -71,7 +71,7 @@ export default function GiftPurchaseClient({ outcome, therapies, therapyMeta }) 
   // the pricing engine for Float/Sauna/Red Light/Cold Plunge, understating
   // the total whenever Couple is selected.
   const sessionMode = guests > 1 ? 'couple' : 'single';
-  const floatDurationMin = outcome?.slug === 'couple-activities' ? 90 : 60;
+  const floatDurationMin = guests > 1 ? 90 : 60;
   useEffect(() => {
     if (selected.length === 0) { setAmount(0); return; }
     let cancelled = false;
