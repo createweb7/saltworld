@@ -194,20 +194,18 @@ export default function CalendarClient({ user }) {
             <div className="min-w-[1400px] grid" style={{ gridTemplateColumns: `160px repeat(${SLOTS.length}, minmax(44px, 1fr))` }}>
               {/* Header row */}
               <div className="sticky left-0 z-10 bg-card border-r border-b border-border text-[11px] uppercase tracking-[0.14em] text-muted-foreground font-semibold px-3 py-2">Resource</div>
-              {/* Left-aligned, not centered: the label marks where its slot
-                  STARTS (standard calendar convention, e.g. Google
-                  Calendar/Outlook), so a booking bar's right edge lines up
-                  exactly under the label of the slot it ends before. Centered
-                  labels made a bar that correctly ended ON a gridline look
-                  like it stopped a whole 15-min column early (reported: a
-                  60-min, 10:30-11:30 booking "looked like" it ended at
-                  11:15, even though its own text and underlying math were
-                  already correct). */}
+              {/* Each label sits ON its column's left gridline (ruler-style
+                  tick), not inside the cell — so a 10:30–11:30 booking spans
+                  exactly from the "10:30" tick to the "11:30" tick. Labels
+                  inside the cell put "11:15" directly above the last quarter
+                  of that bar, which read as "ends at 11:15". */}
               {SLOTS.map((s) => (
-                <div key={s} className={cn(
-                  'border-b border-l border-border text-[10.5px] text-muted-foreground text-left pl-1 py-2 font-mono',
-                  s.endsWith(':00') ? 'text-foreground/70 font-semibold' : ''
-                )}>{s}</div>
+                <div key={s} className="relative h-9 border-b border-l border-border">
+                  <span className={cn(
+                    'absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 px-0.5 bg-card text-[10.5px] text-muted-foreground font-mono whitespace-nowrap',
+                    s.endsWith(':00') ? 'text-foreground/70 font-semibold' : ''
+                  )}>{s}</span>
+                </div>
               ))}
               {resources.map((r) => (
                 <FragmentRow key={r.id} r={r} layout={resourceLayout[r.id]} />
