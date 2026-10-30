@@ -456,6 +456,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatD
   const hasFloat = therapies.some((t) => String(t).includes('float'));
   // Preferred-time concierge flow — the primary UX per Aug-05-2026 direction.
   const [preferredTime, setPreferredTime] = useState('08:00');
+  const [preferredTimeTouched, setPreferredTimeTouched] = useState(false);
   const [recommendations, setRecommendations] = useState([]);
   const [recExpanded, setRecExpanded] = useState(false);       // usedWindow > requestedWindow
   const [recLoading, setRecLoading] = useState(false);
@@ -611,11 +612,12 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatD
     return arr.filter((t) => t >= cutoff);
   }, [date]);
 
-  // If the current preferred time has fallen out of today's options (either
-  // because the date changed or time has simply moved on), snap forward to
-  // the earliest one still offered.
+  // Until the guest picks a time themselves, follow each day's earliest slot —
+  // otherwise today's snap-forward (e.g. to 19:00 at 6:45pm) stuck to every
+  // later date too. A time they chose is kept unless that day doesn't offer it.
   useEffect(() => {
-    if (timeOptions.length && !timeOptions.includes(preferredTime)) {
+    if (!timeOptions.length) return;
+    if (!preferredTimeTouched || !timeOptions.includes(preferredTime)) {
       setPreferredTime(timeOptions[0]);
     }
   }, [timeOptions]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -758,7 +760,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatD
               <select
                 id="preferredTime"
                 value={preferredTime}
-                onChange={(e) => setPreferredTime(e.target.value)}
+                onChange={(e) => { setPreferredTime(e.target.value); setPreferredTimeTouched(true); }}
                 className="h-12 rounded-xl border border-border bg-background px-4 pr-9 text-[16px] font-mono font-semibold focus:outline-none focus:border-foreground/40"
               >
                 {timeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
