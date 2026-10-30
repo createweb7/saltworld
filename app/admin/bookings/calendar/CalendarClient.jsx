@@ -289,13 +289,27 @@ function FragmentRow({ r, layout }) {
                       {b.contact?.name || 'Guest'}{(guests > 1 || children > 0) && <span className="opacity-70"> {'\u00d7'}{guests}{children > 0 ? `+${children}` : ''}</span>}
                     </div>
                     <div className="opacity-80 truncate">{step.therapyName || '\u2014'}</div>
+                    {/* Explicit start\u2013end, so the session's real boundary never
+                        depends on eyeballing which grid column a rounded card
+                        edge lands in \u2014 labels are center-aligned in their
+                        column, which made a card ending exactly on a gridline
+                        look like it stopped a column early. Only shown once
+                        there's room for it (narrow single-column cards keep
+                        just the tooltip). */}
+                    {sessionSpan >= 2 && (
+                      <div className="opacity-60 truncate font-mono text-[9px]">{istHHmm(step.from)}{'\u2013'}{istHHmm(step.to)}</div>
+                    )}
                   </Link>
                   {bufferSpan > 0 && b.status !== 'cancelled' && (
                     <div
-                      className="absolute rounded-md border border-dashed border-foreground/25 bg-foreground/5 z-[5]"
+                      className="absolute rounded-md border border-dashed border-foreground/25 bg-foreground/5 z-[5] flex items-center justify-center"
                       style={{ left: `${sessionSpan * 100}%`, width: `calc(${bufferSpan * 100}% - 4px)`, top, height: itemHeight }}
-                      title={`Room reset \u00b7 ${bufferSpan * SLOT_MIN} min buffer`}
-                    />
+                      title={`Room reset \u00b7 ${bufferSpan * SLOT_MIN} min buffer \u00b7 free from ${istHHmm(step.blockedTo)}`}
+                    >
+                      {bufferSpan >= 2 && (
+                        <span className="text-[9px] font-mono text-muted-foreground truncate px-1">{'\u2192'}{istHHmm(step.blockedTo)}</span>
+                      )}
+                    </div>
                   )}
                 </Fragment>
               );
