@@ -1546,7 +1546,16 @@ async function handle(req, method, segs) {
         if (requestedSlugs.length === 0) return NextResponse.json({ error: 'therapies_required' }, { status: 400 });
         const guests = Math.max(1, Math.min(2, Number(body.guests) || 1));
         const { computeQuote } = await import('@/lib/pricing');
-        const quote = await computeQuote({ therapies: requestedSlugs.map((slug) => ({ slug })), guests });
+        // Same line inputs the gift page quotes with (GiftPurchaseClient):
+        // Couple = couple matrix price + 90-min Float. Slugs alone priced
+        // every Couple gift at the Solo line rate (Couple Float ₹3,000).
+        const sessionMode = guests > 1 ? 'couple' : 'single';
+        const quote = await computeQuote({
+          therapies: requestedSlugs.map((slug) => ({
+            slug, sessionMode, durationMin: slug.includes('float') ? (guests > 1 ? 90 : 60) : undefined,
+          })),
+          guests,
+        });
         amount = Math.round(quote.payableInr);
         if (!amount) return NextResponse.json({ error: 'experience_not_giftable' }, { status: 400 });
         extra = {
