@@ -12,6 +12,7 @@ import { cn } from '@/components/ss/utils';
 import { Wordmark } from '@/components/site/shell';
 import { InlineSignIn } from '@/components/site/inline-sign-in';
 import { OUTCOMES, getOutcome, primaryOutcomeForTherapy } from '@/lib/outcomes';
+import { resolveComboPrice } from '@/lib/combo-pricing';
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                          */
@@ -1886,6 +1887,9 @@ export default function BookingClient({ initialOutcome }) {
     // back to the outcome-level rate × role-multiplier only when the therapy
     // hasn't been priced in the catalog yet.
     const basePrice = parsePrice(o?.pricing?.single?.price);
+    // Couple means 2 in the Salt Cave too. StepSlot syncs `guests` from the
+    // Session type, but only once it mounts — the Therapy step runs earlier.
+    const effGuests = sessionMode === 'couple' && guests < 2 ? 2 : guests;
     // Shared-capacity therapies (e.g. Salt Cave, capacity 7) use a tiered
     // per-person group rate — the solo price applies only to a single guest;
     // the moment there's more than 1, EVERY guest pays the lower per-person
@@ -1907,13 +1911,13 @@ export default function BookingClient({ initialOutcome }) {
         if (p != null) return s + Number(p);
       }
       const dbPrice = Number(meta?.defaultPrice) || 0;
-      if (isShared && (guests > 1 || children > 0)) {
+      if (isShared && (effGuests > 1 || children > 0)) {
         // Children pay the flat child rate each; exactly ONE accompanying
         // adult is free — mirrors the server-side formula in lib/pricing.js.
-        const adultUnitPrice = guests > 1 ? (tieredRate != null ? Number(tieredRate) : dbPrice) : dbPrice;
+        const adultUnitPrice = effGuests > 1 ? (tieredRate != null ? Number(tieredRate) : dbPrice) : dbPrice;
         const childUnitPrice = meta?.childPriceInr != null ? Number(meta.childPriceInr) : dbPrice;
-        const waivedAdults = children > 0 ? Math.min(1, guests) : 0;
-        const chargeableAdults = guests - waivedAdults;
+        const waivedAdults = children > 0 ? Math.min(1, effGuests) : 0;
+        const chargeableAdults = effGuests - waivedAdults;
         return s + (adultUnitPrice * chargeableAdults) + (childUnitPrice * children);
       }
       if (dbPrice > 0) return s + dbPrice;
@@ -1921,6 +1925,18 @@ export default function BookingClient({ initialOutcome }) {
       const mult = PRICE_MULTIPLIER[role] ?? 0.5;
       return s + Math.round(basePrice * mult);
     }, 0);
+    // Same named bundle price the server charges (lib/pricing.js step 1b) —
+    // without it these steps showed the summed ₹7,200 for a Solo
+    // Salt+Sauna+Float that is actually charged ₹6,000. Membership can
+    // still cancel the bundle server-side; the final step shows that quote.
+    if (children === 0 && selected.length >= 2) {
+      const bundle = resolveComboPrice({
+        slugs: selected.map((t) => t.slug),
+        sessionMode: sessionMode === 'couple' ? 'couple' : 'single',
+        floatDurationMin,
+      });
+      if (bundle != null && bundle < sum) return bundle;
+    }
     return sum || basePrice || 0;
   }, [outcome, outcomeMap, therapies, therapyMeta, sessionMode, floatDurationMin, guests, children]);
 
