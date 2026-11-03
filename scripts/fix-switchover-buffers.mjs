@@ -20,12 +20,14 @@
 // uses post (cleaning capped at 30), the tank is held for post + cleaning =
 // 60, so a 13:00-14:30 session frees the tank for the 15:30 anchor.
 //
-// The Infrared Sauna <-> Cold Plunge adjacency exception ("30 mins waiting
-// time while switching is not applicable when they book both") is NOT data —
-// it's handled in code (lib/scheduling.js, isSaunaColdPlungePair), since
-// each room still needs its own full post-buffer for ITS next booking; only
-// the guest's own in-journey wait between those two specific steps is
-// waived.
+// Updated 2026-11-04 to the business's "Rules for Booking" doc, which gives
+// two numbers per therapy: the guest's wait before their next therapy
+// (post) and the gap between two bookings of the same room (post +
+// cleaning): Salt 15/20, Float 30/60, Red Light 15/15, Sauna 30/30, Cold
+// Plunge 30/30, Hot & Cold Contrast 30/45.
+//
+// The QA PDF's Infrared Sauna <-> Cold Plunge no-wait exception was dropped
+// with the rules doc, which gives both a 30-min switch-over.
 //
 // Idempotent — safe to re-run.
 import { createClient } from '@supabase/supabase-js';
@@ -52,11 +54,12 @@ if (!url || !key) throw new Error('Supabase URL/key missing from .env');
 const supabase = createClient(url, key);
 
 const UPDATES = [
-  ['salt-therapy', 15, 0],
+  ['salt-therapy', 15, 5],
   ['float-therapy', 30, 30],
   ['infrared-sauna', 30, 0],
   ['cold-plunge', 30, 0],
-  ['red-light-therapy', 10, 0],
+  ['red-light-therapy', 15, 0],
+  ['hot-cold-contrast', 30, 15],
 ];
 
 for (const [slug, postBufferMin, cleaningBufferMin] of UPDATES) {

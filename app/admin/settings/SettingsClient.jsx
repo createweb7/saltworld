@@ -42,7 +42,14 @@ export default function SettingsClient({ user }) {
   );
 }
 
-/* ---------- Booking rules (cancel / reschedule cutoff) ---------- */
+/* ---------- Booking rules (cancel / reschedule cutoff, booking gates) ---------- */
+const LEAD_TIME_THERAPIES = [
+  ['salt-therapy', 'Salt Therapy'],
+  ['float-therapy', 'Float Therapy'],
+  ['red-light-therapy', 'Red Light Therapy'],
+  ['infrared-sauna', 'Infrared Sauna'],
+  ['cold-plunge', 'Cold Plunge'],
+];
 function BookingRules() {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['settings', 'booking-rules'], queryFn: async () => (await fetch('/api/admin/settings/booking-rules')).json() });
@@ -53,6 +60,9 @@ function BookingRules() {
       cutoffTime: data.cutoffTime || '21:00',
       cutoffDaysBefore: Number(data.cutoffDaysBefore ?? 1),
       minRescheduleNoticeMin: Number(data.minRescheduleNoticeMin ?? 0),
+      perTherapyLeadMin: { ...(data.perTherapyLeadMin || {}) },
+      lastStartTime: data.lastStartTime || '21:00',
+      sameDayLateCutoff: { afterTime: '19:00', slotsAfter: '20:00', ...(data.sameDayLateCutoff || {}) },
     });
   }, [data]);
   const [saving, setSaving] = useState(false);
@@ -88,6 +98,37 @@ function BookingRules() {
         <div className="rounded-lg border border-border bg-muted/40 p-3 mt-3 text-[12px]">
           <span className="text-[10.5px] uppercase tracking-[0.16em] font-semibold text-muted-foreground">Preview</span>
           <div className="mt-1">Customers may cancel/reschedule until <span className="font-mono font-semibold">{form.cutoffTime} IST</span> on day&nbsp;-{form.cutoffDaysBefore || 1} before their session.</div>
+        </div>
+      </div>
+      <div>
+        <div className="text-[13px] font-medium mb-1">Minimum notice to book</div>
+        <div className="text-[12px] text-muted-foreground leading-[1.55] mb-3">
+          A session can only be booked at least this many minutes before it starts.
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          {LEAD_TIME_THERAPIES.map(([slug, label]) => (
+            <Field key={slug} label={label} hint="minutes">
+              <Input type="number" min={0} value={form.perTherapyLeadMin[slug] ?? ''}
+                onChange={(e) => setForm({ ...form, perTherapyLeadMin: { ...form.perTherapyLeadMin, [slug]: Number(e.target.value) } })} />
+            </Field>
+          ))}
+        </div>
+      </div>
+      <div>
+        <div className="text-[13px] font-medium mb-1">Last slot & evening cutoff</div>
+        <div className="text-[12px] text-muted-foreground leading-[1.55] mb-3">
+          No session can start after the last slot. After the evening cutoff, today&rsquo;s late sessions can no longer be booked.
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Last slot" hint="IST · latest start">
+            <Input type="time" value={form.lastStartTime} onChange={(e) => setForm({ ...form, lastStartTime: e.target.value })} />
+          </Field>
+          <Field label="Evening cutoff" hint="After this time today…">
+            <Input type="time" value={form.sameDayLateCutoff.afterTime} onChange={(e) => setForm({ ...form, sameDayLateCutoff: { ...form.sameDayLateCutoff, afterTime: e.target.value } })} />
+          </Field>
+          <Field label="Blocks sessions after" hint="…today, starting later than this">
+            <Input type="time" value={form.sameDayLateCutoff.slotsAfter} onChange={(e) => setForm({ ...form, sameDayLateCutoff: { ...form.sameDayLateCutoff, slotsAfter: e.target.value } })} />
+          </Field>
         </div>
       </div>
       <div className="flex items-center justify-end">
