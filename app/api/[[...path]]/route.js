@@ -1990,5 +1990,6 @@ const route = (m) => async (req, ctx) => {
 
 export const GET = route('GET');
 export const POST = route('POST');
+export const PUT = route('PUT');
 export const PATCH = route('PATCH');
 export const DELETE = route('DELETE');

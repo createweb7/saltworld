@@ -62,7 +62,7 @@ function BookingRules() {
       minRescheduleNoticeMin: Number(data.minRescheduleNoticeMin ?? 0),
       perTherapyLeadMin: { ...(data.perTherapyLeadMin || {}) },
       lastStartTime: data.lastStartTime || '21:00',
-      sameDayLateCutoff: { afterTime: '19:00', slotsAfter: '20:00', ...(data.sameDayLateCutoff || {}) },
+      sameDayLateCutoff: { afterTime: '19:00', slotsAfter: '20:00', ...(data.sameDayLateCutoff?.afterTime ? data.sameDayLateCutoff : {}) },
     });
   }, [data]);
   const [saving, setSaving] = useState(false);
