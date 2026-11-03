@@ -14,6 +14,12 @@
 // cleaning_buffer_min makes "guest wait" and "resource block" the same
 // number for all five, matching the spec's plain wording.
 //
+// Exception, QA Issue #7 (2026-11-04): the Float tank needs a 60-min room
+// reset between bookings, while the guest still only waits 30 min before
+// their next therapy. Float gets post 30 + cleaning 30: the guest's wait
+// uses post (cleaning capped at 30), the tank is held for post + cleaning =
+// 60, so a 13:00-14:30 session frees the tank for the 15:30 anchor.
+//
 // The Infrared Sauna <-> Cold Plunge adjacency exception ("30 mins waiting
 // time while switching is not applicable when they book both") is NOT data —
 // it's handled in code (lib/scheduling.js, isSaunaColdPlungePair), since
@@ -46,17 +52,17 @@ if (!url || !key) throw new Error('Supabase URL/key missing from .env');
 const supabase = createClient(url, key);
 
 const UPDATES = [
-  ['salt-therapy', 15],
-  ['float-therapy', 30],
-  ['infrared-sauna', 30],
-  ['cold-plunge', 30],
-  ['red-light-therapy', 10],
+  ['salt-therapy', 15, 0],
+  ['float-therapy', 30, 30],
+  ['infrared-sauna', 30, 0],
+  ['cold-plunge', 30, 0],
+  ['red-light-therapy', 10, 0],
 ];
 
-for (const [slug, postBufferMin] of UPDATES) {
+for (const [slug, postBufferMin, cleaningBufferMin] of UPDATES) {
   const { data, error } = await supabase
     .from('therapies')
-    .update({ post_buffer_min: postBufferMin, cleaning_buffer_min: 0, updated_at: new Date().toISOString() })
+    .update({ post_buffer_min: postBufferMin, cleaning_buffer_min: cleaningBufferMin, updated_at: new Date().toISOString() })
     .eq('slug', slug)
     .select('slug, post_buffer_min, cleaning_buffer_min');
   if (error) throw error;
