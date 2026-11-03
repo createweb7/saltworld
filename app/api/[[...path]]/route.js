@@ -435,6 +435,15 @@ async function handle(req, method, segs) {
   }
 
   // ------- Public scheduling engine (single source of truth) -------
+  // Logged-in guest (if any), so the slot finders leave out times that clash
+  // with their own other bookings that day — the same check booking create
+  // runs (assertCrossServiceBuffer), which otherwise only fails at payment.
+  const schedulingCustomer = async () => {
+    try {
+      const { getCurrentCustomer } = await import('@/lib/customer-auth');
+      return await getCurrentCustomer();
+    } catch { return null; }
+  };
   if (segs[0] === 'scheduling' && segs[1] === 'slots' && method === 'GET') {
     const u = new URL(req.url);
     const therapies = (u.searchParams.get('therapies') || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -449,7 +458,7 @@ async function handle(req, method, segs) {
     const durationOverrides = floatDurationMin && therapies.includes('float-therapy')
       ? { 'float-therapy': floatDurationMin } : null;
     const { availableJourneySlots } = await import('@/lib/scheduling');
-    const r = await availableJourneySlots({ therapySlugs: therapies, branchId, dateIso: date, sessionMode, durationOverrides, guests, children });
+    const r = await availableJourneySlots({ therapySlugs: therapies, branchId, dateIso: date, sessionMode, durationOverrides, guests, children, customer: await schedulingCustomer() });
     return NextResponse.json(r || { groups: { morning: [], afternoon: [], evening: [] }, totalDurationMin: 0, totalVisitMin: 0 });
   }
 
@@ -487,6 +496,7 @@ async function handle(req, method, segs) {
     const r = await recommendJourneys({
       therapySlugs: therapies, branchId, dateIso: date,
       preferredTime: preferred, windowMin, sessionMode, durationOverrides, guests, children, limit, startOffset: offset,
+      customer: await schedulingCustomer(),
     });
     return NextResponse.json(r);
   }
@@ -505,7 +515,7 @@ async function handle(req, method, segs) {
     const durationOverrides = floatDurationMin && therapy === 'float-therapy'
       ? { 'float-therapy': floatDurationMin } : null;
     const { availableJourneySlots } = await import('@/lib/scheduling');
-    const r = await availableJourneySlots({ therapySlugs: [therapy], branchId, dateIso: date, durationOverrides });
+    const r = await availableJourneySlots({ therapySlugs: [therapy], branchId, dateIso: date, durationOverrides, customer: await schedulingCustomer() });
     if (!r) return NextResponse.json({ groups: { morning: [], afternoon: [], evening: [] }, totalDurationMin: 0, totalVisitMin: 0 });
     if (after) {
       const filt = (arr) => arr.filter((s) => s.time >= after);
@@ -887,11 +897,15 @@ async function handle(req, method, segs) {
           const journeyEndForCross = body.visitToIso
             || body.slotEndAt
             || new Date(new Date(startIso).getTime() + 60 * 60000).toISOString();
+          // Booking for someone else: customerId is the booker's account, not
+          // the guest, so only the guest's own phone says who'd be double-
+          // booked — matching on the booker blocked booking a friend into
+          // the same time as the booker's own visit.
           const csCheck = await assertCrossServiceBuffer({
             therapies: therapySlugs,
             startIso,
             endIso: journeyEndForCross,
-            customerId: body.customerId,
+            customerId: body.bookedForOther ? null : body.customerId,
             phone: body?.contact?.phone,
           });
           if (!csCheck.ok) {
