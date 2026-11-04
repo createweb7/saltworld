@@ -1,0 +1,600 @@
+[
+ {
+  "name": "Salt",
+  "slugs": [
+   "salt-therapy"
+  ],
+  "floatMin": null,
+  "solo": 1600,
+  "couple": 2400,
+  "soloSeparate": 1600,
+  "coupleSeparate": 2400
+ },
+ {
+  "name": "Float",
+  "slugs": [
+   "float-therapy"
+  ],
+  "floatMin": 60,
+  "solo": 3000,
+  "couple": 4000,
+  "soloSeparate": 3000,
+  "coupleSeparate": 4000
+ },
+ {
+  "name": "Float",
+  "slugs": [
+   "float-therapy"
+  ],
+  "floatMin": 90,
+  "solo": 4000,
+  "couple": 5000,
+  "soloSeparate": 4000,
+  "coupleSeparate": 5000
+ },
+ {
+  "name": "Infrared Sauna",
+  "slugs": [
+   "infrared-sauna"
+  ],
+  "floatMin": null,
+  "solo": 2600,
+  "couple": 3900,
+  "soloSeparate": 2600,
+  "coupleSeparate": 3900
+ },
+ {
+  "name": "Cold Plunge",
+  "slugs": [
+   "cold-plunge"
+  ],
+  "floatMin": null,
+  "solo": 960,
+  "couple": 1440,
+  "soloSeparate": 960,
+  "coupleSeparate": 1440
+ },
+ {
+  "name": "Red Light",
+  "slugs": [
+   "red-light-therapy"
+  ],
+  "floatMin": null,
+  "solo": 2200,
+  "couple": 3300,
+  "soloSeparate": 2200,
+  "coupleSeparate": 3300
+ },
+ {
+  "name": "Salt + Float",
+  "slugs": [
+   "salt-therapy",
+   "float-therapy"
+  ],
+  "floatMin": 60,
+  "solo": 4000,
+  "couple": 5500,
+  "soloSeparate": 4600,
+  "coupleSeparate": 6400
+ },
+ {
+  "name": "Salt + Float",
+  "slugs": [
+   "salt-therapy",
+   "float-therapy"
+  ],
+  "floatMin": 90,
+  "solo": 4600,
+  "couple": 6000,
+  "soloSeparate": 5600,
+  "coupleSeparate": 7400
+ },
+ {
+  "name": "Salt + Infrared Sauna",
+  "slugs": [
+   "salt-therapy",
+   "infrared-sauna"
+  ],
+  "floatMin": null,
+  "solo": 3500,
+  "couple": 5000,
+  "soloSeparate": 4200,
+  "coupleSeparate": 6300
+ },
+ {
+  "name": "Float + Infrared Sauna",
+  "slugs": [
+   "float-therapy",
+   "infrared-sauna"
+  ],
+  "floatMin": 60,
+  "solo": 5000,
+  "couple": 7000,
+  "soloSeparate": 5600,
+  "coupleSeparate": 7900
+ },
+ {
+  "name": "Float + Infrared Sauna",
+  "slugs": [
+   "float-therapy",
+   "infrared-sauna"
+  ],
+  "floatMin": 90,
+  "solo": 6000,
+  "couple": 8000,
+  "soloSeparate": 6600,
+  "coupleSeparate": 8900
+ },
+ {
+  "name": "Salt + Cold Plunge",
+  "slugs": [
+   "salt-therapy",
+   "cold-plunge"
+  ],
+  "floatMin": null,
+  "solo": 2100,
+  "couple": 3100,
+  "soloSeparate": 2560,
+  "coupleSeparate": 3840
+ },
+ {
+  "name": "Float + Cold Plunge",
+  "slugs": [
+   "float-therapy",
+   "cold-plunge"
+  ],
+  "floatMin": 60,
+  "solo": 3500,
+  "couple": 4700,
+  "soloSeparate": 3960,
+  "coupleSeparate": 5440
+ },
+ {
+  "name": "Float + Cold Plunge",
+  "slugs": [
+   "float-therapy",
+   "cold-plunge"
+  ],
+  "floatMin": 90,
+  "solo": 4400,
+  "couple": 5600,
+  "soloSeparate": 4960,
+  "coupleSeparate": 6440
+ },
+ {
+  "name": "Infrared Sauna + Cold Plunge",
+  "slugs": [
+   "infrared-sauna",
+   "cold-plunge"
+  ],
+  "floatMin": null,
+  "solo": 3000,
+  "couple": 4700,
+  "soloSeparate": 3560,
+  "coupleSeparate": 5340
+ },
+ {
+  "name": "Salt + Red Light",
+  "slugs": [
+   "salt-therapy",
+   "red-light-therapy"
+  ],
+  "floatMin": null,
+  "solo": 3100,
+  "couple": 4600,
+  "soloSeparate": 3800,
+  "coupleSeparate": 5700
+ },
+ {
+  "name": "Float + Red Light",
+  "slugs": [
+   "float-therapy",
+   "red-light-therapy"
+  ],
+  "floatMin": 60,
+  "solo": 4200,
+  "couple": 5800,
+  "soloSeparate": 5200,
+  "coupleSeparate": 7300
+ },
+ {
+  "name": "Float + Red Light",
+  "slugs": [
+   "float-therapy",
+   "red-light-therapy"
+  ],
+  "floatMin": 90,
+  "solo": 5200,
+  "couple": 6800,
+  "soloSeparate": 6200,
+  "coupleSeparate": 8300
+ },
+ {
+  "name": "Infrared Sauna + Red Light",
+  "slugs": [
+   "infrared-sauna",
+   "red-light-therapy"
+  ],
+  "floatMin": null,
+  "solo": 3800,
+  "couple": 5900,
+  "soloSeparate": 4800,
+  "coupleSeparate": 7200
+ },
+ {
+  "name": "Cold Plunge + Red Light",
+  "slugs": [
+   "cold-plunge",
+   "red-light-therapy"
+  ],
+  "floatMin": null,
+  "solo": 2500,
+  "couple": 3800,
+  "soloSeparate": 3160,
+  "coupleSeparate": 4740
+ },
+ {
+  "name": "Salt + Float + Infrared Sauna",
+  "slugs": [
+   "salt-therapy",
+   "float-therapy",
+   "infrared-sauna"
+  ],
+  "floatMin": 60,
+  "solo": 6000,
+  "couple": 8000,
+  "soloSeparate": 7200,
+  "coupleSeparate": 10300
+ },
+ {
+  "name": "Salt + Float + Infrared Sauna",
+  "slugs": [
+   "salt-therapy",
+   "float-therapy",
+   "infrared-sauna"
+  ],
+  "floatMin": 90,
+  "solo": 7000,
+  "couple": 9000,
+  "soloSeparate": 8200,
+  "coupleSeparate": 11300
+ },
+ {
+  "name": "Salt + Float + Cold Plunge",
+  "slugs": [
+   "salt-therapy",
+   "float-therapy",
+   "cold-plunge"
+  ],
+  "floatMin": 60,
+  "solo": 4700,
+  "couple": 6000,
+  "soloSeparate": 5560,
+  "coupleSeparate": 7840
+ },
+ {
+  "name": "Salt + Float + Cold Plunge",
+  "slugs": [
+   "salt-therapy",
+   "float-therapy",
+   "cold-plunge"
+  ],
+  "floatMin": 90,
+  "solo": 5700,
+  "couple": 7000,
+  "soloSeparate": 6560,
+  "coupleSeparate": 8840
+ },
+ {
+  "name": "Salt + Infrared Sauna + Cold Plunge",
+  "slugs": [
+   "salt-therapy",
+   "infrared-sauna",
+   "cold-plunge"
+  ],
+  "floatMin": null,
+  "solo": 4500,
+  "couple": 6300,
+  "soloSeparate": 5160,
+  "coupleSeparate": 7740
+ },
+ {
+  "name": "Float + Infrared Sauna + Cold Plunge",
+  "slugs": [
+   "float-therapy",
+   "infrared-sauna",
+   "cold-plunge"
+  ],
+  "floatMin": 60,
+  "solo": 5500,
+  "couple": 8000,
+  "soloSeparate": 6560,
+  "coupleSeparate": 9340
+ },
+ {
+  "name": "Float + Infrared Sauna + Cold Plunge",
+  "slugs": [
+   "float-therapy",
+   "infrared-sauna",
+   "cold-plunge"
+  ],
+  "floatMin": 90,
+  "solo": 6500,
+  "couple": 9000,
+  "soloSeparate": 7560,
+  "coupleSeparate": 10340
+ },
+ {
+  "name": "Salt + Float + Red Light",
+  "slugs": [
+   "salt-therapy",
+   "float-therapy",
+   "red-light-therapy"
+  ],
+  "floatMin": 60,
+  "solo": 5500,
+  "couple": 7700,
+  "soloSeparate": 6800,
+  "coupleSeparate": 9700
+ },
+ {
+  "name": "Salt + Float + Red Light",
+  "slugs": [
+   "salt-therapy",
+   "float-therapy",
+   "red-light-therapy"
+  ],
+  "floatMin": 90,
+  "solo": 6500,
+  "couple": 8700,
+  "soloSeparate": 7800,
+  "coupleSeparate": 10700
+ },
+ {
+  "name": "Salt + Infrared Sauna + Red Light",
+  "slugs": [
+   "salt-therapy",
+   "infrared-sauna",
+   "red-light-therapy"
+  ],
+  "floatMin": null,
+  "solo": 5200,
+  "couple": 7800,
+  "soloSeparate": 6400,
+  "coupleSeparate": 9600
+ },
+ {
+  "name": "Float + Infrared Sauna + Red Light",
+  "slugs": [
+   "float-therapy",
+   "infrared-sauna",
+   "red-light-therapy"
+  ],
+  "floatMin": 60,
+  "solo": 6300,
+  "couple": 9000,
+  "soloSeparate": 7800,
+  "coupleSeparate": 11200
+ },
+ {
+  "name": "Float + Infrared Sauna + Red Light",
+  "slugs": [
+   "float-therapy",
+   "infrared-sauna",
+   "red-light-therapy"
+  ],
+  "floatMin": 90,
+  "solo": 7300,
+  "couple": 10000,
+  "soloSeparate": 8800,
+  "coupleSeparate": 12200
+ },
+ {
+  "name": "Salt + Cold Plunge + Red Light",
+  "slugs": [
+   "salt-therapy",
+   "cold-plunge",
+   "red-light-therapy"
+  ],
+  "floatMin": null,
+  "solo": 3900,
+  "couple": 5800,
+  "soloSeparate": 4760,
+  "coupleSeparate": 7140
+ },
+ {
+  "name": "Float + Cold Plunge + Red Light",
+  "slugs": [
+   "float-therapy",
+   "cold-plunge",
+   "red-light-therapy"
+  ],
+  "floatMin": 60,
+  "solo": 5000,
+  "couple": 7000,
+  "soloSeparate": 6160,
+  "coupleSeparate": 8740
+ },
+ {
+  "name": "Float + Cold Plunge + Red Light",
+  "slugs": [
+   "float-therapy",
+   "cold-plunge",
+   "red-light-therapy"
+  ],
+  "floatMin": 90,
+  "solo": 6000,
+  "couple": 8000,
+  "soloSeparate": 7160,
+  "coupleSeparate": 9740
+ },
+ {
+  "name": "Infrared Sauna + Cold Plunge + Red Light",
+  "slugs": [
+   "infrared-sauna",
+   "cold-plunge",
+   "red-light-therapy"
+  ],
+  "floatMin": null,
+  "solo": 4700,
+  "couple": 7000,
+  "soloSeparate": 5760,
+  "coupleSeparate": 8640
+ },
+ {
+  "name": "Salt + Float + Infrared Sauna + Cold Plunge",
+  "slugs": [
+   "salt-therapy",
+   "float-therapy",
+   "infrared-sauna",
+   "cold-plunge"
+  ],
+  "floatMin": 60,
+  "solo": 7000,
+  "couple": 9500,
+  "soloSeparate": 8160,
+  "coupleSeparate": 11740
+ },
+ {
+  "name": "Salt + Float + Infrared Sauna + Cold Plunge",
+  "slugs": [
+   "salt-therapy",
+   "float-therapy",
+   "infrared-sauna",
+   "cold-plunge"
+  ],
+  "floatMin": 90,
+  "solo": 7600,
+  "couple": 10000,
+  "soloSeparate": 9160,
+  "coupleSeparate": 12740
+ },
+ {
+  "name": "Salt + Float + Infrared Sauna + Red Light",
+  "slugs": [
+   "salt-therapy",
+   "float-therapy",
+   "infrared-sauna",
+   "red-light-therapy"
+  ],
+  "floatMin": 60,
+  "solo": 7700,
+  "couple": 11100,
+  "soloSeparate": 9400,
+  "coupleSeparate": 13600
+ },
+ {
+  "name": "Salt + Float + Infrared Sauna + Red Light",
+  "slugs": [
+   "salt-therapy",
+   "float-therapy",
+   "infrared-sauna",
+   "red-light-therapy"
+  ],
+  "floatMin": 90,
+  "solo": 8500,
+  "couple": 11900,
+  "soloSeparate": 10400,
+  "coupleSeparate": 14600
+ },
+ {
+  "name": "Salt + Float + Cold Plunge + Red Light",
+  "slugs": [
+   "salt-therapy",
+   "float-therapy",
+   "cold-plunge",
+   "red-light-therapy"
+  ],
+  "floatMin": 60,
+  "solo": 6300,
+  "couple": 9000,
+  "soloSeparate": 7760,
+  "coupleSeparate": 11140
+ },
+ {
+  "name": "Salt + Float + Cold Plunge + Red Light",
+  "slugs": [
+   "salt-therapy",
+   "float-therapy",
+   "cold-plunge",
+   "red-light-therapy"
+  ],
+  "floatMin": 90,
+  "solo": 7300,
+  "couple": 10000,
+  "soloSeparate": 8760,
+  "coupleSeparate": 12140
+ },
+ {
+  "name": "Salt + Infrared Sauna + Cold Plunge + Red Light",
+  "slugs": [
+   "salt-therapy",
+   "infrared-sauna",
+   "cold-plunge",
+   "red-light-therapy"
+  ],
+  "floatMin": null,
+  "solo": 6000,
+  "couple": 9000,
+  "soloSeparate": 7360,
+  "coupleSeparate": 11040
+ },
+ {
+  "name": "Float + Infrared Sauna + Cold Plunge + Red Light",
+  "slugs": [
+   "float-therapy",
+   "infrared-sauna",
+   "cold-plunge",
+   "red-light-therapy"
+  ],
+  "floatMin": 60,
+  "solo": 7100,
+  "couple": 10300,
+  "soloSeparate": 8760,
+  "coupleSeparate": 12640
+ },
+ {
+  "name": "Float + Infrared Sauna + Cold Plunge + Red Light",
+  "slugs": [
+   "float-therapy",
+   "infrared-sauna",
+   "cold-plunge",
+   "red-light-therapy"
+  ],
+  "floatMin": 90,
+  "solo": 8100,
+  "couple": 11100,
+  "soloSeparate": 9760,
+  "coupleSeparate": 13640
+ },
+ {
+  "name": "Salt + Float + Infrared Sauna + Cold Plunge + Red Light",
+  "slugs": [
+   "salt-therapy",
+   "float-therapy",
+   "infrared-sauna",
+   "cold-plunge",
+   "red-light-therapy"
+  ],
+  "floatMin": 60,
+  "solo": 8400,
+  "couple": 12000,
+  "soloSeparate": 10360,
+  "coupleSeparate": 15040
+ },
+ {
+  "name": "Salt + Float + Infrared Sauna + Cold Plunge + Red Light",
+  "slugs": [
+   "salt-therapy",
+   "float-therapy",
+   "infrared-sauna",
+   "cold-plunge",
+   "red-light-therapy"
+  ],
+  "floatMin": 90,
+  "solo": 9400,
+  "couple": 13000,
+  "soloSeparate": 11360,
+  "coupleSeparate": 16040
+ }
+]
