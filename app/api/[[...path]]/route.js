@@ -537,7 +537,11 @@ async function handle(req, method, segs) {
     const durationOverrides = floatDurationMin && therapy === 'float-therapy'
       ? { 'float-therapy': floatDurationMin } : null;
     const { availableJourneySlots } = await import('@/lib/scheduling');
-    const r = await availableJourneySlots({ therapySlugs: [therapy], branchId, dateIso: date, durationOverrides, customer: await schedulingCustomer() });
+    // Headcount matters for shared rooms (Salt Cave: 7, or 3 with kids) —
+    // without it a Couple / Group / Kids booking was offered part-full slots.
+    const guests = Math.max(1, Number(u.searchParams.get('guests')) || 1);
+    const children = Math.max(0, Math.min(3, Number(u.searchParams.get('children')) || 0));
+    const r = await availableJourneySlots({ therapySlugs: [therapy], branchId, dateIso: date, durationOverrides, guests, children, customer: await schedulingCustomer() });
     if (!r) return NextResponse.json({ groups: { morning: [], afternoon: [], evening: [] }, totalDurationMin: 0, totalVisitMin: 0 });
     if (after) {
       const filt = (arr) => arr.filter((s) => s.time >= after);
@@ -854,6 +858,14 @@ async function handle(req, method, segs) {
           message: 'Up to 3 children can be admitted per booking.',
           meta: { maxChildren: 3 },
         }, { status: 400 });
+      }
+      if (therapySlugs.length > 0 && (requestedGuests > 2 || requestedChildren > 0)) {
+        // Group (3+) and Kids bookings: one therapy on its own, within its
+        // group / kids limits — see lib/group-booking.js.
+        const { checkPartySize } = await import('@/lib/group-booking');
+        const { data: partyRows } = await supabase.from('therapies').select('*').in('slug', therapySlugs);
+        const bad = checkPartySize((partyRows || []).map(toTherapy), requestedGuests, requestedChildren);
+        if (bad) return NextResponse.json(bad, { status: 400 });
       }
       if (therapySlugs.length > 0 && (requestedGuests > 1 || requestedChildren > 0)) {
         const { data: capDocs } = await supabase.from('therapies').select('slug, max_capacity').in('slug', therapySlugs);

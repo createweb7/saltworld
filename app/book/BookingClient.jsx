@@ -13,6 +13,7 @@ import { Wordmark } from '@/components/site/shell';
 import { InlineSignIn } from '@/components/site/inline-sign-in';
 import { OUTCOMES, getOutcome, primaryOutcomeForTherapy } from '@/lib/outcomes';
 import { resolveComboPrice } from '@/lib/combo-pricing';
+import { groupConfig, kidsAllowed, GROUP_MIN_GUESTS, KIDS_SLOT_MAX_PEOPLE } from '@/lib/group-booking';
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                          */
@@ -158,7 +159,86 @@ function parsePrice(str) {
   return Number(String(str || '0').replace(/[^\d]/g, '')) || 0;
 }
 
-function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta = {}, isDirectMode = false, sessionMode, setSessionMode, sessionModeTouched, setSessionModeTouched, totalRupees = 0 }) {
+// Group / Kids options for the current selection (see lib/group-booking.js).
+function partyOptionsFor(slugs, therapyMeta) {
+  const only = slugs.length === 1 ? therapyMeta?.[slugs[0]] : null;
+  return { group: only ? groupConfig(only) : null, kids: only && kidsAllowed(only) ? only : null };
+}
+
+function Counter({ label, value, min, max, onChange, note }) {
+  const btn = 'h-8 w-8 rounded-full border border-border flex items-center justify-center text-[15px] disabled:opacity-30';
+  return (
+    <div className="flex items-center justify-between gap-4 py-1.5">
+      <div>
+        <div className="text-[13.5px] font-medium">{label}</div>
+        {note && <div className="text-[11px] text-muted-foreground">{note}</div>}
+      </div>
+      <div className="flex items-center gap-3">
+        <button type="button" className={btn} disabled={value <= min} onClick={() => onChange(Math.max(min, value - 1))} aria-label={`Fewer ${label}`}>&minus;</button>
+        <span className="w-5 text-center font-mono text-[14px]">{value}</span>
+        <button type="button" className={btn} disabled={value >= max} onClick={() => onChange(Math.min(max, value + 1))} aria-label={`More ${label}`}>+</button>
+      </div>
+    </div>
+  );
+}
+
+// Session type: Solo / Couple, plus Group and Kids when the selection allows.
+function PartyPicker({ options, hasSessionMode, hasFloatOnly, sessionMode, sessionModeTouched, partyType, onChoose,
+  groupSize, setGroupSize, kidsCount, setKidsCount, kidsAdults, setKidsAdults }) {
+  // Therapies priced solo/couple need an explicit pick; the Salt Cave alone
+  // defaults to Solo.
+  const g = options.group;
+  // Group / Kids picked, then the selection changed: show Solo until the
+  // parent resets it (same render), never an option that no longer applies.
+  const fits = (partyType === 'group' && !g) || (partyType === 'kids' && !options.kids) ? 'solo' : partyType;
+  const active = (sessionModeTouched || !hasSessionMode) ? fits : null;
+  const choices = [
+    ['solo', 'Solo'], ['couple', 'Couple'],
+    ...(g ? [['group', 'Group']] : []),
+    ...(options.kids ? [['kids', 'Kids']] : []),
+  ];
+  const kidsMax = KIDS_SLOT_MAX_PEOPLE;
+  let hint;
+  if (!active) hint = 'Select a session type to see the price for this journey.';
+  else if (active === 'group') hint = g.shared
+    ? `For ${GROUP_MIN_GUESTS}–${g.maxGuests} people, ₹${g.perPersonInr.toLocaleString('en-IN')} per person. You may share the cave with other guests.`
+    : `For ${GROUP_MIN_GUESTS}–${g.maxGuests} people, ₹${g.perPersonInr.toLocaleString('en-IN')} per person. The room is reserved for your group.`;
+  else if (active === 'kids') hint = `₹${Number(options.kids.childPriceInr).toLocaleString('en-IN')} per child, with one accompanying adult free. A kids session holds up to ${kidsMax} people in total.`;
+  else if (hasFloatOnly) hint = sessionMode === 'couple'
+    ? 'Couple sessions use a couple-capable float tank for two people together. Fewer tanks support couple mode — book early.'
+    : 'Standard float in a solo tank.';
+  else hint = active === 'couple' ? 'Two people, together in the same room, across your selected therapies.' : 'One person, across your selected therapies.';
+
+  return (
+    <div className="mt-6 rounded-2xl border border-border bg-card p-5 md:p-6">
+      <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold mb-2">Session type</div>
+      <div className="inline-flex flex-wrap rounded-full border border-border p-0.5 bg-background">
+        {choices.map(([id, label]) => (
+          <button key={id} type="button" onClick={() => onChoose(id)}
+            className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
+              active === id ? (id === 'solo' ? 'bg-foreground text-background' : 'bg-brand text-white') : 'text-muted-foreground hover:text-foreground')}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {active === 'group' && g && (
+        <div className="mt-4 max-w-[360px]">
+          <Counter label="People" value={groupSize} min={GROUP_MIN_GUESTS} max={g.maxGuests} onChange={setGroupSize} />
+        </div>
+      )}
+      {active === 'kids' && (
+        <div className="mt-4 max-w-[360px] divide-y divide-border">
+          <Counter label="Children" value={kidsCount} min={1} max={kidsMax - kidsAdults} onChange={setKidsCount} />
+          <Counter label="Adults" value={kidsAdults} min={1} max={kidsMax - kidsCount} onChange={setKidsAdults}
+            note={kidsAdults > 1 ? `One adult free, ₹${Number(options.kids.additionalGuestPriceInr ?? options.kids.defaultPrice).toLocaleString('en-IN')} for each extra adult` : 'Accompanying adult is free'} />
+        </div>
+      )}
+      <div className="mt-2 text-[11.5px] text-muted-foreground max-w-[520px] leading-[1.5]">{hint}</div>
+    </div>
+  );
+}
+
+function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta = {}, isDirectMode = false, sessionMode, setSessionMode, sessionModeTouched, setSessionModeTouched, totalRupees = 0, party = {} }) {
   const o = getOutcome(outcome);
   // Prefer DB override (admin-configurable), fall back to static outcome data.
   const therapies = mappingOverride?.length ? mappingOverride : (o?.protocol?.therapies || []);
@@ -170,6 +250,8 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
   // real price can be shown (see sessionModeTouched in the parent).
   const sessionModeTherapies = values.filter((slug) => Array.isArray(therapyMeta?.[slug]?.durationOptions) && therapyMeta[slug].durationOptions.length > 0);
   const hasSessionMode = sessionModeTherapies.length > 0;
+  // Group / Kids are offered only for a single therapy booked on its own.
+  const partyOptions = partyOptionsFor(values, therapyMeta);
 
   // Resolve the true duration for a therapy: static override > DB meta > outcome-level fallback.
   const durationFor = (t) => t.durationMin || therapyMeta[t.slug]?.durationMin || baseDuration;
@@ -272,33 +354,10 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
             parent's canNext). The direct-mode branch previously had no way
             to set this at all, so Continue was permanently stuck disabled
             for any direct entry into one of these therapies. */}
-        {hasSessionMode && (
-          <div className="mt-6 rounded-2xl border border-border bg-card p-5 md:p-6">
-            <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold mb-2">
-              Session type
-            </div>
-            <div className="inline-flex rounded-full border border-border p-0.5 bg-background">
-              <button type="button" onClick={() => { setSessionMode('single'); setSessionModeTouched(true); }}
-                className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
-                  sessionModeTouched && sessionMode === 'single' ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground')}>
-                Solo
-              </button>
-              <button type="button" onClick={() => { setSessionMode('couple'); setSessionModeTouched(true); }}
-                className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
-                  sessionModeTouched && sessionMode === 'couple' ? 'bg-brand text-white' : 'text-muted-foreground hover:text-foreground')}>
-                Couple
-              </button>
-            </div>
-            <div className="mt-2 text-[11.5px] text-muted-foreground max-w-[520px] leading-[1.5]">
-              {!sessionModeTouched
-                ? 'Select solo or couple to see the price for this journey.'
-                : hasFloat && sessionModeTherapies.length === 1
-                  ? (sessionMode === 'couple'
-                      ? 'Couple sessions use a couple-capable float tank for two people together. Fewer tanks support couple mode — book early.'
-                      : 'Standard float in a solo tank.')
-                  : (sessionMode === 'couple' ? 'Two people, together in the same room, across your selected therapies.' : 'One person, across your selected therapies.')}
-            </div>
-          </div>
+        {(hasSessionMode || partyOptions.group || partyOptions.kids) && (
+          <PartyPicker {...party} options={partyOptions} hasSessionMode={hasSessionMode}
+            hasFloatOnly={hasFloat && sessionModeTherapies.length === 1}
+            sessionMode={sessionMode} sessionModeTouched={sessionModeTouched} />
         )}
 
         {/* Same journey summary bar as outcome flow. Price must come from
@@ -370,33 +429,10 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
           a durationOptions matrix (Float, Sauna, Red Light, Cold Plunge).
           Decided here, before date & time, since it also affects which
           resources (e.g. couple-capable float tanks) are searched later. */}
-      {hasSessionMode && (
-        <div className="mt-6 rounded-2xl border border-border bg-card p-5 md:p-6">
-          <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold mb-2">
-            Session type
-          </div>
-          <div className="inline-flex rounded-full border border-border p-0.5 bg-background">
-            <button type="button" onClick={() => { setSessionMode('single'); setSessionModeTouched(true); }}
-              className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
-                sessionModeTouched && sessionMode === 'single' ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground')}>
-              Solo
-            </button>
-            <button type="button" onClick={() => { setSessionMode('couple'); setSessionModeTouched(true); }}
-              className={cn('h-9 px-4 text-[12.5px] font-medium rounded-full transition-all',
-                sessionModeTouched && sessionMode === 'couple' ? 'bg-brand text-white' : 'text-muted-foreground hover:text-foreground')}>
-              Couple
-            </button>
-          </div>
-          <div className="mt-2 text-[11.5px] text-muted-foreground max-w-[520px] leading-[1.5]">
-            {!sessionModeTouched
-              ? 'Select solo or couple to see the price for this journey.'
-              : hasFloat && sessionModeTherapies.length === 1
-                ? (sessionMode === 'couple'
-                    ? 'Couple sessions use a couple-capable float tank for two people together. Fewer tanks support couple mode — book early.'
-                    : 'Standard float in a solo tank.')
-                : (sessionMode === 'couple' ? 'Two people, together in the same room, across your selected therapies.' : 'One person, across your selected therapies.')}
-          </div>
-        </div>
+      {(hasSessionMode || partyOptions.group || partyOptions.kids) && (
+        <PartyPicker {...party} options={partyOptions} hasSessionMode={hasSessionMode}
+          hasFloatOnly={hasFloat && sessionModeTherapies.length === 1}
+          sessionMode={sessionMode} sessionModeTouched={sessionModeTouched} />
       )}
 
       {/* Combined journey summary — updates as therapies are toggled */}
@@ -433,7 +469,7 @@ function fmtVisit(mins) {
   return `${mins}m`;
 }
 
-function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatDurationMin, setFloatDurationMin, guests, setGuests, children, setChildren, totalRupees = 0, onReorderTherapies }) {
+function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatDurationMin, setFloatDurationMin, guests, setGuests, children, setChildren, totalRupees = 0, onReorderTherapies, partyType = 'solo' }) {
   const days = useMemo(() => {
     // Auto-rollover: if IST wall-clock is past 20:00 (branch close) we hide
     // "today" from the picker and default to tomorrow. TC-1 fix.
@@ -580,18 +616,20 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatD
   // step any more. They're driven by the Session type toggle on the
   // Therapy step: Solo -> 1, Couple -> 2 (clamped to the room's cap).
   // Children are no longer offered at all, so they always stay 0.
+  const fixedParty = partyType === 'group' || partyType === 'kids'; // headcount set on the Therapy step
   useEffect(() => {
+    if (fixedParty) return;
     if (sharedCapacity <= 1) {
       if (guests !== 1) setGuests(1);
       return;
     }
     const target = sessionMode === 'couple' ? Math.min(2, sharedCapacity) : 1;
     if (guests !== target) setGuests(target);
-  }, [sharedCapacity, sessionMode, guests, setGuests]);
+  }, [sharedCapacity, sessionMode, guests, setGuests, fixedParty]);
 
   useEffect(() => {
-    if (children !== 0) setChildren(0);
-  }, [children, setChildren]);
+    if (!fixedParty && children !== 0) setChildren(0);
+  }, [children, setChildren, fixedParty]);
 
   // Precompute time-picker options: every 15 min from 08:00 (centre opens) to 20:00.
   // Float always shows here too — the guest picks any preferred time and the
@@ -663,7 +701,9 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatD
                     <div className="mt-2 mb-1 ml-6 pl-3 border-l-2 border-brand/20">
                       <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
                         <Users className="h-3.5 w-3.5 text-brand shrink-0" />
-                        <span>Capacity: 1&ndash;{sharedCapacity} people per time slot &mdash; you may share with other guests.</span>
+                        <span>{children > 0
+                          ? <>Kids session: up to 3 people in total &mdash; you may share with other guests.</>
+                          : <>Capacity: 1&ndash;{sharedCapacity} people per time slot &mdash; you may share with other guests.</>}</span>
                       </div>
                     </div>
                   )}
@@ -942,7 +982,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatD
           )}
 
           {!loading && manualPickerMode === 'manual' && (
-            <ManualJourneyPicker therapies={therapies} therapyMeta={therapyMeta} date={date} value={value} onChange={onChange} onReorder={onReorderTherapies} floatDurationMin={hasFloat ? floatDurationMin : null} />
+            <ManualJourneyPicker therapies={therapies} therapyMeta={therapyMeta} date={date} value={value} onChange={onChange} onReorder={onReorderTherapies} floatDurationMin={hasFloat ? floatDurationMin : null} guests={guests} children={children} />
           )}
         </>
       )}
@@ -1026,7 +1066,7 @@ function AutoJourneyPicker({ journeyData, date, therapyMeta, value, onChange }) 
 }
 
 /* Manual mode — one card per therapy, downstream cards filter by prior pick. */
-function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, onReorder, floatDurationMin = null }) {
+function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, onReorder, floatDurationMin = null, guests = 1, children = 0 }) {
   // picks[i] = { time, startIso, endIso, planEntry } for therapy i, or undefined
   const [picks, setPicks] = useState(() => value?.plan
     ? value.plan.map((p) => ({ time: p.from ? new Date(new Date(p.from).getTime() + 330*60000).toISOString().slice(11,16) : null, startIso: p.from, endIso: p.to }))
@@ -1061,6 +1101,8 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, on
         setLoadingIdx(i);
         const q = new URLSearchParams({ therapy: therapies[i], date });
         if (floatDurationMin && String(therapies[i]).includes('float')) q.set('floatDurationMin', String(floatDurationMin));
+        if (guests > 1) q.set('guests', String(guests));
+        if (children > 0) q.set('children', String(children));
         const after = cutoffFor(i);
         if (after) q.set('after', after);
         try {
@@ -1074,7 +1116,7 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, on
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [therapies.join(','), date, floatDurationMin, picks.map((p) => p?.endIso || '').join(',')]);
+  }, [therapies.join(','), date, floatDurationMin, guests, children, picks.map((p) => p?.endIso || '').join(',')]);
 
   const pickSlot = (i, slot) => {
     const meta = therapyMeta[therapies[i]];
@@ -1802,6 +1844,32 @@ export default function BookingClient({ initialOutcome }) {
   const [floatDurationMin, setFloatDurationMin] = useState(initialResolvedOutcome === 'couple-activities' ? 90 : 60); // float-therapy: 60 | 90
   const [guests, setGuests] = useState(1); // adult headcount for shared-capacity therapies (e.g. Salt Cave)
   const [children, setChildren] = useState(0); // charged children joining, max 3, 1 free accompanying adult each
+  // Session type beyond Solo/Couple: 'group' (3+ people, one therapy on its
+  // own) and 'kids' (Salt Cave with children). Both drive guests/children.
+  const [partyType, setPartyType] = useState(initialResolvedOutcome === 'couple-activities' ? 'couple' : 'solo');
+  const [groupSize, setGroupSize] = useState(GROUP_MIN_GUESTS);
+  const [kidsCount, setKidsCount] = useState(1);
+  const [kidsAdults, setKidsAdults] = useState(1);
+  useEffect(() => {
+    if (partyType === 'group') { setGuests(groupSize); setChildren(0); }
+    else if (partyType === 'kids') { setGuests(kidsAdults); setChildren(kidsCount); }
+    else { setGuests(1); setChildren(0); } // Couple's 2 in the Salt Cave is set on the Date & time step
+  }, [partyType, groupSize, kidsCount, kidsAdults]);
+  // Group / Kids only fit the selection they were picked for.
+  useEffect(() => {
+    if (partyType !== 'group' && partyType !== 'kids') return;
+    if (!therapies.length || !therapies.every((sl) => therapyMeta[sl])) return; // details not loaded yet
+    const opts = partyOptionsFor(therapies, therapyMeta);
+    if (partyType === 'group' && opts.group) { if (groupSize > opts.group.maxGuests) setGroupSize(opts.group.maxGuests); return; }
+    if (partyType === 'kids' && opts.kids) return;
+    setPartyType('solo'); setSessionMode('single');
+  }, [therapies, therapyMeta]); // eslint-disable-line react-hooks/exhaustive-deps
+  const chooseParty = (type) => {
+    setPartyType(type);
+    setSessionMode(type === 'couple' ? 'couple' : 'single');
+    setSessionModeTouched(true);
+  };
+  const party = { partyType, onChoose: chooseParty, groupSize, setGroupSize, kidsCount, setKidsCount, kidsAdults, setKidsAdults };
   const [coupon, setCoupon] = useState(null);              // { code, discountInr, applied } | null
   // Suggestions surfaced when the confirm step receives a 409 slot_unavailable
   const [slotConflict, setSlotConflict] = useState(null); // { reason, suggestions:[{...}] }
@@ -1844,6 +1912,10 @@ export default function BookingClient({ initialOutcome }) {
     if (draft.therapies) setTherapies(draft.therapies);
     if (draft.slot) setSlot(draft.slot);
     if (draft.sessionMode) setSessionMode(draft.sessionMode);
+    if (draft.partyType) setPartyType(draft.partyType);
+    if (draft.groupSize) setGroupSize(draft.groupSize);
+    if (draft.kidsCount) setKidsCount(draft.kidsCount);
+    if (draft.kidsAdults) setKidsAdults(draft.kidsAdults);
     if (draft.floatDurationMin) setFloatDurationMin(draft.floatDurationMin);
     if (draft.guests) setGuests(draft.guests);
     if (draft.children) setChildren(draft.children);
@@ -1866,6 +1938,7 @@ export default function BookingClient({ initialOutcome }) {
     try {
       sessionStorage.setItem('sw_booking_resume', JSON.stringify({
         outcome, therapies, slot, sessionMode, floatDurationMin, guests, children, contact, bookingFor, payment, stepId,
+        partyType, groupSize, kidsCount, kidsAdults,
       }));
     } catch { /* storage unavailable — Google flow will just land on /account instead */ }
     const returnTo = `${window.location.pathname}?resume=1`;
@@ -1909,6 +1982,11 @@ export default function BookingClient({ initialOutcome }) {
       // single-duration solo/couple therapy like Sauna/Red Light/Cold
       // Plunge) prices off the selected duration + session mode.
       const options = Array.isArray(meta?.durationOptions) ? meta.durationOptions : null;
+      // Group in a private room (Cold Plunge): per-person group rate.
+      if (partyType === 'group' && !isShared && guests >= GROUP_MIN_GUESTS) {
+        const g = groupConfig(meta);
+        if (g) return s + g.perPersonInr * guests;
+      }
       if (options?.length && !isShared) {
         const wantDur = String(t.slug).includes('float') ? Number(floatDurationMin) : Number(meta?.durationMin);
         const opt = options.find((o2) => Number(o2.durationMin) === wantDur) || options[0];
@@ -1943,7 +2021,7 @@ export default function BookingClient({ initialOutcome }) {
       if (bundle != null && bundle < sum) return bundle;
     }
     return sum || basePrice || 0;
-  }, [outcome, outcomeMap, therapies, therapyMeta, sessionMode, floatDurationMin, guests, children]);
+  }, [outcome, outcomeMap, therapies, therapyMeta, sessionMode, floatDurationMin, guests, children, partyType]);
 
   // Load therapy metadata once (for the journey summary in step 3).
   useEffect(() => {
@@ -2386,12 +2464,12 @@ export default function BookingClient({ initialOutcome }) {
       <BookingHeader stepIdx={stepIdx} onBack={back} steps={steps} />
 
       <main className="max-w-[1200px] mx-auto px-4 md:px-8 pt-10 md:pt-14 pb-28 md:pb-16">
-        {stepId === 'outcome' && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); const couple = v === 'couple-activities'; setSessionMode(couple ? 'couple' : 'single'); setFloatDurationMin(couple ? 90 : 60); }} />}
+        {stepId === 'outcome' && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); const couple = v === 'couple-activities'; setSessionMode(couple ? 'couple' : 'single'); setPartyType(couple ? 'couple' : 'solo'); setFloatDurationMin(couple ? 90 : 60); }} />}
         {stepId === 'therapy' && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} therapyMeta={therapyMeta} isDirectMode={isDirectTherapyMode}
-          sessionMode={sessionMode} setSessionMode={setSessionMode} sessionModeTouched={sessionModeTouched} setSessionModeTouched={setSessionModeTouched}
+          sessionMode={sessionMode} setSessionMode={setSessionMode} sessionModeTouched={sessionModeTouched} setSessionModeTouched={setSessionModeTouched} party={party}
           totalRupees={totalRupees} />}
         {stepId === 'slot'    && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode}
-          floatDurationMin={floatDurationMin} setFloatDurationMin={setFloatDurationMin} guests={guests} setGuests={setGuests} children={children} setChildren={setChildren} totalRupees={totalRupees}
+          floatDurationMin={floatDurationMin} setFloatDurationMin={setFloatDurationMin} guests={guests} setGuests={setGuests} children={children} setChildren={setChildren} totalRupees={totalRupees} partyType={partyType}
           onReorderTherapies={(idx, dir) => {
             const arr = [...therapies];
             const j = idx + dir;
