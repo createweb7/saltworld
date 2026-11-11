@@ -549,7 +549,11 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatD
   // /api/scheduling/slots call (buffers + availability) is still in flight —
   // it matches the real total in the common no-duration-override case and is
   // replaced the moment journeyData resolves.
-  const metaDurationSum = therapies.reduce((sum, slug) => sum + (Number(therapyMeta?.[slug]?.durationMin) || 0), 0);
+  // Float's length is the guest's 60 / 90 pick, not the therapy's saved default.
+  const durationFor = (slug) => (String(slug).includes('float') && floatDurationMin)
+    ? Number(floatDurationMin)
+    : (Number(therapyMeta?.[slug]?.durationMin) || 0);
+  const metaDurationSum = therapies.reduce((sum, slug) => sum + durationFor(slug), 0);
   const totalDurationMin = journeyData?.totalDurationMin ?? metaDurationSum;
   const totalVisitMin    = journeyData?.totalVisitMin    || 0;
   const visitStillLoading = loading && journeyData === null;
@@ -648,7 +652,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatD
                 <div key={slug}>
                   <div className="flex items-center justify-between text-[14px]">
                     <div className="flex items-center gap-2"><Check className="h-3.5 w-3.5 text-brand" /><span className="font-medium">{meta.name}</span></div>
-                    <div className="text-[12.5px] text-muted-foreground font-mono">{meta.durationMin} min</div>
+                    <div className="text-[12.5px] text-muted-foreground font-mono">{durationFor(slug)} min</div>
                   </div>
                   {/* Headcount for this shared-capacity resource (e.g. Salt
                       Cave) is no longer manually picked here — it's derived
@@ -938,7 +942,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatD
           )}
 
           {!loading && manualPickerMode === 'manual' && (
-            <ManualJourneyPicker therapies={therapies} therapyMeta={therapyMeta} date={date} value={value} onChange={onChange} onReorder={onReorderTherapies} />
+            <ManualJourneyPicker therapies={therapies} therapyMeta={therapyMeta} date={date} value={value} onChange={onChange} onReorder={onReorderTherapies} floatDurationMin={hasFloat ? floatDurationMin : null} />
           )}
         </>
       )}
@@ -1022,7 +1026,7 @@ function AutoJourneyPicker({ journeyData, date, therapyMeta, value, onChange }) 
 }
 
 /* Manual mode — one card per therapy, downstream cards filter by prior pick. */
-function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, onReorder }) {
+function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, onReorder, floatDurationMin = null }) {
   // picks[i] = { time, startIso, endIso, planEntry } for therapy i, or undefined
   const [picks, setPicks] = useState(() => value?.plan
     ? value.plan.map((p) => ({ time: p.from ? new Date(new Date(p.from).getTime() + 330*60000).toISOString().slice(11,16) : null, startIso: p.from, endIso: p.to }))
@@ -1056,6 +1060,7 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, on
         if (i > 0 && !picks[i - 1]?.endIso) { setSlotsByIdx((s) => ({ ...s, [i]: null })); continue; }
         setLoadingIdx(i);
         const q = new URLSearchParams({ therapy: therapies[i], date });
+        if (floatDurationMin && String(therapies[i]).includes('float')) q.set('floatDurationMin', String(floatDurationMin));
         const after = cutoffFor(i);
         if (after) q.set('after', after);
         try {
@@ -1069,11 +1074,11 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, on
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [therapies.join(','), date, picks.map((p) => p?.endIso || '').join(',')]);
+  }, [therapies.join(','), date, floatDurationMin, picks.map((p) => p?.endIso || '').join(',')]);
 
   const pickSlot = (i, slot) => {
     const meta = therapyMeta[therapies[i]];
-    const dur = meta?.durationMin || 60;
+    const dur = (floatDurationMin && String(therapies[i]).includes('float')) ? floatDurationMin : (meta?.durationMin || 60);
     const startIso = slot.startIso;
     const endIso = new Date(new Date(startIso).getTime() + dur * 60000).toISOString();
     const next = picks.slice(0, i);
@@ -1087,7 +1092,7 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, on
         name: therapyMeta[therapies[idx]]?.name,
         from: p.startIso,
         to: p.endIso,
-        durationMin: therapyMeta[therapies[idx]]?.durationMin,
+        durationMin: Math.round((new Date(p.endIso) - new Date(p.startIso)) / 60000),
       }));
       onChange({
         date,
@@ -1123,7 +1128,7 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, on
                   picks[i]?.time ? 'bg-brand text-white' : 'bg-muted text-muted-foreground')}>{i + 1}</div>
                 <div>
                   <div className="text-[15px] font-medium">{meta.name}</div>
-                  <div className="text-[11.5px] text-muted-foreground">{meta.durationMin} min{cutoff && !locked && <span> &middot; earliest {cutoff}</span>}</div>
+                  <div className="text-[11.5px] text-muted-foreground">{(floatDurationMin && String(therapies[i]).includes('float')) ? floatDurationMin : meta.durationMin} min{cutoff && !locked && <span> &middot; earliest {cutoff}</span>}</div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
