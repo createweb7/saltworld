@@ -2275,11 +2275,16 @@ export default function BookingClient({ initialOutcome }) {
       const selected = merged.filter((t) => therapies.includes(t.slug));
       const primary = selected.find((t) => String(t.role || '').toLowerCase() === 'primary') || selected[0];
       const usingMembership = !!selectedMembershipId;
+      // Booked from a therapy page: the outcome is only an internal default
+      // (Float → "Sleep Optimization…"), not something the guest chose, so
+      // name the booking after the therapies actually booked.
+      const bookedNames = therapies.map((s) => therapyMeta[s]?.name || selected.find((t) => t.slug === s)?.label || s);
+      const sessionLabel = isDirectTherapyMode ? bookedNames.join(' + ') : o?.title;
 
       const r = await fetch('/api/bookings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          outcome, outcomeLabel: o?.title,
+          outcome: isDirectTherapyMode ? null : outcome, outcomeLabel: sessionLabel,
           therapy: primary?.slug || null,
           therapyLabel: primary?.label || null,
           therapies: selected.map((t) => ({ slug: t.slug, label: t.label, role: t.role })),

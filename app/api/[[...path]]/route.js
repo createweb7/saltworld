@@ -13,6 +13,28 @@ import {
 } from '@/lib/razorpay';
 import { sendWhatsappTemplate, whatsappIsConfigured } from '@/lib/whatsapp';
 
+// Booking-confirmed WhatsApp + email (fire-and-forget — never blocks the response).
+function sendBookingConfirmation(doc) {
+  import('@/lib/notifications')
+    .then(({ emit, NOTIFY_EVENTS }) =>
+      emit(NOTIFY_EVENTS.BOOKING_CONFIRMATION, {
+        to: { phone: doc.contact?.phone, email: doc.contact?.email },
+        customerId: doc.customerId,
+        bookingId: doc.id,
+        branchId: doc.branchId,
+        context: {
+          name:     doc.contact?.name || 'there',
+          ref:      doc.ref,
+          outcome:  doc.outcomeLabel || doc.outcome || '',
+          therapy:  doc.therapyLabel || doc.therapy || '',
+          date:     doc.slotDate || '',
+          time:     doc.slotTime || '',
+        },
+      }))
+    .catch(() => {});
+}
+
+
 const slugify = (s) => (s || 'page').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'page';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -1142,24 +1164,10 @@ async function handle(req, method, segs) {
         ).catch(() => {});
       }
 
-      // Fire the central notification engine (fire-and-forget — never blocks the response).
-      import('@/lib/notifications')
-        .then(({ emit, NOTIFY_EVENTS }) =>
-          emit(NOTIFY_EVENTS.BOOKING_CONFIRMATION, {
-            to: { phone: doc.contact?.phone, email: doc.contact?.email },
-            customerId: doc.customerId,
-            bookingId: doc.id,
-            branchId: doc.branchId,
-            context: {
-              name:     doc.contact?.name || 'there',
-              ref:      doc.ref,
-              outcome:  doc.outcomeLabel || doc.outcome || '',
-              therapy:  doc.therapyLabel || doc.therapy || '',
-              date:     doc.slotDate || '',
-              time:     doc.slotTime || '',
-            },
-          }))
-        .catch(() => {});
+      // Confirmation message only once the booking is actually confirmed. An
+      // online booking waiting on Razorpay gets it from the payment verify /
+      // webhook handler instead — never before the guest has paid.
+      if (doc.status === 'confirmed') sendBookingConfirmation(doc);
 
       doc.therapies = therapyLines;
       doc.schedule = schedule;
@@ -1831,12 +1839,16 @@ async function handle(req, method, segs) {
         status: 'verified', provider_payment_id: razorpay_payment_id,
         raw: { ...paymentRecord.raw, verifiedAt: nowIso }, updated_at: nowIso,
       }).eq('id', paymentRecord.id);
-      const { data: bookingRow } = await supabase.from('bookings').select('data').eq('id', bookingId).maybeSingle();
-      await supabase.from('bookings').update({
+      const { data: bookingRow } = await supabase.from('bookings').select('data, status').eq('id', bookingId).maybeSingle();
+      // Guarded on the status we just read, so when the webhook and this
+      // handler race only the one that flips payment_pending → confirmed
+      // sends the confirmation.
+      const { data: updated } = await supabase.from('bookings').update({
         payment: 'online',
         status: 'confirmed',
         data: { ...bookingRow?.data, paymentStatus: 'paid', paymentProvider: 'razorpay', paymentId: razorpay_payment_id, paymentVerifiedAt: nowIso },
-      }).eq('id', bookingId);
+      }).eq('id', bookingId).eq('status', bookingRow?.status ?? 'payment_pending').select('*');
+      if (bookingRow?.status === 'payment_pending' && updated?.[0]) sendBookingConfirmation(toBooking(updated[0]));
       return NextResponse.json({ success: true });
     }
 
@@ -1860,10 +1872,11 @@ async function handle(req, method, segs) {
           }).eq('id', rec.id);
           if (rec.booking_id) {
             const { data: bookingRow } = await supabase.from('bookings').select('data, status').eq('id', rec.booking_id).maybeSingle();
-            await supabase.from('bookings').update({
+            const { data: updated } = await supabase.from('bookings').update({
               status: bookingRow?.status === 'payment_pending' ? 'confirmed' : bookingRow?.status,
               data: { ...bookingRow?.data, paymentStatus: 'captured' },
-            }).eq('id', rec.booking_id);
+            }).eq('id', rec.booking_id).eq('status', bookingRow?.status ?? 'payment_pending').select('*');
+            if (bookingRow?.status === 'payment_pending' && updated?.[0]) sendBookingConfirmation(toBooking(updated[0]));
           }
         }
       } else if (event === 'payment.failed' && entity) {
