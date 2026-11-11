@@ -53,3 +53,25 @@ test('no bundle price when children are on the booking', async () => {
   assert.equal(r.status, 200);
   assert.equal(r.json.discounts?.bundle ?? null, null);
 });
+
+// Group and Kids (agreed Nov 2026): Salt ₹1,200 each for 3–7, Cold Plunge
+// ₹720 each for 3–5, Kids ₹1,600 per child with one adult free.
+const PARTY = [
+  ['Group Salt Cave 3', 'salt-therapy', 3, 0, 3600],
+  ['Group Salt Cave 7', 'salt-therapy', 7, 0, 8400],
+  ['Group Cold Plunge 3', 'cold-plunge', 3, 0, 2160],
+  ['Group Cold Plunge 5', 'cold-plunge', 5, 0, 3600],
+  ['Kids — 1 child + 1 adult', 'salt-therapy', 1, 1, 1600],
+  ['Kids — 2 children + 1 adult', 'salt-therapy', 1, 2, 3200],
+  ['Kids — 1 child + 2 adults', 'salt-therapy', 2, 1, 2800],
+];
+for (const [name, slug, guests, children, price] of PARTY) {
+  test(`price — ${name} — ₹${price}`, async () => {
+    const r = await api('/api/pricing/quote', {
+      method: 'POST',
+      body: { therapies: [{ slug, sessionMode: slug === 'cold-plunge' ? 'single' : undefined }], guests, children },
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r.json.payableInr, price);
+  });
+}

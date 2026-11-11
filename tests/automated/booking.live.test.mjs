@@ -23,6 +23,7 @@ const skip = !ENABLED ? 'set LIVE_TESTS=1 to run live booking tests'
 const DAY = {
   combo: istDate(30), capacity: istDate(31), room: istDate(32), own: istDate(33),
   rules: istDate(34), reschedule: istDate(35), cancel: istDate(36), salt: istDate(37),
+  coldGroup: istDate(38), kids: istDate(39),
 };
 const created = [];
 let adminCookie = null;
@@ -31,13 +32,13 @@ function contact(phone, n = 1) {
   return { name: `Automated Test ${n}`, phone, email: ENV.TEST_EMAIL || '' };
 }
 
-async function book({ therapies, startIso, plan = null, phone, n, sessionMode = 'single', floatMin = null, guests = 1 }) {
+async function book({ therapies, startIso, plan = null, phone, n, sessionMode = 'single', floatMin = null, guests = 1, children = 0 }) {
   const r = await api('/api/bookings', {
     method: 'POST',
     body: {
       therapies: therapies.map((slug) => ({ slug, durationMin: slug === 'float-therapy' ? floatMin : undefined })),
       sessionMode, floatDurationMin: floatMin, startAt: startIso, plan,
-      contact: contact(phone, n), payment: 'at-visit', guests,
+      contact: contact(phone, n), payment: 'at-visit', guests, children,
       outcomeLabel: 'Automated test',
     },
   });
@@ -181,4 +182,40 @@ test('Salt Cave — 7 people fills the slot, the 8th is refused', { skip }, asyn
   assert.equal(full.json.total, 8400);
   const eighth = await book({ therapies: ['salt-therapy'], startIso: istIso(DAY.salt, S), phone: ENV.TEST_PHONE_2, n: 2 });
   assert.equal(eighth.status, 409);
+});
+
+test('Group Cold Plunge — 5 people at ₹720 each holds the room; 6 refused; combo group refused', { skip }, async () => {
+  const free = await freeTimes('cold-plunge', DAY.coldGroup);
+  const T = free.find((t) => t >= '11:00' && t <= '16:00');
+  assert.ok(T, 'no free Cold Plunge time');
+  const six = await book({ therapies: ['cold-plunge'], startIso: istIso(DAY.coldGroup, T), phone: ENV.TEST_PHONE, guests: 6 });
+  assert.equal(six.status, 400);
+  assert.equal(six.json.error, 'guest_cap_exceeded');
+  const combo = await book({ therapies: ['salt-therapy', 'cold-plunge'], startIso: istIso(DAY.coldGroup, T), phone: ENV.TEST_PHONE, guests: 3 });
+  assert.equal(combo.status, 400);
+  assert.equal(combo.json.error, 'group_not_offered');
+  const five = await book({ therapies: ['cold-plunge'], startIso: istIso(DAY.coldGroup, T), phone: ENV.TEST_PHONE, guests: 5 });
+  assert.equal(five.status, 200, JSON.stringify(five.json));
+  assert.equal(five.json.total, 3600);
+  const other = await book({ therapies: ['cold-plunge'], startIso: istIso(DAY.coldGroup, T), phone: ENV.TEST_PHONE_2, n: 2 });
+  assert.equal(other.status, 409, 'room is held for the group');
+});
+
+test('Kids Salt Cave — ₹1,600 per child, adult free, slot holds 3 people in total', { skip }, async (t) => {
+  const free = await freeTimes('salt-therapy', DAY.kids);
+  const S = free.find((x) => x >= '11:00' && x <= '13:00');
+  assert.ok(S, 'no free Salt time');
+  const tooMany = await book({ therapies: ['salt-therapy'], startIso: istIso(DAY.kids, S), phone: ENV.TEST_PHONE, guests: 2, children: 2 });
+  assert.equal(tooMany.status, 400);
+  assert.equal(tooMany.json.error, 'kids_cap_exceeded');
+  const kids = await book({ therapies: ['salt-therapy'], startIso: istIso(DAY.kids, S), phone: ENV.TEST_PHONE, guests: 1, children: 1 });
+  if (kids.status === 409) return t.skip(`real guests already booked at ${S}`);
+  assert.equal(kids.status, 200, JSON.stringify(kids.json));
+  assert.equal(kids.json.total, 1600);
+  const couple = await book({ therapies: ['salt-therapy'], startIso: istIso(DAY.kids, S), phone: ENV.TEST_PHONE_2, n: 2, guests: 2 });
+  assert.equal(couple.status, 409, '2 more adults would make 4 in a kids slot');
+  const kidsTimes = await api(`/api/scheduling/therapy-slots?therapy=salt-therapy&date=${DAY.kids}&guests=2`);
+  assert.ok(!slotTimes(kidsTimes.json).map((x) => x.time).includes(S), 'kids slot still offered to 2 adults');
+  const one = await book({ therapies: ['salt-therapy'], startIso: istIso(DAY.kids, S), phone: ENV.TEST_PHONE_2, n: 2, guests: 1 });
+  assert.equal(one.status, 200, `1 more adult makes 3: ${JSON.stringify(one.json)}`);
 });
