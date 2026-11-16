@@ -75,3 +75,17 @@ for (const [name, slug, guests, children, price] of PARTY) {
     assert.equal(r.json.payableInr, price);
   });
 }
+
+// Hot & Cold Contrast (agreed Nov 2026): both options cost the same as the
+// Sauna + Cold Plunge combo — ₹3,000 solo, ₹4,700 couple. Option 2 is that
+// combo (checked above); Option 1 is the hot-cold-contrast therapy.
+for (const [mode, price] of [['single', 3000], ['couple', 4700]]) {
+  test(`price — Hot & Cold Contrast Option 1 — ${mode === 'single' ? 'Solo' : 'Couple'} ₹${price}`, async () => {
+    const r = await api('/api/pricing/quote', {
+      method: 'POST',
+      body: { therapies: [{ slug: 'hot-cold-contrast', sessionMode: mode }], guests: mode === 'couple' ? 2 : 1 },
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r.json.payableInr, price);
+  });
+}

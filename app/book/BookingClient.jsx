@@ -14,6 +14,7 @@ import { InlineSignIn } from '@/components/site/inline-sign-in';
 import { OUTCOMES, getOutcome, primaryOutcomeForTherapy } from '@/lib/outcomes';
 import { resolveComboPrice } from '@/lib/combo-pricing';
 import { groupConfig, kidsAllowed, GROUP_MIN_GUESTS, KIDS_SLOT_MAX_PEOPLE } from '@/lib/group-booking';
+import { isContrastPair, contrastBookingSlugs, CONTRAST_SLUG, SAUNA_SLUG, COLD_SLUG } from '@/lib/contrast';
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                          */
@@ -182,6 +183,38 @@ function Counter({ label, value, min, max, onChange, note }) {
   );
 }
 
+// Hot & Cold Contrast (Infrared Sauna + Cold Plunge): the guest picks how the
+// session runs — see lib/contrast.js. Both options cost the same.
+const CONTRAST_CHOICES = [
+  { id: 'alternate', title: 'Contrast Experience', body: 'Alternate between Sauna and Ice Cold Plunge within a 60-minute session.' },
+  { id: 'sequence', title: 'Separate Sessions', body: 'Enjoy Sauna first, followed by Ice Cold Plunge, with each facility booked separately.' },
+];
+function ContrastPicker({ value, onChange }) {
+  return (
+    <div className="mt-6 rounded-2xl border border-border bg-card p-5 md:p-6">
+      <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold">Hot &amp; Cold Contrast</div>
+      <div className="mt-1 text-[13px] text-muted-foreground">How would you like your session?</div>
+      <div role="radiogroup" aria-label="Hot & Cold Contrast option" className="mt-3 grid gap-3 md:grid-cols-2">
+        {CONTRAST_CHOICES.map((c) => {
+          const isSel = value === c.id;
+          return (
+            <button key={c.id} type="button" onClick={() => onChange(c.id)} role="radio" aria-checked={isSel}
+              className={cn('text-left rounded-xl border p-4 transition-all',
+                isSel ? 'border-brand bg-brand-soft' : 'border-border bg-background hover:border-foreground/40')}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[14px] font-semibold">{c.title}</div>
+                <div className={cn('h-4 w-4 rounded-full border-2 shrink-0', isSel ? 'border-brand bg-brand' : 'border-border')} />
+              </div>
+              <div className="mt-1.5 text-[12.5px] leading-[1.5] text-muted-foreground">{c.body}</div>
+            </button>
+          );
+        })}
+      </div>
+      {!value && <div className="mt-2 text-[11.5px] text-muted-foreground">Choose an option to continue.</div>}
+    </div>
+  );
+}
+
 // Session type: Solo / Couple, plus Group and Kids when the selection allows.
 function PartyPicker({ options, hasSessionMode, hasFloatOnly, sessionMode, sessionModeTouched, partyType, onChoose,
   groupSize, setGroupSize, kidsCount, setKidsCount, kidsAdults, setKidsAdults }) {
@@ -238,7 +271,7 @@ function PartyPicker({ options, hasSessionMode, hasFloatOnly, sessionMode, sessi
   );
 }
 
-function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta = {}, isDirectMode = false, sessionMode, setSessionMode, sessionModeTouched, setSessionModeTouched, totalRupees = 0, party = {} }) {
+function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta = {}, isDirectMode = false, sessionMode, setSessionMode, sessionModeTouched, setSessionModeTouched, totalRupees = 0, party = {}, contrastOption = null, setContrastOption = () => {} }) {
   const o = getOutcome(outcome);
   // Prefer DB override (admin-configurable), fall back to static outcome data.
   const therapies = mappingOverride?.length ? mappingOverride : (o?.protocol?.therapies || []);
@@ -252,6 +285,7 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
   const hasSessionMode = sessionModeTherapies.length > 0;
   // Group / Kids are offered only for a single therapy booked on its own.
   const partyOptions = partyOptionsFor(values, therapyMeta);
+  const contrast = isContrastPair(values);
 
   // Resolve the true duration for a therapy: static override > DB meta > outcome-level fallback.
   const durationFor = (t) => t.durationMin || therapyMeta[t.slug]?.durationMin || baseDuration;
@@ -280,7 +314,9 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
   const selected = therapies.filter((t) => values.includes(t.slug));
   const combinedDuration = selected.reduce((sum, t) => sum + durationFor(t), 0) || baseDuration;
   const combinedPrice    = selected.reduce((sum, t) => sum + priceFor(t), 0) || basePrice;
-  const journeyLabel = selected.length === 1
+  const journeyLabel = contrast
+    ? 'Hot & Cold Contrast'
+    : selected.length === 1
     ? selected[0].label
     : `${selected.length}-therapy ${o?.title?.toLowerCase() || 'wellness'} journey`;
 
@@ -354,6 +390,7 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
             parent's canNext). The direct-mode branch previously had no way
             to set this at all, so Continue was permanently stuck disabled
             for any direct entry into one of these therapies. */}
+        {contrast && <ContrastPicker value={contrastOption} onChange={setContrastOption} />}
         {(hasSessionMode || partyOptions.group || partyOptions.kids) && (
           <PartyPicker {...party} options={partyOptions} hasSessionMode={hasSessionMode}
             hasFloatOnly={hasFloat && sessionModeTherapies.length === 1}
@@ -429,6 +466,7 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
           a durationOptions matrix (Float, Sauna, Red Light, Cold Plunge).
           Decided here, before date & time, since it also affects which
           resources (e.g. couple-capable float tanks) are searched later. */}
+      {contrast && <ContrastPicker value={contrastOption} onChange={setContrastOption} />}
       {(hasSessionMode || partyOptions.group || partyOptions.kids) && (
         <PartyPicker {...party} options={partyOptions} hasSessionMode={hasSessionMode}
           hasFloatOnly={hasFloat && sessionModeTherapies.length === 1}
@@ -1082,10 +1120,13 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, on
     if (!prev?.endIso) return null;
     const prevTherapy = therapyMeta[therapies[i - 1]];
     const nextTherapy = therapyMeta[therapies[i]];
-    const gap = Math.max(
-      (prevTherapy?.postBufferMin || 0) + (nextTherapy?.preBufferMin || 0),
-      (prevTherapy?.cleaningBufferMin || 0),
-    );
+    // Hot & Cold Contrast Option 2: the Cold Plunge can follow the Sauna straight away.
+    const gap = isContrastPair(therapies) && therapies[i - 1] === SAUNA_SLUG && therapies[i] === COLD_SLUG
+      ? 0
+      : Math.max(
+        (prevTherapy?.postBufferMin || 0) + (nextTherapy?.preBufferMin || 0),
+        (prevTherapy?.cleaningBufferMin || 0),
+      );
     const cutoffMs = new Date(prev.endIso).getTime() + gap * 60000;
     const shifted = new Date(cutoffMs + 330 * 60000);
     return `${String(shifted.getUTCHours()).padStart(2,'0')}:${String(shifted.getUTCMinutes()).padStart(2,'0')}`;
@@ -1799,11 +1840,14 @@ export default function BookingClient({ initialOutcome }) {
   const rawTherapyParam    = searchParams.get('therapy');
   const rawOutcomeParam    = searchParams.get('outcome');
   const isDirectTherapyMode = !!rawTherapyParam && !rawOutcomeParam && !initialOutcome;
-  const primaryOutcome      = isDirectTherapyMode ? primaryOutcomeForTherapy(rawTherapyParam) : null;
+  // `/book?therapy=hot-cold-contrast` opens Sauna + Cold Plunge with the
+  // Hot & Cold Contrast options (lib/contrast.js).
+  const directContrast      = rawTherapyParam === CONTRAST_SLUG;
+  const primaryOutcome      = isDirectTherapyMode ? primaryOutcomeForTherapy(directContrast ? SAUNA_SLUG : rawTherapyParam) : null;
 
   const initialResolvedOutcome = initialOutcome
     || (isDirectTherapyMode ? primaryOutcome?.slug : null);
-  const initialTherapies       = isDirectTherapyMode && rawTherapyParam ? [rawTherapyParam] : [];
+  const initialTherapies       = isDirectTherapyMode && rawTherapyParam ? (directContrast ? [SAUNA_SLUG, COLD_SLUG] : [rawTherapyParam]) : [];
 
   // Direct mode → start at step 0 of a 3-step wizard (Therapy).
   // Normal mode: start at step 1 (Therapy) if outcome came in via SSR, else step 0.
@@ -1870,6 +1914,20 @@ export default function BookingClient({ initialOutcome }) {
     setSessionModeTouched(true);
   };
   const party = { partyType, onChoose: chooseParty, groupSize, setGroupSize, kidsCount, setKidsCount, kidsAdults, setKidsAdults };
+  // Hot & Cold Contrast option ('alternate' | 'sequence') when Sauna + Cold
+  // Plunge are picked together; decides what is actually booked.
+  const [contrastOption, setContrastOption] = useState(null);
+  const isContrast = isContrastPair(therapies);
+  const bookTherapies = useMemo(() => contrastBookingSlugs(therapies, contrastOption), [therapies, contrastOption]);
+  // Outcome-mapping lines for the booked therapies, plus the Hot & Cold
+  // Contrast therapy (Option 1), which no outcome lists on its own.
+  const bookedLines = (merged) => {
+    const lines = merged.filter((t) => bookTherapies.includes(t.slug));
+    if (bookTherapies.includes(CONTRAST_SLUG) && !lines.some((t) => t.slug === CONTRAST_SLUG)) {
+      lines.push({ slug: CONTRAST_SLUG, label: therapyMeta[CONTRAST_SLUG]?.name || 'Hot & Cold Contrast', role: 'primary' });
+    }
+    return lines;
+  };
   const [coupon, setCoupon] = useState(null);              // { code, discountInr, applied } | null
   // Suggestions surfaced when the confirm step receives a 409 slot_unavailable
   const [slotConflict, setSlotConflict] = useState(null); // { reason, suggestions:[{...}] }
@@ -1916,6 +1974,7 @@ export default function BookingClient({ initialOutcome }) {
     if (draft.groupSize) setGroupSize(draft.groupSize);
     if (draft.kidsCount) setKidsCount(draft.kidsCount);
     if (draft.kidsAdults) setKidsAdults(draft.kidsAdults);
+    if (draft.contrastOption) setContrastOption(draft.contrastOption);
     if (draft.floatDurationMin) setFloatDurationMin(draft.floatDurationMin);
     if (draft.guests) setGuests(draft.guests);
     if (draft.children) setChildren(draft.children);
@@ -1938,7 +1997,7 @@ export default function BookingClient({ initialOutcome }) {
     try {
       sessionStorage.setItem('sw_booking_resume', JSON.stringify({
         outcome, therapies, slot, sessionMode, floatDurationMin, guests, children, contact, bookingFor, payment, stepId,
-        partyType, groupSize, kidsCount, kidsAdults,
+        partyType, groupSize, kidsCount, kidsAdults, contrastOption,
       }));
     } catch { /* storage unavailable — Google flow will just land on /account instead */ }
     const returnTo = `${window.location.pathname}?resume=1`;
@@ -1959,7 +2018,7 @@ export default function BookingClient({ initialOutcome }) {
     const o = getOutcome(outcome);
     const staticTherapies = o?.protocol?.therapies || [];
     const merged = (outcomeMap?.therapies?.length ? outcomeMap.therapies : staticTherapies);
-    const selected = merged.filter((t) => therapies.includes(t.slug));
+    const selected = bookedLines(merged);
     // Per-therapy price from the admin Services catalog (defaultPrice on the
     // therapy doc) is the SOURCE OF TRUTH — matches what admin sees. Fall
     // back to the outcome-level rate × role-multiplier only when the therapy
@@ -2021,7 +2080,7 @@ export default function BookingClient({ initialOutcome }) {
       if (bundle != null && bundle < sum) return bundle;
     }
     return sum || basePrice || 0;
-  }, [outcome, outcomeMap, therapies, therapyMeta, sessionMode, floatDurationMin, guests, children, partyType]);
+  }, [outcome, outcomeMap, bookTherapies, therapyMeta, sessionMode, floatDurationMin, guests, children, partyType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load therapy metadata once (for the journey summary in step 3).
   useEffect(() => {
@@ -2054,12 +2113,12 @@ export default function BookingClient({ initialOutcome }) {
   // Real-time pricing quote — debounced. Runs whenever any input the pricing
   // engine cares about changes. Keeps the sidebar breakdown live.
   useEffect(() => {
-    if (!therapies.length) { setQuote(null); return; }
+    if (!bookTherapies.length) { setQuote(null); return; }
     const timer = setTimeout(() => {
       fetch('/api/pricing/quote', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          therapies: therapies.map((slug) => ({
+          therapies: bookTherapies.map((slug) => ({
             slug,
             sessionMode: Array.isArray(therapyMeta[slug]?.durationOptions) && therapyMeta[slug].durationOptions.length > 0 ? sessionMode : undefined,
             durationMin: String(slug).includes('float') ? floatDurationMin : undefined,
@@ -2090,7 +2149,7 @@ export default function BookingClient({ initialOutcome }) {
         .catch(() => setQuote(null));
     }, 300);
     return () => clearTimeout(timer);
-  }, [therapies, customerId, contact?.phone, selectedMembershipId, walletUseInr, coupon, giftCardCode, giftCardPin, guests, children, sessionMode, floatDurationMin, therapyMeta]);
+  }, [bookTherapies, customerId, contact?.phone, selectedMembershipId, walletUseInr, coupon, giftCardCode, giftCardPin, guests, children, sessionMode, floatDurationMin, therapyMeta]);
 
 
   // Pre-fill contact from query params (used when staff launches "New booking" from
@@ -2143,14 +2202,14 @@ export default function BookingClient({ initialOutcome }) {
   // selection changes. Sends the therapy slugs so the server can filter to
   // subscriptions that actually cover the whole journey.
   useEffect(() => {
-    if (!customerId || therapies.length === 0) {
+    if (!customerId || bookTherapies.length === 0) {
       setEligibleMemberships([]);
       setSelectedMembershipId(null);
       return;
     }
     let cancelled = false;
     const qs = new URLSearchParams();
-    qs.set('therapies', therapies.join(','));
+    qs.set('therapies', bookTherapies.join(','));
     if (slot?.startIso) qs.set('atIso', slot.startIso);
     fetch(`/api/customer/subscriptions/eligible?${qs.toString()}`)
       .then((r) => (r.ok ? r.json() : { eligible: [] }))
@@ -2166,7 +2225,7 @@ export default function BookingClient({ initialOutcome }) {
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [customerId, therapies, slot?.startIso]);
+  }, [customerId, bookTherapies, slot?.startIso]);
 
   // Auto-select the primary therapy when outcome changes.
   useEffect(() => {
@@ -2219,7 +2278,7 @@ export default function BookingClient({ initialOutcome }) {
 
   const canNext =
     (stepId === 'outcome' && !!outcome) ||
-    (stepId === 'therapy' && therapies.length > 0 && (!hasSessionModeChoice || sessionModeTouched)) ||
+    (stepId === 'therapy' && therapies.length > 0 && (!hasSessionModeChoice || sessionModeTouched) && (!isContrast || !!contrastOption)) ||
     (stepId === 'slot'    && !!slot?.date && !!slot?.time) ||
     stepId === 'contact';
 
@@ -2355,14 +2414,17 @@ export default function BookingClient({ initialOutcome }) {
       const o = getOutcome(outcome);
       const staticTherapies = o?.protocol?.therapies || [];
       const merged = (outcomeMap?.therapies?.length ? outcomeMap.therapies : staticTherapies);
-      const selected = merged.filter((t) => therapies.includes(t.slug));
+      const selected = bookedLines(merged);
       const primary = selected.find((t) => String(t.role || '').toLowerCase() === 'primary') || selected[0];
       const usingMembership = !!selectedMembershipId;
       // Booked from a therapy page: the outcome is only an internal default
       // (Float → "Sleep Optimization…"), not something the guest chose, so
       // name the booking after the therapies actually booked.
-      const bookedNames = therapies.map((s) => therapyMeta[s]?.name || selected.find((t) => t.slug === s)?.label || s);
-      const sessionLabel = isDirectTherapyMode ? bookedNames.join(' + ') : o?.title;
+      const bookedNames = bookTherapies.map((s) => therapyMeta[s]?.name || selected.find((t) => t.slug === s)?.label || s);
+      const contrastLabel = isContrast
+        ? (contrastOption === 'alternate' ? 'Hot & Cold Contrast (Contrast Experience)' : 'Hot & Cold Contrast (Separate Sessions)')
+        : null;
+      const sessionLabel = isDirectTherapyMode ? (contrastLabel || bookedNames.join(' + ')) : o?.title;
 
       const r = await fetch('/api/bookings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2371,8 +2433,8 @@ export default function BookingClient({ initialOutcome }) {
           therapy: primary?.slug || null,
           therapyLabel: primary?.label || null,
           therapies: selected.map((t) => ({ slug: t.slug, label: t.label, role: t.role })),
-          sessionMode: therapies.some((s) => Array.isArray(therapyMeta[s]?.durationOptions) && therapyMeta[s].durationOptions.length > 0) ? sessionMode : null,
-          floatDurationMin: therapies.some((s) => String(s).includes('float')) ? floatDurationMin : null,
+          sessionMode: bookTherapies.some((s) => Array.isArray(therapyMeta[s]?.durationOptions) && therapyMeta[s].durationOptions.length > 0) ? sessionMode : null,
+          floatDurationMin: bookTherapies.some((s) => String(s).includes('float')) ? floatDurationMin : null,
           slotDate: slot.date, slotTime: slot.time,
           startAt: slot.startIso || null,
           plan: slot.plan || null,
@@ -2467,10 +2529,11 @@ export default function BookingClient({ initialOutcome }) {
         {stepId === 'outcome' && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); const couple = v === 'couple-activities'; setSessionMode(couple ? 'couple' : 'single'); setPartyType(couple ? 'couple' : 'solo'); setFloatDurationMin(couple ? 90 : 60); }} />}
         {stepId === 'therapy' && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} therapyMeta={therapyMeta} isDirectMode={isDirectTherapyMode}
           sessionMode={sessionMode} setSessionMode={setSessionMode} sessionModeTouched={sessionModeTouched} setSessionModeTouched={setSessionModeTouched} party={party}
+          contrastOption={contrastOption} setContrastOption={(v) => { setContrastOption(v); setSlot(null); }}
           totalRupees={totalRupees} />}
-        {stepId === 'slot'    && <StepSlot therapies={therapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode}
+        {stepId === 'slot'    && <StepSlot therapies={bookTherapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode}
           floatDurationMin={floatDurationMin} setFloatDurationMin={setFloatDurationMin} guests={guests} setGuests={setGuests} children={children} setChildren={setChildren} totalRupees={totalRupees} partyType={partyType}
-          onReorderTherapies={(idx, dir) => {
+          onReorderTherapies={isContrast ? undefined : (idx, dir) => {
             const arr = [...therapies];
             const j = idx + dir;
             if (j < 0 || j >= arr.length) return;
@@ -2484,7 +2547,7 @@ export default function BookingClient({ initialOutcome }) {
         {stepId === 'contact' && (
           <StepContact
             outcome={outcome} therapy={therapy} slot={slot}
-            therapies={therapies} therapyMeta={therapyMeta}
+            therapies={bookTherapies} therapyMeta={therapyMeta}
             contact={contact} setContact={setContact}
             payment={payment} setPayment={setPayment}
             canPayOnline={payCfg.configured}

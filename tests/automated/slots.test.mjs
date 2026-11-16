@@ -58,7 +58,10 @@ for (const slug of THERAPIES) {
 }
 
 // Every pair, both orders the engine picks: the guest's wait between two
-// therapies must be at least the wait after the first one.
+// therapies must be at least the wait after the first one. Except Sauna +
+// Cold Plunge — that is Hot & Cold Contrast Option 2 (rules doc §6): Sauna
+// first, then straight into the Cold Plunge.
+const CONTRAST_PAIR = 'infrared-sauna + cold-plunge';
 const PAIRS = [];
 for (let i = 0; i < THERAPIES.length; i++) for (let j = i + 1; j < THERAPIES.length; j++) PAIRS.push([THERAPIES[i], THERAPIES[j]]);
 
@@ -69,6 +72,11 @@ for (const pair of PAIRS) {
     const slots = slotTimes(r.json);
     assert.ok(slots.length > 0, 'nothing offered');
     for (const s of slots) {
+      if (pair.join(' + ') === CONTRAST_PAIR) {
+        assert.deepEqual(s.plan.map((p) => p.therapySlug), ['infrared-sauna', 'cold-plunge'], `${s.time}: Sauna first`);
+        assert.equal(minutesBetween(s.plan[0].to, s.plan[1].from), 0, `${s.time}: Cold Plunge straight after the Sauna`);
+        continue;
+      }
       for (let k = 1; k < s.plan.length; k++) {
         const prev = s.plan[k - 1], cur = s.plan[k];
         const gap = minutesBetween(prev.to, cur.from);

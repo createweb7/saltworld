@@ -23,7 +23,7 @@ const skip = !ENABLED ? 'set LIVE_TESTS=1 to run live booking tests'
 const DAY = {
   combo: istDate(30), capacity: istDate(31), room: istDate(32), own: istDate(33),
   rules: istDate(34), reschedule: istDate(35), cancel: istDate(36), salt: istDate(37),
-  coldGroup: istDate(38), kids: istDate(39),
+  coldGroup: istDate(38), kids: istDate(39), contrast1: istDate(40), contrast2: istDate(41),
 };
 const created = [];
 let adminCookie = null;
@@ -218,4 +218,37 @@ test('Kids Salt Cave — ₹1,600 per child, adult free, slot holds 3 people in 
   assert.ok(!slotTimes(kidsTimes.json).map((x) => x.time).includes(S), 'kids slot still offered to 2 adults');
   const one = await book({ therapies: ['salt-therapy'], startIso: istIso(DAY.kids, S), phone: ENV.TEST_PHONE_2, n: 2, guests: 1 });
   assert.equal(one.status, 200, `1 more adult makes 3: ${JSON.stringify(one.json)}`);
+});
+
+test('Hot & Cold Contrast Option 1 — holds the Sauna and the Cold Plunge for 60 min, ₹3,000', { skip }, async () => {
+  const free = await freeTimes('hot-cold-contrast', DAY.contrast1);
+  const T = free.find((t) => t >= '11:00' && t <= '16:00');
+  assert.ok(T, 'no Hot & Cold Contrast time offered');
+  const a = await book({ therapies: ['hot-cold-contrast'], startIso: istIso(DAY.contrast1, T), phone: ENV.TEST_PHONE, n: 1 });
+  assert.equal(a.status, 200, JSON.stringify(a.json));
+  assert.equal(a.json.total, 3000);
+  const rooms = new Set((a.json.schedule || []).map((s) => s.resourceId));
+  assert.equal(rooms.size, 2, 'both rooms held');
+  assert.equal(minutesBetween(a.json.schedule[0].from, a.json.schedule[0].to), 60);
+
+  const sauna = await book({ therapies: ['infrared-sauna'], startIso: istIso(DAY.contrast1, plus(T, 30)), phone: ENV.TEST_PHONE_2, n: 2 });
+  assert.equal(sauna.status, 409, 'Sauna is taken during the contrast session');
+  const cold = await book({ therapies: ['cold-plunge'], startIso: istIso(DAY.contrast1, T), phone: ENV.TEST_PHONE_2, n: 2 });
+  assert.equal(cold.status, 409, 'Cold Plunge is taken during the contrast session');
+  const soon = await book({ therapies: ['cold-plunge'], startIso: istIso(DAY.contrast1, plus(T, 90)), phone: ENV.TEST_PHONE_2, n: 2 });
+  assert.equal(soon.status, 409, '30 min after the session is inside the 45 min gap');
+  const later = await book({ therapies: ['cold-plunge'], startIso: istIso(DAY.contrast1, plus(T, 105)), phone: ENV.TEST_PHONE_2, n: 2 });
+  assert.equal(later.status, 200, `Cold Plunge free again 45 min after: ${JSON.stringify(later.json)}`);
+});
+
+test('Hot & Cold Contrast Option 2 — Sauna, then Cold Plunge straight after, ₹4,700 couple', { skip }, async () => {
+  const s = await api(`/api/scheduling/slots?therapies=cold-plunge,infrared-sauna&date=${DAY.contrast2}&sessionMode=couple`);
+  const slot = slotTimes(s.json).find((x) => x.time >= '11:00');
+  assert.ok(slot, 'no time offered');
+  const r = await book({ therapies: ['cold-plunge', 'infrared-sauna'], startIso: slot.startIso, plan: slot.plan, phone: ENV.TEST_PHONE, n: 1, sessionMode: 'couple', guests: 2 });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(r.json.total, 4700);
+  const plan = r.json.schedule;
+  assert.deepEqual(plan.map((p) => p.therapySlug), ['infrared-sauna', 'cold-plunge']);
+  assert.equal(minutesBetween(plan[0].to, plan[1].from), 0);
 });
