@@ -213,6 +213,13 @@ function ConvertToCoupleAdmin({ booking, onConverted }) {
   );
 }
 
+// Therapy names from the catalogue, for bookings whose lines carry no label.
+function useTherapyNames() {
+  const { data } = useQuery({ queryKey: ['therapy-names'], staleTime: 600000,
+    queryFn: () => fetch('/api/therapies').then((r) => (r.ok ? r.json() : [])) });
+  return Object.fromEntries((data || []).map((t) => [t.slug, t.name]));
+}
+
 const inr = (n) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const istTime = (iso) => new Date(new Date(iso).getTime() + 330 * 60000).toISOString().slice(11, 16);
 const fmtDay = (iso) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -229,6 +236,7 @@ function Overlay({ children, onClose }) {
 
 // The sessions still on this booking, with their times.
 function SessionsList({ booking: b }) {
+  const names = useTherapyNames();
   const items = b.therapies || [];
   if (!items.length) return null;
   return (
@@ -239,7 +247,7 @@ function SessionsList({ booking: b }) {
           const legs = (b.schedule || []).filter((s) => s.therapySlug === t.slug);
           return (
             <div key={t.slug} className="flex items-center justify-between gap-3 px-4 py-2.5 text-[13px]">
-              <span className="font-medium">{t.label || t.slug}</span>
+              <span className="font-medium">{t.label || names[t.slug] || t.slug}</span>
               <span className="font-mono text-[12px] text-muted-foreground">
                 {legs[0] ? `${istTime(legs[0].from)} – ${istTime(legs[0].to)}` : '—'}
               </span>
@@ -254,6 +262,7 @@ function SessionsList({ booking: b }) {
 // Guest leaves part of the package for another day: pick the sessions they
 // didn't take. Their rooms are freed; they can be rebooked or refunded later.
 function HoldDialog({ booking: b, onClose, onDone }) {
+  const names = useTherapyNames();
   const [sel, setSel] = useState([]);
   const [busy, setBusy] = useState(false);
   const therapies = b.therapies || [];
@@ -286,7 +295,7 @@ function HoldDialog({ booking: b, onClose, onDone }) {
         {therapies.map((t) => (
           <label key={t.slug} className="flex items-center gap-3 px-4 py-2.5 text-[13px] cursor-pointer">
             <input type="checkbox" checked={sel.includes(t.slug)} onChange={() => toggle(t.slug)} className="h-4 w-4" />
-            <span className="flex-1 font-medium">{t.label || t.slug}</span>
+            <span className="flex-1 font-medium">{t.label || names[t.slug] || t.slug}</span>
             <span className="font-mono text-[12px] text-muted-foreground">{inr(values[t.slug])}</span>
           </label>
         ))}
