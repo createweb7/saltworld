@@ -24,6 +24,7 @@ const DAY = {
   combo: istDate(30), capacity: istDate(31), room: istDate(32), own: istDate(33),
   rules: istDate(34), reschedule: istDate(35), cancel: istDate(36), salt: istDate(37),
   coldGroup: istDate(38), kids: istDate(39), contrast1: istDate(40), contrast2: istDate(41),
+  held: istDate(42), heldRebook: istDate(43),
 };
 const created = [];
 let adminCookie = null;
@@ -251,4 +252,58 @@ test('Hot & Cold Contrast Option 2 — Sauna, then Cold Plunge straight after, �
   const plan = r.json.schedule;
   assert.deepEqual(plan.map((p) => p.therapySlug), ['infrared-sauna', 'cold-plunge']);
   assert.equal(minutesBetween(plan[0].to, plan[1].from), 0);
+});
+
+test('held sessions — hold 2 of 3, rooms freed, rebook one at ₹0 on another day', { skip }, async () => {
+  const s = await api(`/api/scheduling/slots?therapies=salt-therapy,red-light-therapy,infrared-sauna&date=${DAY.held}&sessionMode=single`);
+  const slot = slotTimes(s.json).find((x) => x.time >= '10:00');
+  assert.ok(slot, 'no time offered');
+  const r = await book({ therapies: ['salt-therapy', 'red-light-therapy', 'infrared-sauna'], startIso: slot.startIso, plan: slot.plan, phone: ENV.TEST_PHONE, n: 1 });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  const id = r.json.id;
+  const rlt = r.json.schedule.find((x) => x.therapySlug === 'red-light-therapy');
+
+  // Red Light's room is taken at that time…
+  const before = await book({ therapies: ['red-light-therapy'], startIso: rlt.from, phone: ENV.TEST_PHONE_2, n: 2 });
+  assert.equal(before.status, 409, 'Red Light room should be taken before holding');
+
+  const tooMany = await admin(`/bookings/${id}/hold`, { slugs: ['salt-therapy', 'red-light-therapy', 'infrared-sauna'] });
+  assert.equal(tooMany.status, 400);
+  assert.equal(tooMany.json.error, 'nothing_left');
+
+  const h = await admin(`/bookings/${id}/hold`, { slugs: ['red-light-therapy', 'infrared-sauna'] });
+  assert.equal(h.status, 200, JSON.stringify(h.json));
+  assert.deepEqual(h.json.therapies.map((t) => t.slug), ['salt-therapy']);
+  assert.equal(h.json.heldSessions.length, 2);
+  const valueSum = h.json.heldSessions.reduce((a, x) => a + x.valueInr, 0);
+  assert.ok(valueSum > 0 && valueSum < r.json.total, `held value ${valueSum} of ${r.json.total}`);
+  const years = (new Date(h.json.heldSessions[0].expiresAt) - new Date(h.json.createdAt)) / (365 * 86400000);
+  assert.ok(years > 0.99 && years < 1.01, 'valid for 1 year');
+
+  // …and free once held.
+  const freed = await book({ therapies: ['red-light-therapy'], startIso: rlt.from, phone: ENV.TEST_PHONE_2, n: 2 });
+  assert.equal(freed.status, 200, `Red Light room should be free after holding: ${JSON.stringify(freed.json)}`);
+
+  const tooMuch = await admin(`/bookings/${id}/held/refund`, { sessionIds: [h.json.heldSessions[0].id], amountInr: r.json.total + 1 });
+  assert.equal(tooMuch.status, 400);
+  assert.equal(tooMuch.json.error, 'amount_too_high');
+
+  const redLight = h.json.heldSessions.find((x) => x.slug === 'red-light-therapy');
+  const free = await freeTimes('red-light-therapy', DAY.heldRebook);
+  const T = free.find((t) => t >= '11:00');
+  assert.ok(T, 'no Red Light time to rebook');
+  const rb = await admin(`/bookings/${id}/held/rebook`, { sessionIds: [redLight.id], startAt: istIso(DAY.heldRebook, T), slotDate: DAY.heldRebook, slotTime: T });
+  assert.equal(rb.status, 200, JSON.stringify(rb.json));
+  created.push(rb.json.rebooked.id);
+  assert.equal(rb.json.rebooked.total, 0);
+  assert.equal(rb.json.rebooked.payment, 'carried-over');
+  assert.equal(rb.json.rebooked.status, 'confirmed');
+  assert.equal(rb.json.rebooked.carriedOverFrom.ref, r.json.ref);
+  assert.deepEqual(rb.json.rebooked.therapies.map((t) => t.slug), ['red-light-therapy']);
+  const after = Object.fromEntries(rb.json.booking.heldSessions.map((x) => [x.slug, x.status]));
+  assert.deepEqual(after, { 'red-light-therapy': 'rebooked', 'infrared-sauna': 'held' });
+
+  const again = await admin(`/bookings/${id}/held/rebook`, { sessionIds: [redLight.id], startAt: istIso(DAY.heldRebook, T), slotDate: DAY.heldRebook, slotTime: T });
+  assert.equal(again.status, 400);
+  assert.equal(again.json.error, 'session_rebooked');
 });

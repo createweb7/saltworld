@@ -17,6 +17,8 @@ const STATUSES = [
   { key: 'completed',   label: 'Completed'   },
   { key: 'no_show',     label: 'No-show'     },
   { key: 'cancelled',   label: 'Cancelled'   },
+  // Not a status: bookings with unused sessions still waiting to be rebooked.
+  { key: 'held',        label: 'Held sessions' },
 ];
 
 const DATE_CHIPS = [
@@ -31,7 +33,8 @@ const DATE_CHIPS = [
 async function fetchBookings({ q, status, from, to }) {
   const params = new URLSearchParams();
   if (q)      params.set('q', q);
-  if (status) params.set('status', status);
+  if (status === 'held') params.set('held', '1');
+  else if (status) params.set('status', status);
   if (from)   params.set('from', from);
   if (to)     params.set('to', to);
   const res = await fetch(`/api/admin/bookings?${params}`);
@@ -189,6 +192,10 @@ export default function BookingsClient({ user }) {
                   </td>
                   <td className="px-4 py-3 text-[12.5px]">
                     <div>{b.therapyLabel || b.therapy || b.outcomeLabel || b.outcome || '—'}</div>
+                    {(() => {
+                      const n = (b.heldSessions || []).filter((h) => h.status === 'held' && new Date(h.expiresAt) >= new Date()).length;
+                      return n > 0 ? <div className="mt-1 inline-flex h-5 px-2 items-center rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[10.5px] font-semibold">{n} held</div> : null;
+                    })()}
                     {b.resourceName && <div className="text-[11px] text-muted-foreground mt-0.5">{b.resourceName}</div>}
                   </td>
                   <td className="px-4 py-3 font-mono text-[12.5px]">{b.total ? '₹' + b.total.toLocaleString('en-IN') : '—'}</td>
@@ -236,6 +243,8 @@ function PaymentPill({ booking: b }) {
     [label, cls] = b.paymentStatus === 'paid'
       ? ['Paid online', 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400']
       : ['Payment incomplete', 'bg-red-500/10 text-red-600 dark:text-red-400'];
+  } else if (b.payment === 'carried-over') {
+    [label, cls] = ['Prepaid (carried over)', 'bg-blue-500/10 text-blue-700 dark:text-blue-400'];
   } else if (b.payment === 'at-visit') {
     [label, cls] = ['Pay at visit', 'bg-muted text-muted-foreground'];
   } else {

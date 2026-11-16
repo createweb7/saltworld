@@ -41,9 +41,24 @@ const PREFERRED_TIME_OPTIONS = (() => {
   return arr;
 })();
 
-export default function RescheduleDialog({ booking, basePath, onClose, onSaved }) {
+// Also used to rebook held sessions (admin): `submitUrl` + `extraBody` send
+// the pick somewhere other than `${basePath}/reschedule`, `maxDate` caps the
+// dates offered (held sessions expire), and the labels can be changed.
+export default function RescheduleDialog({ booking, basePath, onClose, onSaved, submitUrl = null, extraBody = null,
+  maxDate = null, eyebrow = 'Reschedule', title = 'Pick a new time', confirmVerb = 'Confirm', keepLabel = 'Keep current time' }) {
   const therapySlugs = (booking.therapies || []).map((t) => t.slug).filter(Boolean);
   const sessionMode  = booking.sessionMode || null;
+  // Same inputs the main booking flow sends, so the times offered are the
+  // ones the server will accept (Float 90, Salt Cave group size).
+  const floatDurationMin = Number((booking.therapies || []).find((t) => String(t.slug).includes('float'))?.durationMin) || null;
+  const guests = Math.max(1, Number(booking.guests) || 1);
+  const children = Math.max(0, Number(booking.children) || 0);
+  const addSlotParams = (q) => {
+    if (sessionMode) q.set('sessionMode', sessionMode);
+    if (floatDurationMin) q.set('floatDurationMin', String(floatDurationMin));
+    if (guests > 1) q.set('guests', String(guests));
+    if (children > 0) q.set('children', String(children));
+  };
 
   const days = useMemo(() => {
     const arr = [];
@@ -90,7 +105,7 @@ export default function RescheduleDialog({ booking, basePath, onClose, onSaved }
     let ok = true;
     setLoading(true);
     const q = new URLSearchParams({ therapies: therapySlugs.join(','), date });
-    if (sessionMode) q.set('sessionMode', sessionMode);
+    addSlotParams(q);
     fetch(`/api/scheduling/slots?${q}`)
       .then((r) => r.ok ? r.json() : null)
       .then((d) => { if (ok) { setSlots(d); setLoading(false); } })
@@ -106,7 +121,7 @@ export default function RescheduleDialog({ booking, basePath, onClose, onSaved }
     const q = new URLSearchParams({
       therapies: therapySlugs.join(','), date, preferred: preferredTime, limit: '3', offset: '0', window: '60',
     });
-    if (sessionMode) q.set('sessionMode', sessionMode);
+    addSlotParams(q);
     fetch(`/api/scheduling/recommendations?${q}`)
       .then((r) => r.ok ? r.json() : { recommendations: [] })
       .then((d) => {
@@ -125,7 +140,7 @@ export default function RescheduleDialog({ booking, basePath, onClose, onSaved }
     const q = new URLSearchParams({
       therapies: therapySlugs.join(','), date, preferred: preferredTime, limit: '3', offset: String(nextOffset), window: '60',
     });
-    if (sessionMode) q.set('sessionMode', sessionMode);
+    addSlotParams(q);
     try {
       const d = await fetch(`/api/scheduling/recommendations?${q}`).then((r) => r.json());
       const more = (d.recommendations || []).filter(
@@ -141,9 +156,10 @@ export default function RescheduleDialog({ booking, basePath, onClose, onSaved }
     if (!picked) return setErr('Please pick a new time.');
     setBusy(true); setErr(null); setConflictHint(null);
     try {
-      const r = await fetch(`${basePath}/reschedule`, {
+      const r = await fetch(submitUrl || `${basePath}/reschedule`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          ...(extraBody || {}),
           startAt: picked.startIso,
           slotDate: date,
           slotTime: picked.time,
@@ -158,8 +174,8 @@ export default function RescheduleDialog({ booking, basePath, onClose, onSaved }
         setBusy(false);
         return;
       }
-      if (!r.ok) throw new Error(j.error || 'reschedule_failed');
-      onSaved();
+      if (!r.ok) throw new Error(j.message || j.error || 'reschedule_failed');
+      onSaved(j);
     } catch (e) { setErr(String(e.message || 'Could not reschedule')); }
     finally { setBusy(false); }
   };
@@ -173,11 +189,11 @@ export default function RescheduleDialog({ booking, basePath, onClose, onSaved }
       <div className="bg-background rounded-2xl border border-border shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[10.5px] uppercase tracking-[0.16em] text-muted-foreground font-semibold">Reschedule</div>
-            <h2 className="mt-1 font-serif text-2xl">Pick a new time</h2>
+            <div className="text-[10.5px] uppercase tracking-[0.16em] text-muted-foreground font-semibold">{eyebrow}</div>
+            <h2 className="mt-1 font-serif text-2xl">{title}</h2>
             <p className="mt-1 text-[12.5px] text-muted-foreground">
               {therapySlugs.length} {therapySlugs.length === 1 ? 'therapy' : 'therapies'}
-              {sessionMode ? ` · ${sessionMode} float` : ''}
+              {sessionMode ? ` · ${sessionMode === 'couple' ? 'Couple' : 'Solo'}` : ''}
             </p>
           </div>
           <button onClick={onClose} className="h-8 w-8 rounded-full hover:bg-muted inline-flex items-center justify-center"><X className="h-4 w-4" /></button>
@@ -202,6 +218,13 @@ export default function RescheduleDialog({ booking, basePath, onClose, onSaved }
               </button>
             );
           })}
+        </div>
+
+        <div className="mt-3 flex items-center gap-2 text-[12px] text-muted-foreground">
+          <label htmlFor="rescheduleOtherDate">Another date</label>
+          <input id="rescheduleOtherDate" type="date" value={date} min={toIsoDay(new Date())} max={maxDate || undefined}
+            onChange={(e) => { if (e.target.value) { setDate(e.target.value); setPicked(null); } }}
+            className="h-8 rounded-md border border-border bg-background px-2 text-[12.5px] text-foreground" />
         </div>
 
         <div className="mt-4 inline-flex rounded-full border border-border p-0.5 bg-card">
@@ -331,9 +354,9 @@ export default function RescheduleDialog({ booking, basePath, onClose, onSaved }
         {err && <div className="mt-3 text-[12px] text-red-600">{err}</div>}
 
         <div className="mt-5 flex items-center justify-end gap-2">
-          <button onClick={onClose} className="h-9 px-3 rounded-md text-[12.5px] font-medium border border-border hover:bg-muted">Keep current time</button>
+          <button onClick={onClose} className="h-9 px-3 rounded-md text-[12.5px] font-medium border border-border hover:bg-muted">{keepLabel}</button>
           <button onClick={submit} disabled={busy || !picked} className="h-9 px-3 rounded-md text-[12.5px] font-semibold bg-foreground text-background disabled:opacity-40">
-            {busy ? 'Rescheduling…' : (picked ? `Confirm ${picked.time}` : 'Pick a time')}
+            {busy ? 'Saving…' : (picked ? `${confirmVerb} ${picked.time}` : 'Pick a time')}
           </button>
         </div>
       </div>
