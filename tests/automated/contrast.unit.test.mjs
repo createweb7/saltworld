@@ -5,7 +5,8 @@
 //   Option 2 'sequence':  Sauna 30 min, then straight into Cold Plunge 30 min.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isContrastPair, contrastBookingSlugs } from '../../lib/contrast.js';
+import { isContrastPair, hasContrastPair, contrastBookingSlugs } from '../../lib/contrast.js';
+import { resolveComboPrice } from '../../lib/combo-pricing.js';
 import { buildJourneyPlan, checkJourneyAvailability } from '../../lib/scheduling.js';
 
 const SAUNA = { slug: 'infrared-sauna', name: 'Infrared Sauna', durationMin: 30, postBufferMin: 30, cleaningBufferMin: 0, resourceIds: ['sauna'] };
@@ -13,14 +14,27 @@ const COLD = { slug: 'cold-plunge', name: 'Cold Plunge', durationMin: 30, postBu
 const SALT = { slug: 'salt-therapy', name: 'Salt Therapy', durationMin: 60, postBufferMin: 15, cleaningBufferMin: 5, resourceIds: ['cave'] };
 const CONTRAST = { slug: 'hot-cold-contrast', name: 'Hot & Cold Contrast', durationMin: 60, postBufferMin: 30, cleaningBufferMin: 15, concurrentResources: true, resourceIds: ['sauna', 'cold'] };
 
-test('contrast — the two options only apply to Sauna + Cold Plunge on their own', () => {
+test('contrast — the two options apply whenever Sauna and Cold Plunge are both booked', () => {
   assert.equal(isContrastPair(['infrared-sauna', 'cold-plunge']), true);
-  assert.equal(isContrastPair(['cold-plunge', 'infrared-sauna']), true);
-  assert.equal(isContrastPair(['infrared-sauna']), false);
-  assert.equal(isContrastPair(['infrared-sauna', 'cold-plunge', 'salt-therapy']), false);
+  assert.equal(hasContrastPair(['cold-plunge', 'salt-therapy', 'infrared-sauna']), true);
+  assert.equal(hasContrastPair(['infrared-sauna', 'salt-therapy']), false);
   assert.deepEqual(contrastBookingSlugs(['cold-plunge', 'infrared-sauna'], 'alternate'), ['hot-cold-contrast']);
   assert.deepEqual(contrastBookingSlugs(['cold-plunge', 'infrared-sauna'], 'sequence'), ['infrared-sauna', 'cold-plunge']);
   assert.deepEqual(contrastBookingSlugs(['salt-therapy', 'cold-plunge'], 'alternate'), ['salt-therapy', 'cold-plunge']);
+  // Bigger packages: the pair goes where the first of the two was, rest keep their order.
+  assert.deepEqual(contrastBookingSlugs(['salt-therapy', 'cold-plunge', 'red-light-therapy', 'infrared-sauna', 'float-therapy'], 'alternate'),
+    ['salt-therapy', 'hot-cold-contrast', 'red-light-therapy', 'float-therapy']);
+  assert.deepEqual(contrastBookingSlugs(['salt-therapy', 'cold-plunge', 'red-light-therapy', 'infrared-sauna'], 'sequence'),
+    ['salt-therapy', 'infrared-sauna', 'cold-plunge', 'red-light-therapy']);
+});
+
+test('contrast — Contrast Experience costs the same as the Sauna + Cold Plunge combo it replaces', () => {
+  for (const mode of ['single', 'couple']) {
+    assert.equal(resolveComboPrice({ slugs: ['salt-therapy', 'hot-cold-contrast'], sessionMode: mode }),
+      resolveComboPrice({ slugs: ['salt-therapy', 'infrared-sauna', 'cold-plunge'], sessionMode: mode }));
+    assert.equal(resolveComboPrice({ slugs: ['salt-therapy', 'hot-cold-contrast', 'red-light-therapy', 'float-therapy'], sessionMode: mode, floatDurationMin: 90 }),
+      resolveComboPrice({ slugs: ['salt-therapy', 'infrared-sauna', 'cold-plunge', 'red-light-therapy', 'float-therapy'], sessionMode: mode, floatDurationMin: 90 }));
+  }
 });
 
 const START = new Date('2027-01-20T04:30:00.000Z'); // 10:00 IST
@@ -32,9 +46,10 @@ test('Option 2 — Cold Plunge starts as soon as the Sauna ends', () => {
   assert.equal(j.totalVisitMin, 60);
 });
 
-test('Sauna + Cold Plunge inside a bigger journey keep the usual 30 min wait', () => {
+test('Option 2 inside a bigger journey — Cold Plunge still straight after the Sauna', () => {
   const j = buildJourneyPlan(START, [SALT, SAUNA, COLD]);
-  assert.equal(min(j.plan[1].to, j.plan[2].from), 30);
+  assert.equal(min(j.plan[0].to, j.plan[1].from), 15, 'usual wait after the Salt Cave');
+  assert.equal(min(j.plan[1].to, j.plan[2].from), 0);
 });
 
 test('Cold Plunge before Sauna keeps the usual 30 min wait', () => {

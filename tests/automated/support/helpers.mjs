@@ -59,7 +59,7 @@ export const RULES = {
   leadMin: { 'salt-therapy': 30, 'float-therapy': 90, 'red-light-therapy': 15, 'infrared-sauna': 15, 'cold-plunge': 45 },
 };
 
-export const SESSION_MODE_THERAPIES = new Set(['float-therapy', 'infrared-sauna', 'cold-plunge', 'red-light-therapy']);
+export const SESSION_MODE_THERAPIES = new Set(['float-therapy', 'infrared-sauna', 'cold-plunge', 'red-light-therapy', 'hot-cold-contrast']);
 
 // Request lines exactly as /book sends them.
 export function bookLines(slugs, mode, floatMin) {

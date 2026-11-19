@@ -98,3 +98,30 @@ test('suggested times — 3 genuinely different options', async () => {
   assert.equal(new Set(keys).size, 3, 'duplicate suggestions');
   for (const x of recs) assert.equal(istHHmm(x.plan[0].from), x.time, 'headline time differs from first therapy');
 });
+
+// Hot & Cold Contrast inside bigger packages (rules doc §6).
+test('Separate Sessions in a package — Cold Plunge always straight after the Sauna', async () => {
+  const r = await api(`/api/scheduling/slots?therapies=salt-therapy,cold-plunge,red-light-therapy,infrared-sauna&date=${DATE}&sessionMode=single`);
+  assert.equal(r.status, 200);
+  const slots = slotTimes(r.json);
+  assert.ok(slots.length > 0, 'nothing offered');
+  for (const s of slots) {
+    const order = s.plan.map((p) => p.therapySlug);
+    const i = order.indexOf('infrared-sauna');
+    assert.equal(order[i + 1], 'cold-plunge', `${s.time}: ${order.join(' > ')}`);
+    assert.equal(minutesBetween(s.plan[i].to, s.plan[i + 1].from), 0, `${s.time}: no wait before the plunge`);
+  }
+});
+
+test('Contrast Experience in a package — one 60 min step holding both rooms', async () => {
+  const r = await api(`/api/scheduling/slots?therapies=salt-therapy,hot-cold-contrast,float-therapy&date=${DATE}&sessionMode=single&floatDurationMin=60`);
+  assert.equal(r.status, 200);
+  const slots = slotTimes(r.json);
+  assert.ok(slots.length > 0, 'nothing offered');
+  for (const s of slots) {
+    const step = s.plan.find((p) => p.therapySlug === 'hot-cold-contrast');
+    assert.ok(step, `${s.time}: no contrast step`);
+    assert.equal(minutesBetween(step.from, step.to), 60);
+    assert.ok(!s.plan.some((p) => p.therapySlug === 'infrared-sauna' || p.therapySlug === 'cold-plunge'));
+  }
+});

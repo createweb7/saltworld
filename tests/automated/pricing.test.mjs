@@ -89,3 +89,16 @@ for (const [mode, price] of [['single', 3000], ['couple', 4700]]) {
     assert.equal(r.json.payableInr, price);
   });
 }
+
+// Contrast Experience inside any package: Sauna + Cold Plunge swapped for the
+// hot-cold-contrast step must cost exactly the same as the package with them.
+for (const row of PRICES.filter((r) => r.slugs.includes('infrared-sauna') && r.slugs.includes('cold-plunge') && r.slugs.length > 2)) {
+  const slugs = [...row.slugs.filter((s) => s !== 'infrared-sauna' && s !== 'cold-plunge'), 'hot-cold-contrast'];
+  const label = `${row.name}${row.floatMin ? ` (Float ${row.floatMin})` : ''}`;
+  for (const [mode, price] of [['single', row.solo], ['couple', row.couple]]) {
+    test(`price — ${label} as Contrast Experience — ${mode === 'single' ? 'Solo' : 'Couple'} ₹${price}`, async () => {
+      const q = await quote(slugs, mode, row.floatMin);
+      assert.equal(q.payableInr, price);
+    });
+  }
+}

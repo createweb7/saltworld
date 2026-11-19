@@ -14,7 +14,7 @@ import { InlineSignIn } from '@/components/site/inline-sign-in';
 import { OUTCOMES, getOutcome, primaryOutcomeForTherapy } from '@/lib/outcomes';
 import { resolveComboPrice } from '@/lib/combo-pricing';
 import { groupConfig, kidsAllowed, GROUP_MIN_GUESTS, KIDS_SLOT_MAX_PEOPLE } from '@/lib/group-booking';
-import { isContrastPair, contrastBookingSlugs, CONTRAST_SLUG, SAUNA_SLUG, COLD_SLUG } from '@/lib/contrast';
+import { isContrastPair, hasContrastPair, contrastBookingSlugs, CONTRAST_SLUG, SAUNA_SLUG, COLD_SLUG } from '@/lib/contrast';
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                          */
@@ -193,7 +193,7 @@ function ContrastPicker({ value, onChange }) {
   return (
     <div className="mt-6 rounded-2xl border border-border bg-card p-5 md:p-6">
       <div className="text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground font-semibold">Hot &amp; Cold Contrast</div>
-      <div className="mt-1 text-[13px] text-muted-foreground">How would you like your session?</div>
+      <div className="mt-1 text-[13px] text-muted-foreground">How would you like your Sauna and Ice Cold Plunge?</div>
       <div role="radiogroup" aria-label="Hot & Cold Contrast option" className="mt-3 grid gap-3 md:grid-cols-2">
         {CONTRAST_CHOICES.map((c) => {
           const isSel = value === c.id;
@@ -210,7 +210,7 @@ function ContrastPicker({ value, onChange }) {
           );
         })}
       </div>
-      {!value && <div className="mt-2 text-[11.5px] text-muted-foreground">Choose an option to continue.</div>}
+      {!value && <div className="mt-2 text-[11.5px] text-muted-foreground">Choose an option to see available times.</div>}
     </div>
   );
 }
@@ -271,7 +271,7 @@ function PartyPicker({ options, hasSessionMode, hasFloatOnly, sessionMode, sessi
   );
 }
 
-function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta = {}, isDirectMode = false, sessionMode, setSessionMode, sessionModeTouched, setSessionModeTouched, totalRupees = 0, party = {}, contrastOption = null, setContrastOption = () => {} }) {
+function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta = {}, isDirectMode = false, sessionMode, setSessionMode, sessionModeTouched, setSessionModeTouched, totalRupees = 0, party = {} }) {
   const o = getOutcome(outcome);
   // Prefer DB override (admin-configurable), fall back to static outcome data.
   const therapies = mappingOverride?.length ? mappingOverride : (o?.protocol?.therapies || []);
@@ -390,7 +390,6 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
             parent's canNext). The direct-mode branch previously had no way
             to set this at all, so Continue was permanently stuck disabled
             for any direct entry into one of these therapies. */}
-        {contrast && <ContrastPicker value={contrastOption} onChange={setContrastOption} />}
         {(hasSessionMode || partyOptions.group || partyOptions.kids) && (
           <PartyPicker {...party} options={partyOptions} hasSessionMode={hasSessionMode}
             hasFloatOnly={hasFloat && sessionModeTherapies.length === 1}
@@ -466,7 +465,6 @@ function StepTherapy({ outcome, values, onChange, mappingOverride, therapyMeta =
           a durationOptions matrix (Float, Sauna, Red Light, Cold Plunge).
           Decided here, before date & time, since it also affects which
           resources (e.g. couple-capable float tanks) are searched later. */}
-      {contrast && <ContrastPicker value={contrastOption} onChange={setContrastOption} />}
       {(hasSessionMode || partyOptions.group || partyOptions.kids) && (
         <PartyPicker {...party} options={partyOptions} hasSessionMode={hasSessionMode}
           hasFloatOnly={hasFloat && sessionModeTherapies.length === 1}
@@ -507,7 +505,8 @@ function fmtVisit(mins) {
   return `${mins}m`;
 }
 
-function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatDurationMin, setFloatDurationMin, guests, setGuests, children, setChildren, totalRupees = 0, onReorderTherapies, partyType = 'solo' }) {
+function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatDurationMin, setFloatDurationMin, guests, setGuests, children, setChildren, totalRupees = 0, onReorderTherapies, partyType = 'solo',
+  contrast = false, contrastOption = null, setContrastOption = () => {} }) {
   const days = useMemo(() => {
     // Auto-rollover: if IST wall-clock is past 20:00 (branch close) we hide
     // "today" from the picker and default to tomorrow. TC-1 fix.
@@ -569,14 +568,20 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatD
     if (hasFloat && floatDurationMin) q.set('floatDurationMin', String(floatDurationMin));
     if (guests > 1) q.set('guests', String(guests));
     if (children > 0) q.set('children', String(children));
+    // Ignore an answer for an earlier date / time / selection that arrives
+    // after a newer one (e.g. changing the date first asks with the old
+    // preferred time, then again with the new day's first time).
+    let stale = false;
     fetch(`/api/scheduling/recommendations?${q}`)
       .then((r) => r.ok ? r.json() : { recommendations: [] })
       .then((d) => {
+        if (stale) return;
         setRecommendations(d.recommendations || []);
         setRecExpanded(!!d.expandedWindow);
         setRecLoading(false);
       })
-      .catch(() => { setRecommendations([]); setRecExpanded(false); setRecLoading(false); });
+      .catch(() => { if (!stale) { setRecommendations([]); setRecExpanded(false); setRecLoading(false); } });
+    return () => { stale = true; };
   }, [therapies, date, preferredTime, sessionMode, floatDurationMin, hasFloat, guests, children]);
 
   const loadMore = async () => {
@@ -799,6 +804,11 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatD
           </div>
         </div>
       )}
+
+      {/* Hot & Cold Contrast: Sauna + Cold Plunge in the booking — choose how
+          they run before any times are shown (they change what's bookable). */}
+      {contrast && <ContrastPicker value={contrastOption} onChange={setContrastOption} />}
+      {contrast && !contrastOption ? null : (<>
 
       {/* Date strip */}
       <div className="mt-8 -mx-4 md:mx-0">
@@ -1024,6 +1034,7 @@ function StepSlot({ therapies, therapyMeta, value, onChange, sessionMode, floatD
           )}
         </>
       )}
+      </>)}
     </div>
   );
 }
@@ -1121,7 +1132,7 @@ function ManualJourneyPicker({ therapies, therapyMeta, date, value, onChange, on
     const prevTherapy = therapyMeta[therapies[i - 1]];
     const nextTherapy = therapyMeta[therapies[i]];
     // Hot & Cold Contrast Option 2: the Cold Plunge can follow the Sauna straight away.
-    const gap = isContrastPair(therapies) && therapies[i - 1] === SAUNA_SLUG && therapies[i] === COLD_SLUG
+    const gap = hasContrastPair(therapies) && therapies[i - 1] === SAUNA_SLUG && therapies[i] === COLD_SLUG
       ? 0
       : Math.max(
         (prevTherapy?.postBufferMin || 0) + (nextTherapy?.preBufferMin || 0),
@@ -1917,7 +1928,7 @@ export default function BookingClient({ initialOutcome }) {
   // Hot & Cold Contrast option ('alternate' | 'sequence') when Sauna + Cold
   // Plunge are picked together; decides what is actually booked.
   const [contrastOption, setContrastOption] = useState(null);
-  const isContrast = isContrastPair(therapies);
+  const isContrast = hasContrastPair(therapies);
   const bookTherapies = useMemo(() => contrastBookingSlugs(therapies, contrastOption), [therapies, contrastOption]);
   // Outcome-mapping lines for the booked therapies, plus the Hot & Cold
   // Contrast therapy (Option 1), which no outcome lists on its own.
@@ -2278,7 +2289,7 @@ export default function BookingClient({ initialOutcome }) {
 
   const canNext =
     (stepId === 'outcome' && !!outcome) ||
-    (stepId === 'therapy' && therapies.length > 0 && (!hasSessionModeChoice || sessionModeTouched) && (!isContrast || !!contrastOption)) ||
+    (stepId === 'therapy' && therapies.length > 0 && (!hasSessionModeChoice || sessionModeTouched)) ||
     (stepId === 'slot'    && !!slot?.date && !!slot?.time) ||
     stepId === 'contact';
 
@@ -2421,9 +2432,10 @@ export default function BookingClient({ initialOutcome }) {
       // (Float → "Sleep Optimization…"), not something the guest chose, so
       // name the booking after the therapies actually booked.
       const bookedNames = bookTherapies.map((s) => therapyMeta[s]?.name || selected.find((t) => t.slug === s)?.label || s);
-      const contrastLabel = isContrast
-        ? (contrastOption === 'alternate' ? 'Hot & Cold Contrast (Contrast Experience)' : 'Hot & Cold Contrast (Separate Sessions)')
-        : null;
+      const contrastLabel = !isContrast ? null
+        : isContrastPair(therapies)
+          ? (contrastOption === 'alternate' ? 'Hot & Cold Contrast (Contrast Experience)' : 'Hot & Cold Contrast (Separate Sessions)')
+          : `${bookedNames.join(' + ')}${contrastOption === 'alternate' ? '' : ' (Sauna + Cold Plunge as Separate Sessions)'}`;
       const sessionLabel = isDirectTherapyMode ? (contrastLabel || bookedNames.join(' + ')) : o?.title;
 
       const r = await fetch('/api/bookings', {
@@ -2529,9 +2541,9 @@ export default function BookingClient({ initialOutcome }) {
         {stepId === 'outcome' && <StepOutcome value={outcome} onChange={(v) => { setOutcome(v); setTherapies([]); setOutcomeMap(null); const couple = v === 'couple-activities'; setSessionMode(couple ? 'couple' : 'single'); setPartyType(couple ? 'couple' : 'solo'); setFloatDurationMin(couple ? 90 : 60); }} />}
         {stepId === 'therapy' && <StepTherapy outcome={outcome} values={therapies} onChange={setTherapies} mappingOverride={outcomeMap?.therapies} therapyMeta={therapyMeta} isDirectMode={isDirectTherapyMode}
           sessionMode={sessionMode} setSessionMode={setSessionMode} sessionModeTouched={sessionModeTouched} setSessionModeTouched={setSessionModeTouched} party={party}
-          contrastOption={contrastOption} setContrastOption={(v) => { setContrastOption(v); setSlot(null); }}
           totalRupees={totalRupees} />}
-        {stepId === 'slot'    && <StepSlot therapies={bookTherapies} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode}
+        {stepId === 'slot'    && <StepSlot therapies={bookTherapies} contrast={isContrast} contrastOption={contrastOption}
+          setContrastOption={(v) => { setContrastOption(v); setSlot(null); }} therapyMeta={therapyMeta} value={slot} onChange={setSlot} sessionMode={sessionMode}
           floatDurationMin={floatDurationMin} setFloatDurationMin={setFloatDurationMin} guests={guests} setGuests={setGuests} children={children} setChildren={setChildren} totalRupees={totalRupees} partyType={partyType}
           onReorderTherapies={isContrast ? undefined : (idx, dir) => {
             const arr = [...therapies];
